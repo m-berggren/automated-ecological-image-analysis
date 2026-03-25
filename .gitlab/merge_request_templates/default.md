@@ -4,4 +4,4 @@
 ## How to test
 -
 
-Closes TG-X
+TG-X #closed
