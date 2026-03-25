@@ -2,4 +2,5 @@ from django.apps import AppConfig
 
 
 class DatasetsConfig(AppConfig):
-    name = 'datasets'
+    default_auto_field = 'django.db.models.BigAutoField'
+    name = 'apps.datasets'

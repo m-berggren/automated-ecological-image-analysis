@@ -4,6 +4,24 @@ version = "0.1.0"
 description = "Add your description here"
 readme = "README.md"
 requires-python = ">=3.13"
-dependencies = [
-    "django>=6.0.3",
+dependencies = ["django>=6.0.3"]
+
+[tool.ruff]
+line-length = 88
+extend-exclude = ["*.ipynb", "**/migrations/*"]
+
+[tool.ruff.format]
+quote-style = "single"
+
+[tool.ruff.lint]
+select = ["ANN001", "ANN201"] # ANN001: function args, ANN201: return types
+
+[dependency-groups]
+dev = [
+    "djlint>=1.36.4",
+    "ruff>=0.15.7",
 ]
+
+[tool.djlint]
+profile = "django"
+indent = 2
