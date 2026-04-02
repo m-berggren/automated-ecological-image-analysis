@@ -1,1 +1,88 @@
-@import "tailwind.css";
+/* Author: Claudia Sevilla */
+/* Animation keyframes ported from Lovable's React prototype */
+
+@import url('https://fonts.googleapis.com/css2?family=DM+Sans:ital,opsz,wght@0,9..40,300;0,9..40,400;0,9..40,500;0,9..40,600;0,9..40,700;1,9..40,400&family=Space+Grotesk:wght@400;500;600;700&display=swap');
+@import "tailwindcss";
+
+@theme {
+  --font-display: 'Space Grotesk', sans-serif;
+  --font-body: 'DM Sans', sans-serif;
+
+  --color-background: hsl(80 25% 97%);
+  --color-foreground: hsl(150 30% 12%);
+  --color-border: hsl(120 15% 88%);
+  --color-primary: hsl(152 45% 28%);
+  --color-primary-foreground: hsl(80 25% 97%);
+  --color-muted-foreground: hsl(150 10% 45%);
+
+  --color-eco-sage: hsl(140 25% 75%);
+  --color-eco-mint: hsl(160 40% 85%);
+  --color-eco-forest: hsl(152 45% 22%);
+
+  --color-bbox-pink: hsl(330 100% 64%);
+  --color-bbox-lime: hsl(85 85% 55%);
+  --color-bbox-cyan: hsl(185 90% 55%);
+  --color-bbox-orange: hsl(25 100% 60%);
+  --color-bbox-purple: hsl(270 80% 65%);
+  --color-bbox-yellow: hsl(50 95% 58%);
+
+  --color-blob-1: hsl(140 40% 80%);
+  --color-blob-2: hsl(160 50% 75%);
+  --color-blob-3: hsl(85 45% 78%);
+  --color-blob-4: hsl(215 25% 75%);
+  --color-blob-5: hsl(220 20% 82%);
+
+  --radius: 1rem;
+}
+
+@layer base {
+  * { border-color: var(--color-border); }
+  body {
+    background-color: var(--color-background);
+    color: var(--color-foreground);
+    font-family: var(--font-body);
+  }
+  h1, h2, h3, h4, h5, h6 {
+    font-family: var(--font-display);
+  }
+}
+
+/* Animations */
+@keyframes blob-float {
+  0%, 100% { transform: translate(0, 0) scale(1); }
+  25% { transform: translate(20px, -30px) scale(1.05); }
+  50% { transform: translate(-15px, 15px) scale(0.95); }
+  75% { transform: translate(10px, 20px) scale(1.02); }
+}
+@keyframes blob-float-reverse {
+  0%, 100% { transform: translate(0, 0) scale(1); }
+  25% { transform: translate(-25px, 20px) scale(0.97); }
+  50% { transform: translate(20px, -20px) scale(1.04); }
+  75% { transform: translate(-10px, -15px) scale(0.98); }
+}
+@keyframes bbox-pulse {
+  0%, 100% { opacity: 0.7; }
+  50% { opacity: 1; }
+}
+@keyframes side-box-resize {
+  0%, 100% { transform: scale(1); }
+  20% { transform: scale(1.15, 0.9); }
+  40% { transform: scale(0.85, 1.12); }
+  60% { transform: scale(1.1, 1.05); }
+  80% { transform: scale(0.92, 0.88); }
+}
+@keyframes fadeIn {
+  from { opacity: 0; transform: scale(0.95); }
+  to { opacity: 1; transform: scale(1); }
+}
+@keyframes scan-line {
+  0% { top: 0%; }
+  100% { top: 100%; }
+}
+
+.animate-blob-float { animation: blob-float 12s ease-in-out infinite; }
+.animate-blob-float-reverse { animation: blob-float-reverse 15s ease-in-out infinite; }
+.animate-bbox-pulse { animation: bbox-pulse 2s ease-in-out infinite; }
+.animate-side-box-wander { animation: side-box-resize 6s ease-in-out infinite; }
+.animate-scan-line { animation: scan-line 3s ease-in-out infinite; }
+.animate-fade-in { animation: fadeIn 0.3s ease-out; }
