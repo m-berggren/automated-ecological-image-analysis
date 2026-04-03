@@ -1,16 +1,17 @@
-/* Author: Claudia Sevilla */
-/* Animation keyframes ported from Lovable's React prototype */
-
 @import url('https://fonts.googleapis.com/css2?family=DM+Sans:ital,opsz,wght@0,9..40,300;0,9..40,400;0,9..40,500;0,9..40,600;0,9..40,700;1,9..40,400&family=Space+Grotesk:wght@400;500;600;700&display=swap');
 @import "tailwindcss";
 
+/* Author: Claudia Sevilla */
+/* Animation keyframes ported from Lovable's React prototype */
+
 @theme {
-  --font-display: 'Space Grotesk', sans-serif;
-  --font-body: 'DM Sans', sans-serif;
+  --font-sans-display: 'Space Grotesk', sans-serif;
+  --font-sans-body: 'DM Sans', sans-serif;
 
   --color-background: hsl(80 25% 97%);
   --color-foreground: hsl(150 30% 12%);
   --color-border: hsl(120 15% 88%);
+  --color-accent: hsl(85 50% 55%);
   --color-primary: hsl(152 45% 28%);
   --color-primary-foreground: hsl(80 25% 97%);
   --color-muted-foreground: hsl(150 10% 45%);
@@ -40,10 +41,16 @@
   body {
     background-color: var(--color-background);
     color: var(--color-foreground);
-    font-family: var(--font-body);
+    font-family: var(--font-sans-body);
   }
-  h1, h2, h3, h4, h5, h6 {
-    font-family: var(--font-display);
+}
+
+@layer utilities {
+  .font-display {
+    font-family: var(--font-sans-display);
+  }
+  .font-body {
+    font-family: var(--font-sans-body);
   }
 }
 
@@ -78,6 +85,10 @@
 @keyframes scan-line {
   0% { top: 0%; }
   100% { top: 100%; }
+}
+@keyframes typing-cursor {
+  0%, 100% { opacity: 1; }
+  50% { opacity: 0; }
 }
 
 .animate-blob-float { animation: blob-float 12s ease-in-out infinite; }
