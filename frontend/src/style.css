@@ -5,7 +5,7 @@
 /* Animation keyframes ported from Lovable's React prototype */
 
 @theme {
-  --font-sans-display: 'Space Grotesk', sans-serif;
+  --font-sans-display: 'DM Sans', sans-serif;
   --font-sans-body: 'DM Sans', sans-serif;
 
   --color-background: hsl(80 25% 97%);

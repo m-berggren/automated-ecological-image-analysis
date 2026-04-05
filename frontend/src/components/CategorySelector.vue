@@ -1,5 +1,5 @@
 <!-- Author: Claudia Sevilla -->
-<!-- Buttons ported from Lovable's React prototype -->
+<!-- Button design ported from Lovable's React prototype -->
 <template>
   <section class="relative z-10 max-w-5xl mx-auto px-6 md:px-12 pb-4">
     <div class="grid grid-cols-2 md:grid-cols-4 gap-3 justify-center">
@@ -10,7 +10,7 @@
         :class="cn(
           'group relative flex flex-col items-center gap-2 px-6 py-5 border-2 transition-all duration-300 w-full',
           modelValue === cat.id
-            ? 'border-primary bg-primary/5 shadow-lg shadow-primary/10'
+            ? 'border-primary bg-white/50 shadow-lg shadow-primary/10'
             : 'border-border bg-card/60 hover:border-primary/30 hover:bg-card'
         )"
       >

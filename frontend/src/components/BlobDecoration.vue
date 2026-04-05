@@ -2,7 +2,7 @@
 <!-- Blob decoration ported from Lovable's React prototype -->
 
 <template>
-  <div class="pointer-events-none fixed inset-0 overflow-hidden -z-10">
+  <div class="pointer-events-none inset-0 overflow-hidden -z-10">
     <!-- Large sage blob top-right -->
     <div class="absolute -top-32 -right-32 w-[500px] h-[500px] rounded-full bg-blob-1 opacity-40 blur-3xl animate-blob-float" />
     <!-- Mint blob bottom-left -->
