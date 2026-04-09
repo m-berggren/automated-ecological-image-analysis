@@ -10,6 +10,13 @@
         class="mb-4 w-full p-3 rounded-md border border-green-300 focus:outline-none focus:ring-2 focus:ring-green-400"
       />
       <input
+        v-model="email"
+        type="text"
+        placeholder="Email"
+        required
+        class="mb-4 w-full p-3 rounded-md border border-green-300 focus:outline-none focus:ring-2 focus:ring-green-400"
+      />
+      <input
         v-model="password"
         type="password"
         placeholder="Password"
@@ -38,6 +45,7 @@ import { useRouter } from 'vue-router'
 const router = useRouter()
 const username = ref('')
 const password = ref('')
+const email = ref('')
 const errorMessage = ref('')
 
 async function submitSignup() {
@@ -49,6 +57,7 @@ async function submitSignup() {
       body: JSON.stringify({
         username: username.value,
         password: password.value,
+        email: email.value,
       }),
     })
     const data = await res.json()

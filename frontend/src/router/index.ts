@@ -7,7 +7,7 @@ const router = createRouter({
   history: createWebHistory(),
   routes: [
     { path: '/', component: Index },
-    { path: '/:signup', component: Signup },
+    { path: '/signup', component: Signup },
     { path: '/:pathMatch(.*)*', component: NotFound },
   ],
 })

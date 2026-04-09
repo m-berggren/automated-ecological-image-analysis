@@ -28,13 +28,17 @@ def login(request):
 @api_view(['POST'])
 @permission_classes([AllowAny])
 def register(request):
-    username = request.data.get("username")
-    password = request.data.get("password")
+    username = request.data.get("username"),
+    password = request.data.get("password"),
+    email = request.data.get("email"),
 
     if User.objects.filter(username=username).exists():
         return Response({"error": "User exists"}, status=400)
 
-    user = User.objects.create_user(username=username, password=password)
+    if not email:
+        return Response({"error": "Email required"}, status=400)
+
+    user = User.objects.create_user(username=username, password=password, email=email)
     token = Token.objects.create(user=user)
 
     return Response({"token": token.key})
