@@ -28,9 +28,9 @@ def login(request):
 @api_view(['POST'])
 @permission_classes([AllowAny])
 def register(request):
-    username = request.data.get("username"),
-    password = request.data.get("password"),
-    email = request.data.get("email"),
+    username = request.data.get("username")
+    password = request.data.get("password")
+    email = request.data.get("email")
 
     if User.objects.filter(username=username).exists():
         return Response({"error": "User exists"}, status=400)
