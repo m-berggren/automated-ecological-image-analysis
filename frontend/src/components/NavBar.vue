@@ -14,11 +14,12 @@
       >
         Log In
       </button>
-      <button
+      <RouterLink
+        to="/signup"
         class="px-4 py-1.5 rounded-lg text-sm font-semibold bg-primary text-primary-foreground hover:bg-primary/80 transition-colors"
       >
         Sign Up
-      </button>
+      </RouterLink>
     </div>
   </nav>
 </template>
