@@ -31,11 +31,7 @@ INSTALLED_APPS = [
     'apps.datasets',
     'rest_framework',
     'rest_framework.authtoken',
-<<<<<<< HEAD
     'corsheaders',
-=======
-    "corsheaders",
->>>>>>> 860a74c (TG-25 Connect the backend to the frontend and modify cors settings)
 ]
 
 MIDDLEWARE = [

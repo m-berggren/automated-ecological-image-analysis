@@ -9,11 +9,12 @@
       </span>
     </RouterLink>
     <div class="flex items-center gap-2 mt-2">
-      <button
+      <RouterLink
+        to="/signin"
         class="px-4 py-1.5 rounded-lg text-sm font-semibold bg-secondary text-secondary-foreground hover:bg-secondary/70 transition-colors"
       >
         Log In
-      </button>
+      </RouterLink>
       <RouterLink
         to="/signup"
         class="px-4 py-1.5 rounded-lg text-sm font-semibold bg-primary text-primary-foreground hover:bg-primary/80 transition-colors"
