@@ -5,6 +5,7 @@ from rest_framework.authtoken.models import Token
 from rest_framework.decorators import api_view, permission_classes
 from rest_framework.response import Response
 from rest_framework.permissions import AllowAny
+import datetime
 
 
 # Create your views here.
@@ -37,6 +38,10 @@ def register(request):
 
     if not email:
         return Response({"error": "Email required"}, status=400)
+
+    if User.objects.filter(email=email).exists():
+        return Response({"error": "email exists"}, status=400)
+
 
     user = User.objects.create_user(username=username, password=password, email=email)
     token = Token.objects.create(user=user)

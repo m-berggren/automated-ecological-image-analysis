@@ -12,9 +12,10 @@
       <button class="px-4 py-1.5 rounded-lg text-sm font-semibold bg-secondary text-secondary-foreground hover:bg-secondary/70 transition-colors">
         Log In
       </button>
-      <button class="px-4 py-1.5 rounded-lg text-sm font-semibold bg-primary text-primary-foreground hover:bg-primary/80 transition-colors">
+      <RouterLink to="/signup"
+      class="px-4 py-1.5 rounded-lg text-sm font-semibold bg-primary text-primary-foreground hover:bg-primary/80 transition-colors">
         Sign Up
-      </button>
+      </RouterLink >
     </div>
   </nav>
 </template>
