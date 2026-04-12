@@ -3,8 +3,7 @@
     <BlobDecoration />
     <SideBoxes />
     <NavBar />
-      <RegistrationForm class="mt-10 mx-auto max-w-md" />
-
+      <SignInForm class="mt-10 mx-auto max-w-md" />
 
     <!-- Footer -->
     <footer class="relative z-10 border-t border-border mt-20 py-6 px-6 text-center">
@@ -20,7 +19,6 @@ import NavBar from '../components/NavBar.vue'
 import BlobDecoration from '../components/BlobDecoration.vue'
 import TypingTitle from '../components/TypingTitle.vue'
 import BoundingBoxDecor from '../components/BoundingBoxDecor.vue'
-import RegistrationForm from '../components/RegistrationForm.vue'
-
 import SideBoxes from '../components/SideBoxes.vue'
+import SignInForm from '../components/SignInForm.vue'
 </script>

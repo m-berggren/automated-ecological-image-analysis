@@ -31,10 +31,11 @@ INSTALLED_APPS = [
     'apps.datasets',
     'rest_framework',
     'rest_framework.authtoken',
-    "corsheaders",
+    'corsheaders',
 ]
 
 MIDDLEWARE = [
+    'corsheaders.middleware.CorsMiddleware',
     'django.middleware.security.SecurityMiddleware',
     'django.contrib.sessions.middleware.SessionMiddleware',
     "corsheaders.middleware.CorsMiddleware",
@@ -113,3 +114,5 @@ REST_FRAMEWORK = {
         'rest_framework.permissions.IsAuthenticated',
     ],
 }
+
+CORS_ALLOW_ALL_ORIGINS = True
