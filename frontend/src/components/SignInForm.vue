@@ -30,11 +30,13 @@
 <script setup lang="ts">
 import { ref } from 'vue'
 import { useRouter } from 'vue-router'
+import { useAuthStore } from '../stores/auth'
 
 const router = useRouter()
 const username = ref('')
 const password = ref('')
 const errorMessage = ref('')
+const auth = useAuthStore()
 
 async function submitSignin() {
   errorMessage.value = ''
@@ -50,6 +52,12 @@ async function submitSignin() {
     const data = await res.json()
     if (res.ok) {
       localStorage.setItem('token', data.token)
+
+
+      auth.user = data.user
+      await auth.checkAuth()
+
+
       router.push('/')
     } else {
       errorMessage.value = data.error || 'Signin failed'

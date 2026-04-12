@@ -15,3 +15,5 @@ static/vue/
 
 # Environment variables
 .env
+
+node_modules
