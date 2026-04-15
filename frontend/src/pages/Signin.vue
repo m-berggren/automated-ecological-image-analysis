@@ -5,7 +5,8 @@
         <Sprout class="w-6 h-6 text-primary" />
         <span class="font-display font-bold text-xl tracking-tight">Ecosia</span>
       </div>
-      <div class="rounded-xl border border-border bg-surface p-8 shadow-sm">
+      <div class="relative rounded-xl border border-border bg-surface p-8 shadow-sm">
+        <ThemeToggle class="absolute top-2 right-2" />
         <h1 class="font-display font-semibold text-lg mb-1">Sign in</h1>
         <p class="text-sm text-muted-foreground mb-6">
           Access the ecological image analysis tool.
@@ -25,4 +26,5 @@
 <script setup lang="ts">
 import { Sprout } from 'lucide-vue-next'
 import SignInForm from '@/components/SignInForm.vue'
+import ThemeToggle from '@/components/ThemeToggle.vue'
 </script>

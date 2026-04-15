@@ -10,11 +10,14 @@
     </div>
     <div class="flex items-center gap-2">
       <slot name="actions" />
+      <ThemeToggle />
     </div>
   </header>
 </template>
 
 <script setup lang="ts">
+import ThemeToggle from '@/components/ThemeToggle.vue'
+
 defineProps<{
   title: string
   subtitle?: string

@@ -40,6 +40,35 @@
   --radius: 1rem;
 }
 
+/* Theme palettes — override tokens declared in @theme.
+   Classes are applied to <html> by stores/theme.ts. */
+
+html.theme-dark {
+  --color-background: hsl(150 10% 10%);
+  --color-foreground: hsl(80 15% 92%);
+  --color-surface: hsl(150 10% 14%);
+  --color-border: hsl(150 8% 22%);
+  --color-muted: hsl(150 8% 18%);
+  --color-muted-foreground: hsl(150 8% 62%);
+  --color-primary: hsl(152 50% 55%);
+  --color-primary-foreground: hsl(150 40% 10%);
+  --color-secondary: hsl(150 10% 20%);
+  --color-secondary-foreground: hsl(80 15% 92%);
+}
+
+html.theme-green {
+  --color-background: hsl(115 22% 93%);
+  --color-foreground: hsl(125 35% 12%);
+  --color-surface: hsl(125 28% 77%);
+  --color-border: hsl(125 22% 63%);
+  --color-muted: hsl(125 22% 84%);
+  --color-muted-foreground: hsl(125 18% 32%);
+  --color-primary: hsl(128 45% 24%);
+  --color-primary-foreground: hsl(80 25% 97%);
+  --color-secondary: hsl(125 20% 80%);
+  --color-secondary-foreground: hsl(125 35% 12%);
+}
+
 @layer base {
   * {
     border-color: var(--color-border);
