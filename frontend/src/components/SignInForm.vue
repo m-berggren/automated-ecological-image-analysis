@@ -1,38 +1,44 @@
 <template>
-  <div class="min-h-screen flex flex-col justify-center items-center px-6">
-    <h2 class="text-3xl font-extrabold mb-8 text-green-900">Sign In</h2>
-    <form @submit.prevent="submitSignin" class="w-full max-w-sm">
+  <form @submit.prevent="submitSignin" class="space-y-4">
+    <div>
+      <label for="signin-username" class="block text-sm font-medium mb-1.5">Username</label>
       <input
+        id="signin-username"
         v-model="username"
         type="text"
-        placeholder="Username"
         required
-        class="mb-4 w-full p-3 rounded-md border border-green-300 focus:outline-none focus:ring-2 focus:ring-green-400"
+        autocomplete="username"
+        class="w-full px-3 py-2 rounded-md border border-border bg-background focus:outline-none focus:ring-2 focus:ring-primary/40 focus:border-primary"
       />
+    </div>
+    <div>
+      <label for="signin-password" class="block text-sm font-medium mb-1.5">Password</label>
       <input
+        id="signin-password"
         v-model="password"
         type="password"
-        placeholder="Password"
         required
-        class="mb-6 w-full p-3 rounded-md border border-green-300 focus:outline-none focus:ring-2 focus:ring-green-400"
+        autocomplete="current-password"
+        class="w-full px-3 py-2 rounded-md border border-border bg-background focus:outline-none focus:ring-2 focus:ring-primary/40 focus:border-primary"
       />
-      <button
-        type="submit"
-        class="w-full bg-green-700 text-white py-3 rounded-lg font-semibold hover:bg-green-600"
-      >
-        Sign In
-      </button>
-    </form>
-    <p v-if="errorMessage" class="mt-2 text-red-600 font-semibold">{{ errorMessage }}</p>
-  </div>
+    </div>
+    <button
+      type="submit"
+      class="w-full bg-primary text-primary-foreground py-2.5 rounded-md font-medium hover:bg-primary/90 transition-colors"
+    >
+      Sign in
+    </button>
+    <p v-if="errorMessage" class="text-sm text-red-600">{{ errorMessage }}</p>
+  </form>
 </template>
 
 <script setup lang="ts">
 import { ref } from 'vue'
-import { useRouter } from 'vue-router'
-import { useAuthStore } from '../stores/auth'
+import { useRoute, useRouter } from 'vue-router'
+import { useAuthStore } from '@/stores/auth'
 
 const router = useRouter()
+const route = useRoute()
 const username = ref('')
 const password = ref('')
 const errorMessage = ref('')
@@ -52,15 +58,11 @@ async function submitSignin() {
     const data = await res.json()
     if (res.ok) {
       localStorage.setItem('token', data.token)
-
-
-      auth.user = data.user
       await auth.checkAuth()
-
-
-      router.push('/')
+      const next = typeof route.query.next === 'string' ? route.query.next : '/'
+      router.push(next)
     } else {
-      errorMessage.value = data.error || 'Signin failed'
+      errorMessage.value = data.error || 'Sign in failed'
     }
   } catch {
     errorMessage.value = 'Network error'
