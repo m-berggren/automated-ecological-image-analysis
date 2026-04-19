@@ -15,3 +15,13 @@ static/vue/
 
 # Environment variables
 .env
+<<<<<<< Updated upstream
+=======
+
+.DS_Store
+
+*.csv
+*.txt
+
+*.pth
+>>>>>>> Stashed changes
