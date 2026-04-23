@@ -1,6 +1,9 @@
 import { createRouter, createWebHistory } from 'vue-router'
 import AppShell from '@/components/AppShell.vue'
-import Seeds from '@/pages/Seeds.vue'
+import SeedsUpload from '@/pages/SeedsUpload.vue'
+import SeedsRuns from '@/pages/SeedsRuns.vue'
+import SeedsExport from '@/pages/SeedsExport.vue'
+import SeedsModels from '@/pages/SeedsModels.vue'
 import Pollinators from '@/pages/Pollinators.vue'
 import Pollen from '@/pages/Pollen.vue'
 import Flowers from '@/pages/Flowers.vue'
@@ -18,8 +21,12 @@ const router = createRouter({
       path: '/',
       component: AppShell,
       children: [
-        { path: '', redirect: '/seeds' },
-        { path: 'seeds', component: Seeds },
+        { path: '', redirect: '/seeds/upload' },
+        { path: 'seeds', redirect: '/seeds/upload' },
+        { path: 'seeds/upload', component: SeedsUpload },
+        { path: 'seeds/runs', component: SeedsRuns },
+        { path: 'seeds/export', component: SeedsExport },
+        { path: 'seeds/models', component: SeedsModels, meta: { staffOnly: true } },
         { path: 'pollinators', component: Pollinators },
         { path: 'pollen', component: Pollen },
         { path: 'flowers', component: Flowers },
