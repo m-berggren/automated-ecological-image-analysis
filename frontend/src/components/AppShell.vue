@@ -1,12 +1,7 @@
 <template>
   <div class="flex min-h-screen bg-background text-foreground">
-    <aside
-      class="flex flex-col w-60 shrink-0 border-r border-border bg-surface"
-    >
-      <RouterLink
-        to="/"
-        class="flex items-center gap-2 px-5 h-16 border-b border-border"
-      >
+    <aside class="flex flex-col w-60 shrink-0 border-r border-border bg-surface">
+      <RouterLink to="/" class="flex items-center gap-2 px-5 h-16 border-b border-border">
         <Sprout class="w-6 h-6 text-primary" />
         <span class="font-display font-bold text-xl tracking-tight">
           {{ appName }}
@@ -82,14 +77,7 @@
 import { computed } from 'vue'
 import { useRouter } from 'vue-router'
 import { useAuthStore } from '@/stores/auth'
-import {
-  Sprout,
-  Microscope,
-  Bug,
-  Flower2,
-  Sparkles,
-  LogOut,
-} from 'lucide-vue-next'
+import { Sprout, Microscope, Bug, Flower2, Sparkles, LogOut } from 'lucide-vue-next'
 
 const auth = useAuthStore()
 const router = useRouter()
@@ -103,9 +91,7 @@ const modules = [
   { to: '/flowers', label: 'Flowers', icon: Flower2, paused: true },
 ]
 
-const initial = computed(() =>
-  (auth.user?.username ?? '?').charAt(0).toUpperCase(),
-)
+const initial = computed(() => (auth.user?.username ?? '?').charAt(0).toUpperCase())
 
 async function handleLogout() {
   await auth.logout()

@@ -8,9 +8,7 @@
       <div class="relative rounded-xl border border-border bg-surface p-8 shadow-sm">
         <ThemeToggle class="absolute top-2 right-2" />
         <h1 class="font-display font-semibold text-lg mb-1">Sign in</h1>
-        <p class="text-sm text-muted-foreground mb-6">
-          Access the ecological image analysis tool.
-        </p>
+        <p class="text-sm text-muted-foreground mb-6">Access the ecological image analysis tool.</p>
         <SignInForm />
       </div>
       <p class="text-sm text-muted-foreground text-center mt-6">

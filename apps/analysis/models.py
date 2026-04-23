@@ -16,19 +16,24 @@ class ModelVersion(models.Model):
     model_file_path = models.CharField(max_length=255)
 
     metrics = models.JSONField(
-        default=dict, blank=True,
+        default=dict,
+        blank=True,
         help_text='e.g. {precision, recall, f1, mae, rmse, confusion_matrix}',
     )
     parameters = models.JSONField(
-        default=dict, blank=True,
+        default=dict,
+        blank=True,
         help_text='Hyperparameters and training config (model-specific shape)',
     )
 
     is_active = models.BooleanField(default=False)
 
     created_by = models.ForeignKey(
-        settings.AUTH_USER_MODEL, on_delete=models.SET_NULL,
-        null=True, blank=True, related_name='created_model_versions',
+        settings.AUTH_USER_MODEL,
+        on_delete=models.SET_NULL,
+        null=True,
+        blank=True,
+        related_name='created_model_versions',
     )
     created_at = models.DateTimeField(auto_now_add=True)
 
@@ -40,7 +45,8 @@ class ModelVersion(models.Model):
     def save(self, *args, **kwargs):
         if self.is_active:
             ModelVersion.objects.filter(
-                module=self.module, is_active=True,
+                module=self.module,
+                is_active=True,
             ).exclude(pk=self.pk).update(is_active=False)
         super().save(*args, **kwargs)
 
@@ -58,23 +64,33 @@ class JobStatus(models.TextChoices):
 class TrainingJob(models.Model):
     module = models.CharField(max_length=20, choices=Module.choices)
     status = models.CharField(
-        max_length=20, choices=JobStatus.choices, default=JobStatus.PENDING,
+        max_length=20,
+        choices=JobStatus.choices,
+        default=JobStatus.PENDING,
     )
 
     started_at = models.DateTimeField(auto_now_add=True)
     completed_at = models.DateTimeField(null=True, blank=True)
 
     resulting_model = models.OneToOneField(
-        ModelVersion, on_delete=models.SET_NULL,
-        null=True, blank=True, related_name='training_job',
+        ModelVersion,
+        on_delete=models.SET_NULL,
+        null=True,
+        blank=True,
+        related_name='training_job',
     )
     training_images = models.ManyToManyField(
-        'datasets.ImageAsset', related_name='training_jobs', blank=True,
+        'datasets.ImageAsset',
+        related_name='training_jobs',
+        blank=True,
     )
 
     initiated_by = models.ForeignKey(
-        settings.AUTH_USER_MODEL, on_delete=models.SET_NULL,
-        null=True, blank=True, related_name='initiated_training_jobs',
+        settings.AUTH_USER_MODEL,
+        on_delete=models.SET_NULL,
+        null=True,
+        blank=True,
+        related_name='initiated_training_jobs',
     )
     progress_log = models.TextField(blank=True)
 
@@ -85,19 +101,27 @@ class TrainingJob(models.Model):
 class InferenceRun(models.Model):
     module = models.CharField(max_length=20, choices=Module.choices)
     model_version = models.ForeignKey(
-        ModelVersion, on_delete=models.PROTECT, related_name='inference_runs',
+        ModelVersion,
+        on_delete=models.PROTECT,
+        related_name='inference_runs',
     )
     status = models.CharField(
-        max_length=20, choices=JobStatus.choices, default=JobStatus.PENDING,
+        max_length=20,
+        choices=JobStatus.choices,
+        default=JobStatus.PENDING,
     )
 
     images = models.ManyToManyField(
-        'datasets.ImageAsset', related_name='inference_runs',
+        'datasets.ImageAsset',
+        related_name='inference_runs',
     )
 
     initiated_by = models.ForeignKey(
-        settings.AUTH_USER_MODEL, on_delete=models.SET_NULL,
-        null=True, blank=True, related_name='initiated_inference_runs',
+        settings.AUTH_USER_MODEL,
+        on_delete=models.SET_NULL,
+        null=True,
+        blank=True,
+        related_name='initiated_inference_runs',
     )
     created_at = models.DateTimeField(auto_now_add=True)
     completed_at = models.DateTimeField(null=True, blank=True)
@@ -122,10 +146,14 @@ class Detection(models.Model):
     """
 
     inference_run = models.ForeignKey(
-        InferenceRun, on_delete=models.CASCADE, related_name='detections',
+        InferenceRun,
+        on_delete=models.CASCADE,
+        related_name='detections',
     )
     image = models.ForeignKey(
-        'datasets.ImageAsset', on_delete=models.CASCADE, related_name='detections',
+        'datasets.ImageAsset',
+        on_delete=models.CASCADE,
+        related_name='detections',
     )
 
     bbox = models.JSONField(help_text='{x, y, w, h, rotation}')
@@ -136,14 +164,18 @@ class Detection(models.Model):
     )
 
     status = models.CharField(
-        max_length=20, choices=DetectionStatus.choices,
+        max_length=20,
+        choices=DetectionStatus.choices,
         default=DetectionStatus.PENDING,
     )
     flagged_for_training = models.BooleanField(default=False)
 
     reviewed_by = models.ForeignKey(
-        settings.AUTH_USER_MODEL, on_delete=models.SET_NULL,
-        null=True, blank=True, related_name='reviewed_detections',
+        settings.AUTH_USER_MODEL,
+        on_delete=models.SET_NULL,
+        null=True,
+        blank=True,
+        related_name='reviewed_detections',
     )
     reviewed_at = models.DateTimeField(null=True, blank=True)
 

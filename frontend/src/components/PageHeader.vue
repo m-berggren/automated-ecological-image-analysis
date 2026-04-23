@@ -1,5 +1,7 @@
 <template>
-  <header class="border-b border-border px-8 h-16 flex items-center justify-between shrink-0 bg-surface">
+  <header
+    class="border-b border-border px-8 h-16 flex items-center justify-between shrink-0 bg-surface"
+  >
     <div>
       <h1 class="font-display font-semibold text-lg leading-none">
         {{ title }}

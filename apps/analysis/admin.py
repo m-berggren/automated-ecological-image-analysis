@@ -22,7 +22,12 @@ class TrainingJobAdmin(admin.ModelAdmin):
 @admin.register(InferenceRun)
 class InferenceRunAdmin(admin.ModelAdmin):
     list_display = (
-        'id', 'module', 'model_version', 'status', 'created_at', 'completed_at',
+        'id',
+        'module',
+        'model_version',
+        'status',
+        'created_at',
+        'completed_at',
     )
     list_filter = ('module', 'status')
     readonly_fields = ('created_at',)
@@ -32,8 +37,14 @@ class InferenceRunAdmin(admin.ModelAdmin):
 @admin.register(Detection)
 class DetectionAdmin(admin.ModelAdmin):
     list_display = (
-        'id', 'inference_run', 'image', 'predicted_class',
-        'confidence', 'area', 'status', 'flagged_for_training',
+        'id',
+        'inference_run',
+        'image',
+        'predicted_class',
+        'confidence',
+        'area',
+        'status',
+        'flagged_for_training',
     )
     list_filter = ('predicted_class', 'status', 'flagged_for_training')
     search_fields = ('predicted_class',)

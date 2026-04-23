@@ -63,9 +63,7 @@
         autocomplete="new-password"
         class="w-full px-3 py-2 rounded-md border border-border bg-background focus:outline-none focus:ring-2 focus:ring-primary/40 focus:border-primary"
       />
-      <p v-if="passwordMismatch" class="text-xs text-red-600 mt-1.5">
-        Passwords do not match
-      </p>
+      <p v-if="passwordMismatch" class="text-xs text-red-600 mt-1.5">Passwords do not match</p>
     </div>
     <button
       type="submit"
@@ -106,11 +104,16 @@ const strengthScore = computed(() => {
 const strengthText = computed(() => {
   switch (strengthScore.value) {
     case 0:
-    case 1: return 'Weak'
-    case 2: return 'Medium'
-    case 3: return 'Strong'
-    case 4: return 'Very strong'
-    default: return ''
+    case 1:
+      return 'Weak'
+    case 2:
+      return 'Medium'
+    case 3:
+      return 'Strong'
+    case 4:
+      return 'Very strong'
+    default:
+      return ''
   }
 })
 
@@ -118,11 +121,16 @@ const strengthWidth = computed(() => `${strengthScore.value * 25}%`)
 
 const strengthColor = computed(() => {
   switch (strengthScore.value) {
-    case 1: return 'bg-red-500'
-    case 2: return 'bg-orange-500'
-    case 3: return 'bg-yellow-500'
-    case 4: return 'bg-green-500'
-    default: return 'bg-muted'
+    case 1:
+      return 'bg-red-500'
+    case 2:
+      return 'bg-orange-500'
+    case 3:
+      return 'bg-yellow-500'
+    case 4:
+      return 'bg-green-500'
+    default:
+      return 'bg-muted'
   }
 })
 

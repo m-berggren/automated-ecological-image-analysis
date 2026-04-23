@@ -6,8 +6,14 @@ from .models import Annotation, FlowerMarker, ImageAsset
 @admin.register(ImageAsset)
 class ImageAssetAdmin(admin.ModelAdmin):
     list_display = (
-        'id', 'module', 'purpose', 'file', 'captured_at',
-        'weather', 'excluded', 'uploaded_at',
+        'id',
+        'module',
+        'purpose',
+        'file',
+        'captured_at',
+        'weather',
+        'excluded',
+        'uploaded_at',
     )
     list_filter = ('module', 'purpose', 'weather', 'excluded')
     search_fields = ('file', 'site', 'plot', 'notes')
@@ -25,7 +31,11 @@ class AnnotationAdmin(admin.ModelAdmin):
 @admin.register(FlowerMarker)
 class FlowerMarkerAdmin(admin.ModelAdmin):
     list_display = (
-        'id', 'image', 'color', 'open_flowers', 'closed_flowers',
+        'id',
+        'image',
+        'color',
+        'open_flowers',
+        'closed_flowers',
         'pollinator_visiting',
     )
     list_filter = ('color', 'pollinator_visiting')

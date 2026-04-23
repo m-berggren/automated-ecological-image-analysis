@@ -1,19 +1,19 @@
-import { defineStore } from "pinia"
-import { api } from "../api"
+import { defineStore } from 'pinia'
+import { api } from '../api'
 
-export const useAuthStore = defineStore("auth", {
+export const useAuthStore = defineStore('auth', {
   state: () => ({
-    user: null as null | { username: string }
+    user: null as null | { username: string },
   }),
 
   getters: {
-    isLoggedIn: (state) => !!state.user
+    isLoggedIn: (state) => !!state.user,
   },
 
   actions: {
     async checkAuth() {
       try {
-        const res = await api("/api/auth/me/")
+        const res = await api('/api/auth/me/')
 
         if (!res.ok) {
           this.user = null
@@ -24,15 +24,15 @@ export const useAuthStore = defineStore("auth", {
         this.user = data.user ?? null
       } catch (err) {
         this.user = null
-        console.error("Auth check failed:", err)
+        console.error('Auth check failed:', err)
       }
     },
 
     async logout() {
-      await api("/api/auth/logout/", { method: "POST" })
+      await api('/api/auth/logout/', { method: 'POST' })
 
-      localStorage.removeItem("token")
+      localStorage.removeItem('token')
       this.user = null
-    }
-  }
+    },
+  },
 })

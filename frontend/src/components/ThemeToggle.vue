@@ -18,17 +18,23 @@ const theme = useThemeStore()
 
 const icon = computed(() => {
   switch (theme.current) {
-    case 'dark': return Moon
-    case 'green': return Leaf
-    default: return Sun
+    case 'dark':
+      return Moon
+    case 'green':
+      return Leaf
+    default:
+      return Sun
   }
 })
 
 const label = computed(() => {
   switch (theme.current) {
-    case 'dark': return 'Dark'
-    case 'green': return 'Green'
-    default: return 'Light'
+    case 'dark':
+      return 'Dark'
+    case 'green':
+      return 'Green'
+    default:
+      return 'Light'
   }
 })
 </script>
