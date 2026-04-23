@@ -79,8 +79,11 @@
 import { ref, computed } from 'vue'
 import { useRouter } from 'vue-router'
 import { Eye, EyeOff } from 'lucide-vue-next'
-
+import { useAuthStore } from '@/stores/auth'
+import { tokenManager } from '@/lib/token'
+import { API_BASE_URL } from '@/lib/config'
 const router = useRouter()
+const auth = useAuthStore()
 const username = ref('')
 const email = ref('')
 const password = ref('')
@@ -141,7 +144,7 @@ async function submitSignup() {
     return
   }
   try {
-    const res = await fetch('http://localhost:8000/api/auth/register/', {
+    const res = await fetch(`${API_BASE_URL}/api/auth/register/`, {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify({
@@ -152,7 +155,9 @@ async function submitSignup() {
     })
     const data = await res.json()
     if (res.ok) {
-      router.push('/signin')
+      tokenManager.set(data.access, data.refresh)
+      auth.syncFromToken()
+      router.push('/')
     } else {
       errorMessage.value = data.error || 'Signup failed'
     }

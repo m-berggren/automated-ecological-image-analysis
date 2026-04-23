@@ -36,7 +36,8 @@
 import { ref } from 'vue'
 import { useRoute, useRouter } from 'vue-router'
 import { useAuthStore } from '@/stores/auth'
-
+import { tokenManager } from '@/lib/token'
+import { API_BASE_URL } from '@/lib/config'
 const router = useRouter()
 const route = useRoute()
 const username = ref('')
@@ -47,7 +48,7 @@ const auth = useAuthStore()
 async function submitSignin() {
   errorMessage.value = ''
   try {
-    const res = await fetch('http://localhost:8000/api/auth/login/', {
+    const res = await fetch(`${API_BASE_URL}/api/auth/login/`, {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify({
@@ -57,12 +58,12 @@ async function submitSignin() {
     })
     const data = await res.json()
     if (res.ok) {
-      localStorage.setItem('token', data.token)
-      await auth.checkAuth()
+      tokenManager.set(data.access, data.refresh)
+      auth.syncFromToken()
       const next = typeof route.query.next === 'string' ? route.query.next : '/'
       router.push(next)
     } else {
-      errorMessage.value = data.error || 'Sign in failed'
+      errorMessage.value = data.detail || 'Invalid credentials'
     }
   } catch {
     errorMessage.value = 'Network error'
