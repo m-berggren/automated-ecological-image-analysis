@@ -137,12 +137,22 @@ class DetectionStatus(models.TextChoices):
     UNSURE = 'unsure', 'Unsure'
 
 
+class DetectionScope(models.TextChoices):
+    ROI = 'roi', 'Inside ROI (near marked flower)'
+    OUTSIDE_ROI = 'outside_roi', 'Outside ROI'
+    UNKNOWN = 'unknown', 'Unknown'
+
+
 class Detection(models.Model):
     """A single bounding box predicted by an inference run.
 
     Allowed predicted_class values per module:
     - seeds: 'seed' / 'inactive'
     - pollinators: 'bumblebee' / 'fly' / 'butterfly' / 'other'
+
+    Pollinator-specific taxonomy fields (scientific_name through
+    detection_scope) are populated by the InsectNet classification
+    pipeline. They are nullable so seed detections are unaffected.
     """
 
     inference_run = models.ForeignKey(
@@ -161,6 +171,29 @@ class Detection(models.Model):
     predicted_class = models.CharField(max_length=50)
     area = models.FloatField(
         help_text='Pixel area of bbox; persisted to drive the seeds volume filter',
+    )
+
+    # InsectNet taxonomy — populated by the pollinator pipeline
+    scientific_name = models.CharField(max_length=200, blank=True)
+    common_name = models.CharField(max_length=200, blank=True)
+    order = models.CharField(max_length=100, blank=True)
+    family = models.CharField(max_length=100, blank=True)
+    energy_score = models.FloatField(
+        null=True, blank=True,
+        help_text='InsectNet OOD energy score; lower = more confident',
+    )
+    confirmed = models.BooleanField(
+        null=True, blank=True,
+        help_text='InsectNet in-distribution flag (True = confident ID)',
+    )
+    near_marker = models.BooleanField(
+        null=True, blank=True,
+        help_text='Detection overlaps with the marked-flower ROI zone',
+    )
+    detection_scope = models.CharField(
+        max_length=20,
+        choices=DetectionScope.choices,
+        default=DetectionScope.UNKNOWN,
     )
 
     status = models.CharField(
