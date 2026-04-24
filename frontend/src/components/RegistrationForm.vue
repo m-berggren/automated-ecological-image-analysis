@@ -1,111 +1,100 @@
 <template>
-  <div class="min-h-screen flex flex-col justify-center items-center px-6">
-    <h2 class="text-3xl font-extrabold mb-8 text-green-900">Sign Up</h2>
-
-    <form @submit.prevent="submitSignup" class="w-full max-w-sm">
-
-      <!-- Username -->
+  <form @submit.prevent="submitSignup" class="space-y-4">
+    <div>
+      <label for="signup-username" class="block text-sm font-medium mb-1.5">Username</label>
       <input
+        id="signup-username"
         v-model="username"
         type="text"
-        placeholder="Username"
         required
-        class="mb-4 w-full p-3 rounded-md border border-green-300 focus:outline-none focus:ring-2 focus:ring-green-400"
+        autocomplete="username"
+        class="w-full px-3 py-2 rounded-md border border-border bg-background focus:outline-none focus:ring-2 focus:ring-primary/40 focus:border-primary"
       />
-
-      <!-- Email -->
+    </div>
+    <div>
+      <label for="signup-email" class="block text-sm font-medium mb-1.5">Email</label>
       <input
+        id="signup-email"
         v-model="email"
         type="email"
-        placeholder="Email"
         required
-        class="mb-4 w-full p-3 rounded-md border border-green-300 focus:outline-none focus:ring-2 focus:ring-green-400"
+        autocomplete="email"
+        class="w-full px-3 py-2 rounded-md border border-border bg-background focus:outline-none focus:ring-2 focus:ring-primary/40 focus:border-primary"
       />
-
-      <!-- Password -->
-      <div class="relative mb-2">
+    </div>
+    <div>
+      <label for="signup-password" class="block text-sm font-medium mb-1.5">Password</label>
+      <div class="relative">
         <input
+          id="signup-password"
           v-model="password"
           :type="showPassword ? 'text' : 'password'"
-          placeholder="Password"
           required
-          class="w-full p-3 rounded-md border border-green-300 focus:outline-none focus:ring-2 focus:ring-green-400"
+          autocomplete="new-password"
+          class="w-full px-3 py-2 pr-10 rounded-md border border-border bg-background focus:outline-none focus:ring-2 focus:ring-primary/40 focus:border-primary"
         />
-
-        <span
+        <button
+          type="button"
           @click="showPassword = !showPassword"
-          class="absolute right-3 top-3 cursor-pointer select-none"
+          class="absolute right-2 top-1/2 -translate-y-1/2 p-1 text-muted-foreground hover:text-foreground"
+          :aria-label="showPassword ? 'Hide password' : 'Show password'"
         >
-          👁
-        </span>
+          <component :is="showPassword ? EyeOff : Eye" class="w-4 h-4" />
+        </button>
       </div>
-
-      <!-- Password Strength -->
-      <div class="mb-4">
-        <div class="h-2 w-full bg-gray-200 rounded">
+      <div v-if="password" class="mt-2">
+        <div class="h-1 w-full bg-muted rounded overflow-hidden">
           <div
-            class="h-2 rounded transition-all"
+            class="h-full transition-all"
             :class="strengthColor"
             :style="{ width: strengthWidth }"
-          ></div>
+          />
         </div>
-        <p class="text-sm mt-1 text-gray-600">{{ strengthText }}</p>
+        <p class="text-xs mt-1 text-muted-foreground">{{ strengthText }}</p>
       </div>
-
-      <!-- Confirm Password -->
+    </div>
+    <div>
+      <label for="signup-confirm" class="block text-sm font-medium mb-1.5">Confirm password</label>
       <input
+        id="signup-confirm"
         v-model="confirmPassword"
         :type="showPassword ? 'text' : 'password'"
-        placeholder="Confirm Password"
         required
-        class="mb-6 w-full p-3 rounded-md border border-green-300 focus:outline-none focus:ring-2 focus:ring-green-400"
+        autocomplete="new-password"
+        class="w-full px-3 py-2 rounded-md border border-border bg-background focus:outline-none focus:ring-2 focus:ring-primary/40 focus:border-primary"
       />
-
-      <p v-if="passwordMismatch" class="text-red-600 text-sm mb-3">
-        Passwords do not match
-      </p>
-
-      <button
-        type="submit"
-        class="w-full bg-green-700 text-white py-3 rounded-lg font-semibold hover:bg-green-600"
-      >
-        Create Account
-      </button>
-    </form>
-
-    <p class="mt-4 text-green-800">
-      Already have an account?
-      <router-link to="/" class="underline hover:text-green-600">
-        Log In
-      </router-link>
-    </p>
-
-    <p v-if="errorMessage" class="mt-2 text-red-600 font-semibold">
-      {{ errorMessage }}
-    </p>
-  </div>
+      <p v-if="passwordMismatch" class="text-xs text-red-600 mt-1.5">Passwords do not match</p>
+    </div>
+    <button
+      type="submit"
+      class="w-full bg-primary text-primary-foreground py-2.5 rounded-md font-medium hover:bg-primary/90 transition-colors"
+    >
+      Create account
+    </button>
+    <p v-if="errorMessage" class="text-sm text-red-600">{{ errorMessage }}</p>
+  </form>
 </template>
 
 <script setup lang="ts">
 import { ref, computed } from 'vue'
 import { useRouter } from 'vue-router'
-
+import { Eye, EyeOff } from 'lucide-vue-next'
+import { useAuthStore } from '@/stores/auth'
+import { tokenManager } from '@/lib/token'
+import { API_BASE_URL } from '@/lib/config'
 const router = useRouter()
-
+const auth = useAuthStore()
 const username = ref('')
 const email = ref('')
 const password = ref('')
 const confirmPassword = ref('')
-
 const showPassword = ref(false)
 const errorMessage = ref('')
 
-/* Password Match */
-const passwordMismatch = computed(() => {
-  return confirmPassword.value && password.value !== confirmPassword.value
-})
+const passwordMismatch = computed(
+  () => !!confirmPassword.value && password.value !== confirmPassword.value,
+)
 
-/* Password Strength */
 const strengthScore = computed(() => {
   let score = 0
   if (password.value.length >= 8) score++
@@ -119,21 +108,19 @@ const strengthText = computed(() => {
   switch (strengthScore.value) {
     case 0:
     case 1:
-      return 'Weak 🔴'
+      return 'Weak'
     case 2:
-      return 'Medium 🟠'
+      return 'Medium'
     case 3:
-      return 'Strong 🟡'
+      return 'Strong'
     case 4:
-      return 'Very Strong 🟢'
+      return 'Very strong'
     default:
       return ''
   }
 })
 
-const strengthWidth = computed(() => {
-  return (strengthScore.value * 25) + '%'
-})
+const strengthWidth = computed(() => `${strengthScore.value * 25}%`)
 
 const strengthColor = computed(() => {
   switch (strengthScore.value) {
@@ -146,32 +133,30 @@ const strengthColor = computed(() => {
     case 4:
       return 'bg-green-500'
     default:
-      return 'bg-gray-300'
+      return 'bg-muted'
   }
 })
 
 async function submitSignup() {
   errorMessage.value = ''
-
   if (passwordMismatch.value) {
-    errorMessage.value = 'Password does not match'
+    errorMessage.value = 'Passwords do not match'
     return
   }
-
   try {
-    const res = await fetch('http://localhost:8000/api/auth/register/', {
+    const res = await fetch(`${API_BASE_URL}/api/auth/register/`, {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify({
         username: username.value,
         email: email.value,
-        password: password.value
+        password: password.value,
       }),
     })
-
     const data = await res.json()
-
     if (res.ok) {
+      tokenManager.set(data.access, data.refresh)
+      auth.syncFromToken()
       router.push('/')
     } else {
       errorMessage.value = data.error || 'Signup failed'

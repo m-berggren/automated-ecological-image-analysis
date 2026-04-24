@@ -1,5 +1,5 @@
 @import url('https://fonts.googleapis.com/css2?family=DM+Sans:ital,opsz,wght@0,9..40,300;0,9..40,400;0,9..40,500;0,9..40,600;0,9..40,700;1,9..40,400&family=Space+Grotesk:wght@400;500;600;700&display=swap');
-@import "tailwindcss";
+@import 'tailwindcss';
 
 /* Author: Claudia Sevilla */
 /* Animation keyframes ported from Lovable's React prototype */
@@ -10,11 +10,15 @@
 
   --color-background: hsl(80 25% 97%);
   --color-foreground: hsl(150 30% 12%);
+  --color-surface: hsl(0 0% 100%);
   --color-border: hsl(120 15% 88%);
+  --color-muted: hsl(120 15% 94%);
+  --color-muted-foreground: hsl(150 10% 45%);
   --color-accent: hsl(85 50% 55%);
   --color-primary: hsl(152 45% 28%);
   --color-primary-foreground: hsl(80 25% 97%);
-  --color-muted-foreground: hsl(150 10% 45%);
+  --color-secondary: hsl(120 15% 92%);
+  --color-secondary-foreground: hsl(150 30% 12%);
 
   --color-eco-sage: hsl(140 25% 75%);
   --color-eco-mint: hsl(160 40% 85%);
@@ -36,8 +40,39 @@
   --radius: 1rem;
 }
 
+/* Theme palettes — override tokens declared in @theme.
+   Classes are applied to <html> by stores/theme.ts. */
+
+html.theme-dark {
+  --color-background: hsl(150 10% 10%);
+  --color-foreground: hsl(80 15% 92%);
+  --color-surface: hsl(150 10% 14%);
+  --color-border: hsl(150 8% 22%);
+  --color-muted: hsl(150 8% 18%);
+  --color-muted-foreground: hsl(150 8% 62%);
+  --color-primary: hsl(152 50% 55%);
+  --color-primary-foreground: hsl(150 40% 10%);
+  --color-secondary: hsl(150 10% 20%);
+  --color-secondary-foreground: hsl(80 15% 92%);
+}
+
+html.theme-green {
+  --color-background: hsl(115 22% 93%);
+  --color-foreground: hsl(125 35% 12%);
+  --color-surface: hsl(125 28% 77%);
+  --color-border: hsl(125 22% 63%);
+  --color-muted: hsl(125 22% 84%);
+  --color-muted-foreground: hsl(125 18% 32%);
+  --color-primary: hsl(128 45% 24%);
+  --color-primary-foreground: hsl(80 25% 97%);
+  --color-secondary: hsl(125 20% 80%);
+  --color-secondary-foreground: hsl(125 35% 12%);
+}
+
 @layer base {
-  * { border-color: var(--color-border); }
+  * {
+    border-color: var(--color-border);
+  }
   body {
     background-color: var(--color-background);
     color: var(--color-foreground);
@@ -56,44 +91,105 @@
 
 /* Animations */
 @keyframes blob-float {
-  0%, 100% { transform: translate(0, 0) scale(1); }
-  25% { transform: translate(20px, -30px) scale(1.05); }
-  50% { transform: translate(-15px, 15px) scale(0.95); }
-  75% { transform: translate(10px, 20px) scale(1.02); }
+  0%,
+  100% {
+    transform: translate(0, 0) scale(1);
+  }
+  25% {
+    transform: translate(20px, -30px) scale(1.05);
+  }
+  50% {
+    transform: translate(-15px, 15px) scale(0.95);
+  }
+  75% {
+    transform: translate(10px, 20px) scale(1.02);
+  }
 }
 @keyframes blob-float-reverse {
-  0%, 100% { transform: translate(0, 0) scale(1); }
-  25% { transform: translate(-25px, 20px) scale(0.97); }
-  50% { transform: translate(20px, -20px) scale(1.04); }
-  75% { transform: translate(-10px, -15px) scale(0.98); }
+  0%,
+  100% {
+    transform: translate(0, 0) scale(1);
+  }
+  25% {
+    transform: translate(-25px, 20px) scale(0.97);
+  }
+  50% {
+    transform: translate(20px, -20px) scale(1.04);
+  }
+  75% {
+    transform: translate(-10px, -15px) scale(0.98);
+  }
 }
 @keyframes bbox-pulse {
-  0%, 100% { opacity: 0.7; }
-  50% { opacity: 1; }
+  0%,
+  100% {
+    opacity: 0.7;
+  }
+  50% {
+    opacity: 1;
+  }
 }
 @keyframes side-box-resize {
-  0%, 100% { transform: scale(1); }
-  20% { transform: scale(1.15, 0.9); }
-  40% { transform: scale(0.85, 1.12); }
-  60% { transform: scale(1.1, 1.05); }
-  80% { transform: scale(0.92, 0.88); }
+  0%,
+  100% {
+    transform: scale(1);
+  }
+  20% {
+    transform: scale(1.15, 0.9);
+  }
+  40% {
+    transform: scale(0.85, 1.12);
+  }
+  60% {
+    transform: scale(1.1, 1.05);
+  }
+  80% {
+    transform: scale(0.92, 0.88);
+  }
 }
 @keyframes fadeIn {
-  from { opacity: 0; transform: scale(0.95); }
-  to { opacity: 1; transform: scale(1); }
+  from {
+    opacity: 0;
+    transform: scale(0.95);
+  }
+  to {
+    opacity: 1;
+    transform: scale(1);
+  }
 }
 @keyframes scan-line {
-  0% { top: 0%; }
-  100% { top: 100%; }
+  0% {
+    top: 0%;
+  }
+  100% {
+    top: 100%;
+  }
 }
 @keyframes typing-cursor {
-  0%, 100% { opacity: 1; }
-  50% { opacity: 0; }
+  0%,
+  100% {
+    opacity: 1;
+  }
+  50% {
+    opacity: 0;
+  }
 }
 
-.animate-blob-float { animation: blob-float 12s ease-in-out infinite; }
-.animate-blob-float-reverse { animation: blob-float-reverse 15s ease-in-out infinite; }
-.animate-bbox-pulse { animation: bbox-pulse 2s ease-in-out infinite; }
-.animate-side-box-wander { animation: side-box-resize 6s ease-in-out infinite; }
-.animate-scan-line { animation: scan-line 3s ease-in-out infinite; }
-.animate-fade-in { animation: fadeIn 0.3s ease-out; }
+.animate-blob-float {
+  animation: blob-float 12s ease-in-out infinite;
+}
+.animate-blob-float-reverse {
+  animation: blob-float-reverse 15s ease-in-out infinite;
+}
+.animate-bbox-pulse {
+  animation: bbox-pulse 2s ease-in-out infinite;
+}
+.animate-side-box-wander {
+  animation: side-box-resize 6s ease-in-out infinite;
+}
+.animate-scan-line {
+  animation: scan-line 3s ease-in-out infinite;
+}
+.animate-fade-in {
+  animation: fadeIn 0.3s ease-out;
+}

@@ -4,7 +4,6 @@
 <template>
   <section class="relative z-10 max-w-5xl mx-auto px-6 md:px-12 py-2">
     <div class="relative w-full mx-auto flex flex-col gap-4">
-
       <!-- Upload Zone -->
       <div
         v-if="!image"
@@ -12,12 +11,14 @@
         @dragleave="isDragOver = false"
         @drop="handleDrop"
         @click="fileInputRef?.click()"
-        :class="cn(
-          'relative cursor-pointer border-2 border-dashed rounded-2xl p-6 md:p-8 text-center transition-all duration-300',
-          isDragOver
-            ? 'border-accent bg-accent/10 scale-[1.02]'
-            : 'border-border bg-white/50 hover:border-primary/40 hover:bg-card/80'
-        )"
+        :class="
+          cn(
+            'relative cursor-pointer border-2 border-dashed rounded-2xl p-6 md:p-8 text-center transition-all duration-300',
+            isDragOver
+              ? 'border-accent bg-accent/10 scale-[1.02]'
+              : 'border-border bg-white/50 hover:border-primary/40 hover:bg-card/80',
+          )
+        "
       >
         <input
           ref="fileInputRef"
@@ -38,7 +39,6 @@
         <BoundingBoxDecor color="lime" className="w-17 h-10 top-3 right-4 opacity-30" />
         <BoundingBoxDecor color="pink" className="w-12 h-8 bottom-4 left-5 opacity-20" />
       </div>
-
 
       <!-- File Preview -->
       <div
@@ -71,7 +71,6 @@
       >
         Analyse Image
       </button>
-
     </div>
   </section>
 </template>
