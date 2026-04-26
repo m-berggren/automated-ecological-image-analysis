@@ -1,38 +1,41 @@
-import { defineStore } from "pinia"
-import { api } from "../api"
+import { defineStore } from 'pinia'
+import { tokenManager } from '@/lib/token'
 
-export const useAuthStore = defineStore("auth", {
+export const useAuthStore = defineStore('auth', {
   state: () => ({
-    user: null as null | { username: string }
+    user: tokenManager.isSignedIn()
+      ? {
+          username: tokenManager.getUsername() ?? '',
+          is_staff: tokenManager.isStaff(),
+        }
+      : (null as null | { username: string; is_staff: boolean }),
   }),
 
   getters: {
-    isLoggedIn: (state) => !!state.user
+    isLoggedIn: (state) => !!state.user,
   },
 
   actions: {
-    async checkAuth() {
-      try {
-        const res = await api("/api/auth/me/")
-
-        if (!res.ok) {
-          this.user = null
-          return
+    /** Call after login/register sets new tokens. */
+    syncFromToken() {
+      if (tokenManager.isSignedIn()) {
+        this.user = {
+          username: tokenManager.getUsername() ?? '',
+          is_staff: tokenManager.isStaff(),
         }
-
-        const data = await res.json()
-        this.user = data.user ?? null
-      } catch (err) {
+      } else {
         this.user = null
-        console.error("Auth check failed:", err)
       }
     },
 
-    async logout() {
-      await api("/api/auth/logout/", { method: "POST" })
+    /** Legacy — kept for router guard. No HTTP call needed anymore. */
+    async checkAuth() {
+      this.syncFromToken()
+    },
 
-      localStorage.removeItem("token")
+    async logout() {
+      tokenManager.clear()
       this.user = null
-    }
-  }
+    },
+  },
 })

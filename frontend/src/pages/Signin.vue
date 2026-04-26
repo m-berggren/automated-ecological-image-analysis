@@ -1,24 +1,28 @@
 <template>
-  <div class="min-h-screen">
-    <BlobDecoration />
-    <SideBoxes />
-    <NavBar />
-      <SignInForm class="mt-10 mx-auto max-w-md" />
-
-    <!-- Footer -->
-    <footer class="relative z-10 border-t border-border mt-20 py-6 px-6 text-center">
-      <p class="text-xs text-muted-foreground font-body">
-        Ecosia • Automated Ecological Image Analysis
+  <div class="min-h-screen flex items-center justify-center bg-background px-6">
+    <div class="w-full max-w-sm">
+      <div class="flex items-center gap-2 justify-center mb-8">
+        <Sprout class="w-6 h-6 text-primary" />
+        <span class="font-display font-bold text-xl tracking-tight">Ecosia</span>
+      </div>
+      <div class="relative rounded-xl border border-border bg-surface p-8 shadow-sm">
+        <ThemeToggle class="absolute top-2 right-2" />
+        <h1 class="font-display font-semibold text-lg mb-1">Sign in</h1>
+        <p class="text-sm text-muted-foreground mb-6">Access the ecological image analysis tool.</p>
+        <SignInForm />
+      </div>
+      <p class="text-sm text-muted-foreground text-center mt-6">
+        Don't have an account?
+        <RouterLink to="/signup" class="text-primary font-medium hover:underline">
+          Create one
+        </RouterLink>
       </p>
-    </footer>
+    </div>
   </div>
 </template>
 
 <script setup lang="ts">
-import NavBar from '../components/NavBar.vue'
-import BlobDecoration from '../components/BlobDecoration.vue'
-import TypingTitle from '../components/TypingTitle.vue'
-import BoundingBoxDecor from '../components/BoundingBoxDecor.vue'
-import SideBoxes from '../components/SideBoxes.vue'
-import SignInForm from '../components/SignInForm.vue'
+import { Sprout } from 'lucide-vue-next'
+import SignInForm from '@/components/SignInForm.vue'
+import ThemeToggle from '@/components/ThemeToggle.vue'
 </script>
