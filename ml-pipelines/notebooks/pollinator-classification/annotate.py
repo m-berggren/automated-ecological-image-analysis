@@ -159,14 +159,15 @@ print(f"bbox entries: {bbox_total}/{total_crops}"
 
 # ── UI constants ──────────────────────────────────────────────────────────────
 WIN_W, WIN_H = 1800, 1100
-DEBUG_W      = 800
+DEBUG_W      = 920
 PANEL_W      = WIN_W - DEBUG_W
-CROP_SIZE    = 160
 PAD          = 8
-CROP_COLS    = max(1, PANEL_W // (CROP_SIZE + PAD))
+CROP_COLS    = 3
+CROP_SIZE    = max(1, (PANEL_W - PAD * CROP_COLS - 15) // CROP_COLS)
+CROP_META_H  = 45
 HEADER_H     = 65
 FOOTER_H     = 40
-ROWS_VISIBLE = max(1, (WIN_H - HEADER_H - FOOTER_H) // (CROP_SIZE + PAD + 50) - 1)
+ROWS_VISIBLE = max(1, (WIN_H - HEADER_H - FOOTER_H - PAD) // (CROP_SIZE + PAD + CROP_META_H))
 
 # ── Colours & badges ──────────────────────────────────────────────────────────
 COLORS = {
@@ -314,6 +315,7 @@ state = {
     "selected_idx": None,
     "scroll_row":  0,
     "overlay":     None,   # None  or  numpy array to draw fullscreen over canvas
+    "overlay_kind": None,
 }
 click_buf = [None]
 trackbar_buf = [None]
@@ -346,8 +348,8 @@ def build_debug_overlay(task_idx: int):
     cy = (WIN_H - sh) // 2
     cx = (WIN_W - sw) // 2
     canvas[cy:cy+sh, cx:cx+sw] = shown
-    cv2.putText(canvas, "click or any key to close",
-                (WIN_W // 2 - 130, WIN_H - 10),
+    cv2.putText(canvas, "A/D or arrows = prev/next  |  click or other key to close",
+                (WIN_W // 2 - 240, WIN_H - 10),
                 cv2.FONT_HERSHEY_SIMPLEX, 0.5, (160, 160, 160), 1)
     return canvas
 
@@ -376,6 +378,7 @@ def on_mouse(event, x, y, flags, param):
     if state["overlay"] is not None:
         if event == cv2.EVENT_LBUTTONDOWN:
             state["overlay"] = None
+            state["overlay_kind"] = None
         return
 
     _, _, crops, _, _ = tasks[state["task_idx"]]
@@ -423,7 +426,7 @@ def on_mouse(event, x, y, flags, param):
     # Crop grid
     for i in range(len(crops)):
         x1, y1, x2, y2 = crop_rect(i)
-        if y1 < HEADER_H or y2 > WIN_H - FOOTER_H:
+        if y1 < HEADER_H or y2 + CROP_META_H > WIN_H - FOOTER_H - PAD:
             continue
         if x1 <= x <= x2 and y1 <= y <= y2:
             click_buf[0] = -3 if state["selected_idx"] == i else i
@@ -445,7 +448,7 @@ def crop_rect(idx: int):
     for r in range(row_of_idx - state["scroll_row"]):
         actual_r = r + state["scroll_row"]
         if actual_r < len(heights):
-            y += heights[actual_r] + PAD + 45
+            y += heights[actual_r] + PAD + CROP_META_H
 
     x1 = DEBUG_W + PAD + col * (CROP_SIZE + PAD)
 
@@ -534,9 +537,10 @@ def render():
                     cv2.FONT_HERSHEY_SIMPLEX, 0.4, (180, 180, 180), 1)
 
     # ── Right panel: crop thumbnails ──────────────────────────────────────────
+    grid_bottom = WIN_H - FOOTER_H - PAD
     for i, (crop_path, crop_fn) in enumerate(crops):
         x1, y1, x2, y2 = crop_rect(i)
-        if y2 < HEADER_H or y1 >= WIN_H - FOOTER_H - 30:
+        if y2 < HEADER_H or y1 >= grid_bottom:
             continue
         if x2 > WIN_W:
             continue
@@ -557,8 +561,10 @@ def render():
         thumb, orig_w, orig_h, _ = entry
         th_h, th_w = thumb.shape[:2]
         tx, ty     = x1, y1
+        if ty < HEADER_H or ty + th_h + CROP_META_H > grid_bottom:
+            continue
 
-        clip = min(th_h, WIN_H - FOOTER_H - 30 - ty)
+        clip = min(th_h, grid_bottom - CROP_META_H - ty)
         if ty >= 0 and clip > 0 and tx + th_w <= WIN_W - 15:
             canvas[ty : ty + clip, tx : tx + th_w] = thumb[:clip]
 
@@ -624,7 +630,8 @@ while True:
         trackbar_buf[0] = None
     if tb_val != state["task_idx"] and click_buf[0] is None:
         load_progress_for_task(tb_val)
-        state.update({"task_idx": tb_val, "selected_idx": None, "scroll_row": 0, "overlay": None})
+        state.update({"task_idx": tb_val, "selected_idx": None, "scroll_row": 0,
+                      "overlay": None, "overlay_kind": None})
 
     if click_buf[0] is not None:
         val        = click_buf[0]
@@ -635,14 +642,17 @@ while True:
             _, _, crops, _, _ = tasks[state["task_idx"]]
             if i < len(crops):
                 state["overlay"] = build_preview_overlay(*crops[i])
+                state["overlay_kind"] = "preview"
         elif val == -2:
             state["overlay"] = build_debug_overlay(state["task_idx"])
+            state["overlay_kind"] = "debug"
         elif val == -3:
             sel = state["selected_idx"]
             if sel is not None:
                 _, _, crops, _, _ = tasks[state["task_idx"]]
                 if sel < len(crops):
                     state["overlay"] = build_preview_overlay(*crops[sel])
+                    state["overlay_kind"] = "preview"
         elif val == -1:
             state["selected_idx"] = None
         else:
@@ -652,10 +662,27 @@ while True:
     key_raw = cv2.waitKeyEx(30)
     key     = key_raw & 0xFF
 
-    # Any key press dismisses overlay
+    prev_keys = (ord("a"), ord("A"), 81, 65361, 2424832, 63234)
+    next_keys = (ord("d"), ord("D"), 83, 65363, 2555904, 63235)
+
+    # Any key press dismisses overlay, except debug overlay navigation
     if state["overlay"] is not None:
         if key_raw != -1:
-            state["overlay"] = None
+            if state["overlay_kind"] == "debug" and (key in (ord("d"), ord("D")) or key_raw in next_keys):
+                new = min(state["task_idx"] + 1, total_images - 1)
+                load_progress_for_task(new)
+                state.update({"task_idx": new, "selected_idx": None, "scroll_row": 0,
+                              "overlay": build_debug_overlay(new), "overlay_kind": "debug"})
+                cv2.setTrackbarPos("Image", WINDOW, new)
+            elif state["overlay_kind"] == "debug" and (key in (ord("a"), ord("A")) or key_raw in prev_keys):
+                new = max(state["task_idx"] - 1, 0)
+                load_progress_for_task(new)
+                state.update({"task_idx": new, "selected_idx": None, "scroll_row": 0,
+                              "overlay": build_debug_overlay(new), "overlay_kind": "debug"})
+                cv2.setTrackbarPos("Image", WINDOW, new)
+            else:
+                state["overlay"] = None
+                state["overlay_kind"] = None
         continue
 
     if key in (ord("p"), ord("P")):
@@ -664,6 +691,7 @@ while True:
             _, _, crops, _, _ = tasks[state["task_idx"]]
             if sel < len(crops):
                 state["overlay"] = build_preview_overlay(*crops[sel])
+                state["overlay_kind"] = "preview"
 
     elif key in (ord("c"), ord("C")):
         _, _, crops, _, _ = tasks[state["task_idx"]]
@@ -707,13 +735,13 @@ while True:
                 if crop_fn not in progress:
                     apply_label(crop_fn, crop_path, label)
 
-    elif key in (ord("d"), ord("D")) or key_raw in (83, 65363, 2555904, 63235):
+    elif key in (ord("d"), ord("D")) or key_raw in next_keys:
         new = min(state["task_idx"] + 1, total_images - 1)
         load_progress_for_task(new)
         state.update({"task_idx": new, "selected_idx": None, "scroll_row": 0})
         cv2.setTrackbarPos("Image", WINDOW, new)
 
-    elif key in (ord("a"), ord("A")) or key_raw in (81, 65361, 2424832, 63234):
+    elif key in (ord("a"), ord("A")) or key_raw in prev_keys:
         new = max(state["task_idx"] - 1, 0)
         load_progress_for_task(new)
         state.update({"task_idx": new, "selected_idx": None, "scroll_row": 0})
