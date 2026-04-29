@@ -9,9 +9,15 @@ __pycache__/
 # Virtual environment
 .venv/
 
-#images and labels
+# Images and labels
 data/seed/images/
 data/seed/labels/
+data/seed/train.txt
+data/seed/val.txt
+
+# Jupyter notebook checkpoints
+data/seed/.ipynb_checkpoints/
+ml-pipelines/notebooks/seed-counting/.ipynb_checkpoints/
 
 # YOLO outputs
 runs/
