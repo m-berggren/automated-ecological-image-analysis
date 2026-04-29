@@ -227,27 +227,11 @@ def get_color(label):
 def get_badge(label):
     return BADGES.get(label, (label[:3].upper() if label else ""))
 
-# ── Pre-cache thumbnails ───────────────────────────────────────────────────────
+# ── Thumbnail cache ───────────────────────────────────────────────────────────
+# Filled lazily by render() on first access — preloading every crop at startup
+# blocks the UI for minutes on large runs.
 # str(path) -> (thumb_bgr, orig_w, orig_h, display_h)
 thumb_cache: dict = {}
-
-print(f"Loading {total_crops} thumbnails ...")
-for _, _, crops, _, _ in tasks:
-    for crop_path, _ in crops:
-        key = str(crop_path)
-        if key in thumb_cache:
-            continue
-        img = cv2.imread(key)
-        if img is None:
-            thumb_cache[key] = (np.zeros((CROP_SIZE, CROP_SIZE, 3), dtype=np.uint8), 0, 0, CROP_SIZE)
-            continue
-        orig_h, orig_w = img.shape[:2]
-        scale = CROP_SIZE / max(orig_w, orig_h)
-        tw    = max(1, int(orig_w * scale))
-        th    = max(1, int(orig_h * scale))
-        thumb = cv2.resize(img, (tw, th), interpolation=cv2.INTER_AREA)
-        thumb_cache[key] = (thumb, orig_w, orig_h, th)
-print(f"Thumbnails cached: {len(thumb_cache)}")
 
 # ── Row-height cache ──────────────────────────────────────────────────────────
 row_heights_cache: dict = {}
