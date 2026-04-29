@@ -14,9 +14,10 @@ Controls:
   Q       -> quit and save
 
 Usage:
-  python3 annotate.py --results path/to/results --output path/to/labeled
+  python3 annotate.py --results path/to/results --output path/to/annotated_crops
 """
 
+import os
 import argparse
 import csv
 import json
@@ -26,38 +27,65 @@ import sys
 from collections import defaultdict
 from pathlib import Path
 
+
 import cv2
 import numpy as np
 
 if sys.platform == "win32":
     sys.stdout.reconfigure(encoding="utf-8")
 
+
+# ── Helper to get JSON path for saving progress, based on input folder name
+def get_json_path(input_folder, output_dir):
+    cam_name = os.path.basename(os.fspath(input_folder))
+    return Path(output_dir) / "progress" / f"{cam_name}_result.json"
+
 # ── CLI ───────────────────────────────────────────────────────────────────────
 parser = argparse.ArgumentParser()
 parser.add_argument("--results", type=Path, default=Path("results"))
-parser.add_argument("--output",  type=Path, default=Path("labeled"))
+parser.add_argument("--output",  type=Path, default=Path("annotated_crops"))
 args = parser.parse_args()
 
 RESULTS_DIR   = args.results
-OUTPUT_DIR    = args.output
-PROGRESS_FILE = OUTPUT_DIR / "progress.json"
+OUTPUT_DIR    = args.output.with_name("annotated_crops") if args.output.name == "labeled" else args.output
+ANNOTATION_DIR = OUTPUT_DIR / "progress"
+LABELED_DIR = OUTPUT_DIR / "labeled"
+ANNOTATION_DIR.mkdir(parents=True, exist_ok=True)
 
 for sub in ("bumblebee", "fly", "butterfly", "other", "background", "unsure"):
-    (OUTPUT_DIR / sub).mkdir(parents=True, exist_ok=True)
+    (LABELED_DIR / sub).mkdir(parents=True, exist_ok=True)
 
 # ── Progress ──────────────────────────────────────────────────────────────────
 progress: dict = {}
-if PROGRESS_FILE.exists():
-    progress = json.loads(PROGRESS_FILE.read_text(encoding="utf-8"))
-    print(f"Resuming -- {len(progress)} crops already labeled")
+current_progress_file = None
 
 _save_counter = 0
 def save_progress(force=False):
     global _save_counter
+    if current_progress_file is None:
+        return
     _save_counter += 1
     if force or _save_counter >= 5:
-        PROGRESS_FILE.write_text(json.dumps(progress, indent=2), encoding="utf-8")
+        current_progress_file.write_text(json.dumps(progress, indent=2), encoding="utf-8")
         _save_counter = 0
+
+def load_progress_for_task(task_idx):
+    global progress, current_progress_file, _save_counter
+    if not tasks:
+        return
+    _, _, _, cam_name, _ = tasks[task_idx]
+    progress_file = Path(get_json_path(cam_name, OUTPUT_DIR))
+    if current_progress_file == progress_file:
+        return
+    if current_progress_file is not None:
+        save_progress(force=True)
+    current_progress_file = progress_file
+    if current_progress_file.exists():
+        progress = json.loads(current_progress_file.read_text(encoding="utf-8"))
+        print(f"Resuming -- {len(progress)} crops already labeled")
+    else:
+        progress = {}
+    _save_counter = 0
 
 # ── Collect tasks ─────────────────────────────────────────────────────────────
 tasks = []
@@ -114,6 +142,8 @@ for cam_dir in sorted(RESULTS_DIR.iterdir()):
 total_images = len(tasks)
 total_crops  = sum(len(c) for _, _, c, _, _ in tasks)
 all_crop_fns = {cf for _, _, crops, _, _ in tasks for _, cf in crops}
+if tasks:
+    load_progress_for_task(0)
 done_crops   = sum(1 for fn in progress if fn in all_crop_fns)
 
 print(f"Images: {total_images} | Total crops: {total_crops} | "
@@ -286,12 +316,10 @@ state = {
     "overlay":     None,   # None  or  numpy array to draw fullscreen over canvas
 }
 click_buf = [None]
+trackbar_buf = [None]
 
 def on_trackbar(val):
-    state["task_idx"]     = val
-    state["selected_idx"] = None
-    state["scroll_row"]   = 0
-    state["overlay"]      = None
+    trackbar_buf[0] = val
 
 def get_total_rows():
     return len(get_row_heights(state["task_idx"]))
@@ -433,12 +461,12 @@ def crop_rect(idx: int):
 # ── Label I/O ─────────────────────────────────────────────────────────────────
 def apply_label(crop_fn, crop_path, label):
     if crop_fn in progress:
-        old_dest = OUTPUT_DIR / progress[crop_fn] / crop_fn
+        old_dest = LABELED_DIR / progress[crop_fn] / crop_fn
         if old_dest.exists():
             old_dest.unlink()
-    dest = OUTPUT_DIR / label / crop_fn
+    dest = LABELED_DIR / label / crop_fn
     if dest.exists():
-        dest = OUTPUT_DIR / label / f"{state['task_idx']}_{crop_fn}"
+        dest = LABELED_DIR / label / f"{state['task_idx']}_{crop_fn}"
     shutil.copy2(crop_path, dest)
     progress[crop_fn] = label
     save_progress()
@@ -591,8 +619,12 @@ cv2.setMouseCallback(WINDOW, on_mouse)
 
 while True:
     tb_val = cv2.getTrackbarPos("Image", WINDOW)
+    if trackbar_buf[0] is not None:
+        tb_val = trackbar_buf[0]
+        trackbar_buf[0] = None
     if tb_val != state["task_idx"] and click_buf[0] is None:
-        state.update({"task_idx": tb_val, "selected_idx": None, "scroll_row": 0})
+        load_progress_for_task(tb_val)
+        state.update({"task_idx": tb_val, "selected_idx": None, "scroll_row": 0, "overlay": None})
 
     if click_buf[0] is not None:
         val        = click_buf[0]
@@ -638,7 +670,7 @@ while True:
         removed = 0
         for _, crop_fn in crops:
             if crop_fn in progress:
-                old = OUTPUT_DIR / progress[crop_fn] / crop_fn
+                old = LABELED_DIR / progress[crop_fn] / crop_fn
                 if old.exists():
                     old.unlink()
                 del progress[crop_fn]
@@ -677,11 +709,13 @@ while True:
 
     elif key in (ord("d"), ord("D")) or key_raw in (83, 65363, 2555904, 63235):
         new = min(state["task_idx"] + 1, total_images - 1)
+        load_progress_for_task(new)
         state.update({"task_idx": new, "selected_idx": None, "scroll_row": 0})
         cv2.setTrackbarPos("Image", WINDOW, new)
 
     elif key in (ord("a"), ord("A")) or key_raw in (81, 65361, 2424832, 63234):
         new = max(state["task_idx"] - 1, 0)
+        load_progress_for_task(new)
         state.update({"task_idx": new, "selected_idx": None, "scroll_row": 0})
         cv2.setTrackbarPos("Image", WINDOW, new)
 
@@ -695,12 +729,12 @@ while True:
 cv2.destroyAllWindows()
 save_progress()
 
-bb_n  = len(list((OUTPUT_DIR / "bumblebee").glob("*.jpg")))
-fly_n = len(list((OUTPUT_DIR / "fly").glob("*.jpg")))
-but_n = len(list((OUTPUT_DIR / "butterfly").glob("*.jpg")))
-oth_n = len(list((OUTPUT_DIR / "other").glob("*.jpg")))
-bg_n  = len(list((OUTPUT_DIR / "background").glob("*.jpg")))
-un_n  = len(list((OUTPUT_DIR / "unsure").glob("*.jpg")))
+bb_n  = len(list((LABELED_DIR / "bumblebee").glob("*.jpg")))
+fly_n = len(list((LABELED_DIR / "fly").glob("*.jpg")))
+but_n = len(list((LABELED_DIR / "butterfly").glob("*.jpg")))
+oth_n = len(list((LABELED_DIR / "other").glob("*.jpg")))
+bg_n  = len(list((LABELED_DIR / "background").glob("*.jpg")))
+un_n  = len(list((LABELED_DIR / "unsure").glob("*.jpg")))
 total_insect = bb_n + fly_n + but_n + oth_n
 print(f"\nDone!")
 print(f"  insects: {total_insect}  (BB={bb_n}  fly={fly_n}  but={but_n}  other={oth_n})")
