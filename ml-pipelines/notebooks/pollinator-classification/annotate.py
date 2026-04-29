@@ -98,6 +98,7 @@ def load_progress_for_task(task_idx):
     global progress, current_progress_file, _save_counter
     if not tasks:
         return
+    task_idx = max(0, min(int(task_idx), len(tasks) - 1))
     _, _, _, cam_name, _ = tasks[task_idx]
     progress_file = Path(get_json_path(cam_name, OUTPUT_DIR))
     if current_progress_file == progress_file:
@@ -167,6 +168,10 @@ for cam_dir in sorted(RESULTS_DIR.iterdir()):
 total_images = len(tasks)
 total_crops  = sum(len(c) for _, _, c, _, _ in tasks)
 all_crop_fns = {cf for _, _, crops, _, _ in tasks for _, cf in crops}
+
+def clamp_task_idx(idx):
+    return max(0, min(int(idx), total_images - 1))
+
 if tasks:
     load_progress_for_task(0)
 done_crops   = sum(1 for fn in progress if fn in all_crop_fns)
@@ -248,6 +253,7 @@ print(f"Thumbnails cached: {len(thumb_cache)}")
 row_heights_cache: dict = {}
 
 def get_row_heights(task_idx: int) -> list:
+    task_idx = clamp_task_idx(task_idx)
     if task_idx in row_heights_cache:
         return row_heights_cache[task_idx]
     _, _, crops, _, _ = tasks[task_idx]
@@ -386,7 +392,7 @@ click_buf = [None]
 trackbar_buf = [None]
 
 def on_trackbar(val):
-    trackbar_buf[0] = val
+    trackbar_buf[0] = clamp_task_idx(val)
 
 def get_total_rows():
     return len(get_row_heights(state["task_idx"]))
@@ -394,6 +400,7 @@ def get_total_rows():
 # ── Overlay builders (called from main loop, not callbacks) ───────────────────
 def build_debug_overlay(task_idx: int):
     """Build a full-window image of the debug photo with bbox overlay."""
+    task_idx = clamp_task_idx(task_idx)
     debug_path, _, crops, _, bbox_map = tasks[task_idx]
     if debug_path is None or not Path(debug_path).exists():
         return None
@@ -421,6 +428,7 @@ def build_debug_overlay(task_idx: int):
     return canvas
 
 def hit_debug_overlay_bbox(task_idx: int, x: int, y: int):
+    task_idx = clamp_task_idx(task_idx)
     debug_path, _, crops, _, bbox_map = tasks[task_idx]
     if debug_path is None or not Path(debug_path).exists():
         return None
@@ -588,7 +596,8 @@ def render():
     if state["overlay"] is not None:
         return state["overlay"]
 
-    idx   = state["task_idx"]
+    idx   = clamp_task_idx(state["task_idx"])
+    state["task_idx"] = idx
     sel   = state["selected_idx"]
     debug_path, img_name, crops, cam_name, bbox_map = tasks[idx]
     crops_labels = {cf: progress.get(cf) for _, cf in crops}
@@ -766,8 +775,9 @@ cv2.setMouseCallback(WINDOW, on_mouse)
 
 while True:
     tb_val = cv2.getTrackbarPos("Image", WINDOW)
+    tb_val = clamp_task_idx(tb_val)
     if trackbar_buf[0] is not None:
-        tb_val = trackbar_buf[0]
+        tb_val = clamp_task_idx(trackbar_buf[0])
         trackbar_buf[0] = None
     if tb_val != state["task_idx"] and click_buf[0] is None:
         load_progress_for_task(tb_val)
@@ -801,21 +811,27 @@ while True:
 
     cv2.imshow(WINDOW, render())
     key_raw = cv2.waitKeyEx(30)
-    key     = key_raw & 0xFF
+    ascii_key = key_raw if 0 <= key_raw <= 255 else None
 
-    prev_keys = (ord("a"), ord("A"), 81, 65361, 2424832, 63234)
-    next_keys = (ord("d"), ord("D"), 83, 65363, 2555904, 63235)
+    prev_keys = (65361, 2424832, 63234)
+    next_keys = (65363, 2555904, 63235)
+    up_keys   = (65362, 2490368, 63232)
+    down_keys = (65364, 2621440, 63233)
 
     # Any key press dismisses overlay, except debug overlay navigation
     if state["overlay"] is not None:
         if key_raw != -1:
-            if state["overlay_kind"] == "debug" and (key in (ord("d"), ord("D")) or key_raw in next_keys):
+            if state["overlay_kind"] == "debug" and (
+                ascii_key in (ord("d"), ord("D")) or key_raw in next_keys
+            ):
                 new = min(state["task_idx"] + 1, total_images - 1)
                 load_progress_for_task(new)
                 state.update({"task_idx": new, "selected_idx": None, "scroll_row": 0,
                               "overlay": build_debug_overlay(new), "overlay_kind": "debug"})
                 cv2.setTrackbarPos("Image", WINDOW, new)
-            elif state["overlay_kind"] == "debug" and (key in (ord("a"), ord("A")) or key_raw in prev_keys):
+            elif state["overlay_kind"] == "debug" and (
+                ascii_key in (ord("a"), ord("A")) or key_raw in prev_keys
+            ):
                 new = max(state["task_idx"] - 1, 0)
                 load_progress_for_task(new)
                 state.update({"task_idx": new, "selected_idx": None, "scroll_row": 0,
@@ -826,7 +842,7 @@ while True:
                 state["overlay_kind"] = None
         continue
 
-    if key in (ord("p"), ord("P")):
+    if ascii_key in (ord("p"), ord("P")):
         sel = state["selected_idx"]
         if sel is not None:
             _, _, crops, _, _ = tasks[state["task_idx"]]
@@ -834,7 +850,7 @@ while True:
                 state["overlay"] = build_preview_overlay(*crops[sel])
                 state["overlay_kind"] = "preview"
 
-    elif key in (ord("c"), ord("C")):
+    elif ascii_key in (ord("c"), ord("C")):
         _, _, crops, _, _ = tasks[state["task_idx"]]
         removed = 0
         for _, crop_fn in crops:
@@ -849,11 +865,11 @@ while True:
             print(f"Cleared {removed} crops in current image")
         state["selected_idx"] = None
 
-    elif key in (ord("q"), ord("Q")):
+    elif ascii_key in (ord("q"), ord("Q")):
         save_progress(force=True)
         break
 
-    elif key in (
+    elif ascii_key in (
         ord("b"), ord("B"),
         ord("1"), ord("2"), ord("3"), ord("4"),
         ord("u"), ord("U"),
@@ -865,7 +881,7 @@ while True:
             ord("3"): "butterfly",
             ord("4"): "other",
             ord("u"): "unsure",    ord("U"): "unsure",
-        }[key]
+        }[ascii_key]
         _, _, crops, _, _ = tasks[state["task_idx"]]
         sel = state["selected_idx"]
         if sel is not None and sel < len(crops):
@@ -876,22 +892,22 @@ while True:
                 if crop_fn not in progress:
                     apply_label(crop_fn, crop_path, label)
 
-    elif key in (ord("d"), ord("D")) or key_raw in next_keys:
+    elif ascii_key in (ord("d"), ord("D")) or key_raw in next_keys:
         new = min(state["task_idx"] + 1, total_images - 1)
         load_progress_for_task(new)
         state.update({"task_idx": new, "selected_idx": None, "scroll_row": 0})
         cv2.setTrackbarPos("Image", WINDOW, new)
 
-    elif key in (ord("a"), ord("A")) or key_raw in prev_keys:
+    elif ascii_key in (ord("a"), ord("A")) or key_raw in prev_keys:
         new = max(state["task_idx"] - 1, 0)
         load_progress_for_task(new)
         state.update({"task_idx": new, "selected_idx": None, "scroll_row": 0})
         cv2.setTrackbarPos("Image", WINDOW, new)
 
-    elif key in (ord("w"), ord("W")) or key_raw in (82, 65362, 2490368, 63232):
+    elif ascii_key in (ord("w"), ord("W")) or key_raw in up_keys:
         state["scroll_row"] = max(0, state["scroll_row"] - 1)
 
-    elif key in (ord("x"), ord("X")) or key_raw in (84, 65364, 2621440, 63233):
+    elif ascii_key in (ord("x"), ord("X")) or key_raw in down_keys:
         max_scroll = max(0, get_total_rows() - ROWS_VISIBLE)
         state["scroll_row"] = min(state["scroll_row"] + 1, max_scroll)
 
