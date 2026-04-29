@@ -240,30 +240,30 @@ def get_row_heights(task_idx: int) -> list:
     return heights
 
 # ── ROI offset helper ─────────────────────────────────────────────────────────
-def read_roi_offset(debug_path) -> tuple:
-    """Return (ox, oy) from the _4_offset.json saved alongside the debug image."""
+def read_debug_transform(debug_path) -> tuple:
+    """Return (ox, oy, storage_scale) saved alongside the debug image."""
     if debug_path is None:
-        return 0, 0
+        return 0, 0, 1.0
     stem = Path(str(debug_path)).stem
     if "_4_final_saved_crops" not in stem:
-        return 0, 0
+        return 0, 0, 1.0
     offset_path = Path(str(debug_path)).parent / (
         stem.replace("_4_final_saved_crops", "_4_offset") + ".json"
     )
     if not offset_path.exists():
-        return 0, 0
+        return 0, 0, 1.0
     try:
         d = json.loads(offset_path.read_text(encoding="utf-8"))
-        return int(d.get("ox", 0)), int(d.get("oy", 0))
+        return int(d.get("ox", 0)), int(d.get("oy", 0)), float(d.get("scale", 1.0))
     except Exception:
-        return 0, 0
+        return 0, 0, 1.0
 
 # ── Debug-image cache ─────────────────────────────────────────────────────────
-# str(path) -> (base_bgr_canvas, scale, ox, oy)
+# str(path) -> (base_bgr_canvas, coord_scale, ox, oy)
 debug_cache: dict = {}
 
 def load_debug_base(path):
-    """Return (canvas_copy, scale, ox, oy)."""
+    """Return (canvas_copy, coord_scale, ox, oy)."""
     tw, th = DEBUG_W, WIN_H
     if path is None or not Path(path).exists():
         blank = np.zeros((th, tw, 3), dtype=np.uint8)
@@ -277,15 +277,16 @@ def load_debug_base(path):
             debug_cache[key] = (np.zeros((th, tw, 3), dtype=np.uint8), 1.0, 0, 0)
         else:
             h, w   = img.shape[:2]
-            scale  = min(tw / w, th / h)
-            nw, nh = int(w * scale), int(h * scale)
+            view_scale = min(tw / w, th / h)
+            nw, nh = int(w * view_scale), int(h * view_scale)
             scaled = cv2.resize(img, (nw, nh), interpolation=cv2.INTER_AREA)
             canvas = np.zeros((th, tw, 3), dtype=np.uint8)
             canvas[:nh, :nw] = scaled
-            ox, oy = read_roi_offset(path)
-            debug_cache[key] = (canvas, scale, ox, oy)
-    base, scale, ox, oy = debug_cache[key]
-    return base.copy(), scale, ox, oy
+            ox, oy, storage_scale = read_debug_transform(path)
+            coord_scale = view_scale * storage_scale
+            debug_cache[key] = (canvas, coord_scale, ox, oy)
+    base, coord_scale, ox, oy = debug_cache[key]
+    return base.copy(), coord_scale, ox, oy
 
 # ── Bbox overlay helper ───────────────────────────────────────────────────────
 def draw_bbox_overlay(img, crops, bbox_map, crops_labels, sel, scale, ox, oy,
@@ -355,10 +356,11 @@ def build_debug_overlay(task_idx: int):
     oh, ow = img.shape[:2]
     scale  = min(WIN_W / ow, WIN_H / oh, 2.0)
     shown  = cv2.resize(img, (int(ow * scale), int(oh * scale)), interpolation=cv2.INTER_AREA)
-    ox, oy = read_roi_offset(debug_path)
+    ox, oy, storage_scale = read_debug_transform(debug_path)
+    coord_scale = scale * storage_scale
     crops_labels = {cf: progress.get(cf) for _, cf in crops}
     draw_bbox_overlay(shown, crops, bbox_map, crops_labels,
-                      state["selected_idx"], scale, ox, oy,
+                      state["selected_idx"], coord_scale, ox, oy,
                       num_fs=0.28, show_all_numbers=True)
     sh, sw = shown.shape[:2]
     # Pad to full window size
@@ -385,7 +387,8 @@ def hit_debug_overlay_bbox(task_idx: int, x: int, y: int):
     cy = (WIN_H - sh) // 2
     if not (cx <= x <= cx + sw and cy <= y <= cy + sh):
         return None
-    ox, oy = read_roi_offset(debug_path)
+    ox, oy, storage_scale = read_debug_transform(debug_path)
+    coord_scale = scale * storage_scale
     PAD_HIT = 8
     best_i = None
     best_area = None
@@ -393,10 +396,10 @@ def hit_debug_overlay_bbox(task_idx: int, x: int, y: int):
         if crop_fn not in bbox_map:
             continue
         bx, by, bw, bh = bbox_map[crop_fn]
-        dx = cx + int((bx - ox) * scale)
-        dy = cy + int((by - oy) * scale)
-        dw = int(bw * scale)
-        dh = int(bh * scale)
+        dx = cx + int((bx - ox) * coord_scale)
+        dy = cy + int((by - oy) * coord_scale)
+        dw = int(bw * coord_scale)
+        dh = int(bh * coord_scale)
         if (dx - PAD_HIT <= x <= dx + dw + PAD_HIT and
                 dy - PAD_HIT <= y <= dy + dh + PAD_HIT):
             area = max(1, dw * dh)
