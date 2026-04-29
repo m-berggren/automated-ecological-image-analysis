@@ -10,7 +10,8 @@ __pycache__/
 .venv/
 
 #images and labels
-data/
+data/seed/images/
+data/seed/labels/
 
 # YOLO outputs
 runs/
