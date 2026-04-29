@@ -291,8 +291,30 @@ def load_debug_base(path):
 # ── Bbox overlay helper ───────────────────────────────────────────────────────
 def draw_bbox_overlay(img, crops, bbox_map, crops_labels, sel, scale, ox, oy,
                       num_fs=0.22, show_all_numbers=False):
-    """Draw bbox overlay only for the selected crop."""
+    """Draw selected bbox plus labels already assigned."""
     SEL_COLOR = (180, 0, 255)   # bright magenta
+
+    for i, (_, crop_fn) in enumerate(crops):
+        label = crops_labels.get(crop_fn)
+        if label is None or crop_fn not in bbox_map:
+            continue
+        bx, by, bw, bh = bbox_map[crop_fn]
+        dx = int((bx - ox) * scale)
+        dy = int((by - oy) * scale)
+        dw = int(bw * scale)
+        dh = int(bh * scale)
+        color = get_color(label)
+        if label != "background":
+            cv2.rectangle(img, (dx, dy), (dx + dw, dy + dh), color, 2)
+
+        badge = get_badge(label)
+        fs = max(0.18, num_fs - 0.02) if label == "background" else max(0.24, num_fs + 0.05)
+        (tw_b, th_b), _ = cv2.getTextSize(badge, cv2.FONT_HERSHEY_SIMPLEX, fs, 1)
+        tx = max(1, dx)
+        ty = max(th_b + 4, dy - 4 if label != "background" else dy + th_b + 3)
+        cv2.rectangle(img, (tx - 2, ty - th_b - 3), (tx + tw_b + 4, ty + 3), color, -1)
+        cv2.putText(img, badge, (tx, ty), cv2.FONT_HERSHEY_SIMPLEX, fs, (0, 0, 0), 1)
+
     if show_all_numbers:
         for i, (_, crop_fn) in enumerate(crops):
             if crop_fn not in bbox_map:
@@ -560,7 +582,7 @@ def render():
     cv2.rectangle(canvas, (0, 0), (WIN_W, HEADER_H - 2), (25, 25, 25), -1)
     done_this = sum(1 for _, cf in crops if cf in progress)
     g_done    = sum(1 for fn in progress if fn in all_crop_fns)
-    more_txt  = "  [v more below]" if total_rows > state["scroll_row"] + ROWS_VISIBLE else ""
+    more_txt  = "  [MORE CROPS BELOW]" if total_rows > state["scroll_row"] + ROWS_VISIBLE else ""
     cv2.putText(canvas,
                 f"[{idx+1}/{total_images}]  {cam_name} / {Path(img_name).name}"
                 f"  ({done_this}/{len(crops)} labeled){more_txt}",
@@ -579,6 +601,19 @@ def render():
                 "  |  double-click crop = large preview",
                 (DEBUG_W + 10, WIN_H - 12),
                 cv2.FONT_HERSHEY_SIMPLEX, 0.40, (130, 130, 130), 1)
+    if total_rows > state["scroll_row"] + ROWS_VISIBLE:
+        msg = "v v v   MORE CROPS BELOW   v v v"
+        fs = 0.75
+        (tw_m, th_m), _ = cv2.getTextSize(msg, cv2.FONT_HERSHEY_SIMPLEX, fs, 2)
+        mx1 = DEBUG_W + 12
+        mx2 = WIN_W - 24
+        my1 = WIN_H - FOOTER_H + 4
+        my2 = WIN_H - 4
+        cv2.rectangle(canvas, (mx1, my1), (mx2, my2), (0, 180, 255), -1)
+        cv2.rectangle(canvas, (mx1, my1), (mx2, my2), (0, 0, 0), 2)
+        tx = mx1 + max(10, (mx2 - mx1 - tw_m) // 2)
+        cv2.putText(canvas, msg, (tx, my1 + th_m + 7),
+                    cv2.FONT_HERSHEY_SIMPLEX, fs, (0, 0, 0), 2)
 
     # ── Scrollbar ──────────────────────────────────────────────────────────────
     if total_rows > ROWS_VISIBLE:
