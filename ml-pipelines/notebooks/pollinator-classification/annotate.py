@@ -31,6 +31,31 @@ from pathlib import Path
 import cv2
 import numpy as np
 
+UI_FONT_SCALE = 1.20
+UI_TEXT_LINE_TYPE = cv2.LINE_8
+_cv2_put_text = cv2.putText
+_cv2_get_text_size = cv2.getTextSize
+
+def _ui_text_thickness(thickness):
+    return max(1, int(round(thickness)))
+
+def _ui_put_text(img, text, org, fontFace, fontScale, color,
+                 thickness=1, lineType=None, bottomLeftOrigin=False):
+    lineType = UI_TEXT_LINE_TYPE if lineType is None else lineType
+    return _cv2_put_text(
+        img, text, org, fontFace, fontScale * UI_FONT_SCALE, color,
+        _ui_text_thickness(thickness), lineType, bottomLeftOrigin
+    )
+
+def _ui_get_text_size(text, fontFace, fontScale, thickness):
+    return _cv2_get_text_size(
+        text, fontFace, fontScale * UI_FONT_SCALE,
+        _ui_text_thickness(thickness)
+    )
+
+cv2.putText = _ui_put_text
+cv2.getTextSize = _ui_get_text_size
+
 if sys.platform == "win32":
     sys.stdout.reconfigure(encoding="utf-8")
 
@@ -164,9 +189,9 @@ PANEL_W      = WIN_W - DEBUG_W
 PAD          = 8
 CROP_COLS    = 3
 CROP_SIZE    = max(1, (PANEL_W - PAD * CROP_COLS - 15) // CROP_COLS)
-CROP_META_H  = 45
-HEADER_H     = 65
-FOOTER_H     = 40
+CROP_META_H  = 66
+HEADER_H     = 86
+FOOTER_H     = 58
 ROWS_VISIBLE = max(1, (WIN_H - HEADER_H - FOOTER_H - PAD) // (CROP_SIZE + PAD + CROP_META_H))
 
 # ── Colours & badges ──────────────────────────────────────────────────────────
@@ -181,13 +206,13 @@ COLORS = {
     None:         (60,   60,  60),
 }
 BADGES = {
-    "bumblebee":  "BB",
-    "fly":        "FLY",
-    "butterfly":  "BUT",
-    "other":      "OTH",
-    "insect":     "INS",
+    "bumblebee":  "bumblebee",
+    "fly":        "fly",
+    "butterfly":  "butterfly",
+    "other":      "other",
+    "insect":     "insect",
     "background": "BG",
-    "unsure":     "?",
+    "unsure":     "unsure",
     None:         "",
 }
 
@@ -587,10 +612,17 @@ def render():
                 f"[{idx+1}/{total_images}]  {cam_name} / {Path(img_name).name}"
                 f"  ({done_this}/{len(crops)} labeled){more_txt}",
                 (10, 24), cv2.FONT_HERSHEY_SIMPLEX, 0.55, (220, 220, 220), 1)
-    cv2.putText(canvas,
-                "B=bg  1=BB  2=fly  3=but  4=other  U=unsure  C=clear  P=preview"
-                "  |  A=prev  D=next  |  W/X or wheel=scroll  |  Q=quit",
-                (10, 50), cv2.FONT_HERSHEY_SIMPLEX, 0.40, (160, 160, 160), 1)
+    instruction = (
+        "B=background | 1=bumblebee | 2=fly | 3=butterfly | 4=other | U=unsure | "
+        "C=clear | P=preview | A/D=previous/next | W/X or mouse wheel=scroll crops | Q=quit"
+    )
+    instr_fs = 0.44
+    while cv2.getTextSize(instruction, cv2.FONT_HERSHEY_SIMPLEX, instr_fs, 1)[0][0] > WIN_W - 20:
+        instr_fs -= 0.02
+        if instr_fs <= 0.36:
+            break
+    cv2.putText(canvas, instruction, (10, 62),
+                cv2.FONT_HERSHEY_SIMPLEX, instr_fs, (180, 180, 180), 1)
 
     # ── Footer ─────────────────────────────────────────────────────────────────
     cv2.rectangle(canvas, (DEBUG_W, WIN_H - FOOTER_H), (WIN_W, WIN_H), (20, 20, 20), -1)
@@ -672,10 +704,13 @@ def render():
 
         # Label badge
         badge = get_badge(label)
-        bw_px = max(22, len(badge) * 8 + 8)
-        cv2.rectangle(canvas, (tx, ty + th_h), (tx + bw_px, ty + th_h + 17), color, -1)
-        cv2.putText(canvas, badge, (tx + 4, ty + th_h + 13),
-                    cv2.FONT_HERSHEY_SIMPLEX, 0.48, (0, 0, 0), 1)
+        badge_fs = 0.48
+        (bw_t, bh_t), _ = cv2.getTextSize(badge, cv2.FONT_HERSHEY_SIMPLEX, badge_fs, 1)
+        badge_h = bh_t + 8
+        bw_px = max(28, bw_t + 10)
+        cv2.rectangle(canvas, (tx, ty + th_h), (tx + bw_px, ty + th_h + badge_h), color, -1)
+        cv2.putText(canvas, badge, (tx + 5, ty + th_h + bh_t + 5),
+                    cv2.FONT_HERSHEY_SIMPLEX, badge_fs, (0, 0, 0), 1)
 
         # Index number badge (top-left)
         num_txt = str(i)
@@ -688,16 +723,25 @@ def render():
                     cv2.FONT_HERSHEY_SIMPLEX, fs_n, nfg, 1)
 
         # Size text
+        meta_y = ty + th_h + badge_h
         if orig_w > 0:
-            cv2.putText(canvas, f"{orig_w}x{orig_h}", (tx, ty + th_h + 30),
-                        cv2.FONT_HERSHEY_SIMPLEX, 0.30, (140, 180, 140), 1)
+            size_text = f"{orig_w}x{orig_h}"
+            size_fs = 0.30
+            (_, size_h), _ = cv2.getTextSize(size_text, cv2.FONT_HERSHEY_SIMPLEX, size_fs, 1)
+            size_y = meta_y + size_h + 7
+            cv2.putText(canvas, size_text, (tx, size_y),
+                        cv2.FONT_HERSHEY_SIMPLEX, size_fs, (140, 180, 140), 1)
+        else:
+            size_y = meta_y + 18
 
         # Filename
         m      = _re.search(r"_crop_(\d+)", crop_fn)
         prefix = f"#{m.group(1)} " if m else ""
         short  = (".." + crop_fn[-12:]) if len(crop_fn) > 14 else crop_fn
-        cv2.putText(canvas, prefix + short, (tx, ty + th_h + 42),
-                    cv2.FONT_HERSHEY_SIMPLEX, 0.28, (110, 110, 110), 1)
+        file_fs = 0.28
+        (_, file_h), _ = cv2.getTextSize(prefix + short, cv2.FONT_HERSHEY_SIMPLEX, file_fs, 1)
+        cv2.putText(canvas, prefix + short, (tx, size_y + file_h + 8),
+                    cv2.FONT_HERSHEY_SIMPLEX, file_fs, (110, 110, 110), 1)
 
         # Selection glow
         if i == sel:
