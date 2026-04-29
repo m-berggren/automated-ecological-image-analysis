@@ -289,8 +289,25 @@ def load_debug_base(path):
 
 # ── Bbox overlay helper ───────────────────────────────────────────────────────
 def draw_bbox_overlay(img, crops, bbox_map, crops_labels, sel, scale, ox, oy,
-                      num_fs=0.22):
+                      num_fs=0.22, show_all_numbers=False):
     """Draw bbox overlay only for the selected crop."""
+    SEL_COLOR = (180, 0, 255)   # bright magenta
+    if show_all_numbers:
+        for i, (_, crop_fn) in enumerate(crops):
+            if crop_fn not in bbox_map:
+                continue
+            bx, by, bw, bh = bbox_map[crop_fn]
+            dx = int((bx - ox) * scale)
+            dy = int((by - oy) * scale)
+            num_txt = str(i)
+            (tw_n, th_n), _ = cv2.getTextSize(num_txt, cv2.FONT_HERSHEY_SIMPLEX, num_fs, 1)
+            nx = max(1, dx)
+            ny = max(th_n + 2, dy - 3)
+            color = SEL_COLOR if i == sel else (245, 245, 245)
+            bg = (35, 35, 35)
+            cv2.rectangle(img, (nx - 1, ny - th_n - 2), (nx + tw_n + 2, ny + 2), bg, -1)
+            cv2.putText(img, num_txt, (nx, ny), cv2.FONT_HERSHEY_SIMPLEX, num_fs, color, 1)
+
     if sel is None or sel >= len(crops):
         return
     crop_fn = crops[sel][1]
@@ -301,13 +318,13 @@ def draw_bbox_overlay(img, crops, bbox_map, crops_labels, sel, scale, ox, oy,
     dy = int((by - oy) * scale)
     dw = int(bw * scale)
     dh = int(bh * scale)
-    SEL_COLOR = (180, 0, 255)   # bright magenta
     cv2.rectangle(img, (dx, dy), (dx + dw, dy + dh), SEL_COLOR, 2)
-    num_txt = str(sel)
-    (tw_n, th_n), _ = cv2.getTextSize(num_txt, cv2.FONT_HERSHEY_SIMPLEX, num_fs, 1)
-    nx, ny = dx + 1, dy + th_n + 1
-    cv2.rectangle(img, (nx - 1, ny - th_n - 1), (nx + tw_n + 1, ny + 1), SEL_COLOR, -1)
-    cv2.putText(img, num_txt, (nx, ny), cv2.FONT_HERSHEY_SIMPLEX, num_fs, (255, 255, 255), 1)
+    if not show_all_numbers:
+        num_txt = str(sel)
+        (tw_n, th_n), _ = cv2.getTextSize(num_txt, cv2.FONT_HERSHEY_SIMPLEX, num_fs, 1)
+        nx, ny = dx + 1, dy + th_n + 1
+        cv2.rectangle(img, (nx - 1, ny - th_n - 1), (nx + tw_n + 1, ny + 1), SEL_COLOR, -1)
+        cv2.putText(img, num_txt, (nx, ny), cv2.FONT_HERSHEY_SIMPLEX, num_fs, (255, 255, 255), 1)
 
 # ── State ─────────────────────────────────────────────────────────────────────
 state = {
@@ -341,17 +358,52 @@ def build_debug_overlay(task_idx: int):
     ox, oy = read_roi_offset(debug_path)
     crops_labels = {cf: progress.get(cf) for _, cf in crops}
     draw_bbox_overlay(shown, crops, bbox_map, crops_labels,
-                      state["selected_idx"], scale, ox, oy, num_fs=0.32)
+                      state["selected_idx"], scale, ox, oy,
+                      num_fs=0.28, show_all_numbers=True)
     sh, sw = shown.shape[:2]
     # Pad to full window size
     canvas = np.zeros((WIN_H, WIN_W, 3), dtype=np.uint8)
     cy = (WIN_H - sh) // 2
     cx = (WIN_W - sw) // 2
     canvas[cy:cy+sh, cx:cx+sw] = shown
-    cv2.putText(canvas, "A/D or arrows = prev/next  |  click or other key to close",
-                (WIN_W // 2 - 240, WIN_H - 10),
+    cv2.putText(canvas, "click bbox = select  |  A/D or arrows = prev/next  |  other click/key = close",
+                (WIN_W // 2 - 330, WIN_H - 10),
                 cv2.FONT_HERSHEY_SIMPLEX, 0.5, (160, 160, 160), 1)
     return canvas
+
+def hit_debug_overlay_bbox(task_idx: int, x: int, y: int):
+    debug_path, _, crops, _, bbox_map = tasks[task_idx]
+    if debug_path is None or not Path(debug_path).exists():
+        return None
+    img = cv2.imread(str(debug_path))
+    if img is None:
+        return None
+    oh, ow = img.shape[:2]
+    scale = min(WIN_W / ow, WIN_H / oh, 2.0)
+    sw, sh = int(ow * scale), int(oh * scale)
+    cx = (WIN_W - sw) // 2
+    cy = (WIN_H - sh) // 2
+    if not (cx <= x <= cx + sw and cy <= y <= cy + sh):
+        return None
+    ox, oy = read_roi_offset(debug_path)
+    PAD_HIT = 8
+    best_i = None
+    best_area = None
+    for i, (_, crop_fn) in enumerate(crops):
+        if crop_fn not in bbox_map:
+            continue
+        bx, by, bw, bh = bbox_map[crop_fn]
+        dx = cx + int((bx - ox) * scale)
+        dy = cy + int((by - oy) * scale)
+        dw = int(bw * scale)
+        dh = int(bh * scale)
+        if (dx - PAD_HIT <= x <= dx + dw + PAD_HIT and
+                dy - PAD_HIT <= y <= dy + dh + PAD_HIT):
+            area = max(1, dw * dh)
+            if best_area is None or area < best_area:
+                best_i = i
+                best_area = area
+    return best_i
 
 def build_preview_overlay(crop_path, crop_fn):
     """Build a full-window preview of a single crop."""
@@ -377,6 +429,12 @@ def on_mouse(event, x, y, flags, param):
     # Any click dismisses overlay
     if state["overlay"] is not None:
         if event == cv2.EVENT_LBUTTONDOWN:
+            if state["overlay_kind"] == "debug":
+                hit_i = hit_debug_overlay_bbox(state["task_idx"], x, y)
+                if hit_i is not None:
+                    state["selected_idx"] = hit_i
+                    max_scroll = max(0, get_total_rows() - ROWS_VISIBLE)
+                    state["scroll_row"] = max(0, min(hit_i // CROP_COLS, max_scroll))
             state["overlay"] = None
             state["overlay_kind"] = None
         return
@@ -570,8 +628,9 @@ def render():
 
         label  = crops_labels.get(crop_fn)
         color  = get_color(label)
-        border = 4 if i == sel else 2
-        cv2.rectangle(canvas, (tx - 2, ty - 2), (tx + th_w + 2, ty + th_h + 2), color, border)
+        border = 6 if i == sel else 2
+        border_color = (180, 0, 255) if i == sel else color
+        cv2.rectangle(canvas, (tx - 2, ty - 2), (tx + th_w + 2, ty + th_h + 2), border_color, border)
 
         # Label badge
         badge = get_badge(label)
