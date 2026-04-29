@@ -148,20 +148,34 @@ for cam_dir in sorted(RESULTS_DIR.iterdir()):
             except (ValueError, TypeError):
                 pass
 
+    # Index debug_dir once: bucket files by the "{cam_prefix}__{img_stem}"
+    # prefix so each image becomes one dict lookup instead of up to 5 globs.
+    cam_prefix    = cam_dir.name
+    debug_by_stem = defaultdict(list)
+    for entry in os.scandir(debug_dir):
+        if not entry.is_file():
+            continue
+        name = entry.name
+        suffix_at = name.find("_", len(cam_prefix) + 2)  # past "{cam_prefix}__"
+        stem = name[:suffix_at] if suffix_at != -1 else Path(name).stem
+        debug_by_stem[stem].append(Path(entry.path))
+
+    def pick_debug(candidates):
+        if not candidates:
+            return None
+        for tag in ("_4_final_saved_crops", "_3_contours", "_1_original"):
+            for p in candidates:
+                if tag in p.name:
+                    return p
+        for p in sorted(candidates):
+            if "_2_diff" not in p.name:
+                return p
+        return candidates[0]
+
     for img_name, crops in sorted(image_crops.items()):
-        img_stem   = Path(img_name).stem
-        cam_prefix = cam_dir.name
-        stem       = f"{cam_prefix}__{img_stem}"
-        debug_img = (
-            next(debug_dir.glob(f"{stem}*_4_final_saved_crops*"), None)
-            or next(debug_dir.glob(f"{stem}*_3_contours*"), None)
-            or next(debug_dir.glob(f"{stem}*_1_original*"), None)
-            or next(
-                (p for p in sorted(debug_dir.glob(f"{stem}*")) if "_2_diff" not in p.name),
-                None,
-            )
-            or next(debug_dir.glob(f"{stem}*"), None)
-        )
+        img_stem  = Path(img_name).stem
+        stem      = f"{cam_prefix}__{img_stem}"
+        debug_img = pick_debug(debug_by_stem.get(stem, []))
         if crops:
             tasks.append((debug_img, img_name, crops, cam_dir.name, bbox_map))
 
