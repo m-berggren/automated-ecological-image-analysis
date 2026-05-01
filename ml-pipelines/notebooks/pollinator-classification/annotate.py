@@ -4,21 +4,24 @@ Pollinator Crop Annotation Tool
 Left: debug image with numbered bounding boxes  |  Right: crops with index badges
 
 Controls:
-  Click a crop (right)   -> select it; its bbox on the left is highlighted
-  b / 1 / 2 / 3 / 4 / u -> label selected crop (or ALL unlabeled if none selected)
-  Tab or E              -> toggle BATCH mode. The next label key applies to
-                           ALL unlabeled crops in this image. Press the same
-                           label key again to revert. Toggle off to cancel.
-                           (Trackbar at the top mirrors this state.)
+  Two navigation modes, toggle with R.
+
+  IMAGE_NAV (default — header has no badge)
+    Left / Right    -> previous / next image
+    Up   / Down     -> scroll the crop grid up / down
+    b 1 2 3 4 u     -> label EVERY unlabeled crop in the current image
+                       (press the same key again on the same image to revert)
+    Click a crop    -> select it (also flips behavior to selected-crop labels)
+
+  CROP_NAV (header shows "CROP NAV" badge)
+    Left / Right    -> move crop selection left / right
+    Up   / Down     -> move crop selection up / down (by row)
+    b 1 2 3 4 u     -> label the SELECTED crop, advance to next
+
   Labels: bg / bumblebee / fly / butterfly / other / unsure
-  C       -> clear all annotations in current image
-  P       -> preview selected crop (large popup)
-  A / D            -> previous / next image
-  Left / Right     -> previous / next image (default) or crop selection
-                       (toggle with R or the top trackbar)
-  R                -> toggle Left/Right arrow behaviour image <-> crop
-  W / S            -> scroll crops up / down  (mouse wheel also works)
-  Q       -> quit and save
+  C   -> clear all annotations in current image
+  P   -> preview selected crop (large popup)
+  Q   -> quit and save
 
 Usage:
   python3 annotate.py --results path/to/results --output path/to/annotated_crops
@@ -208,24 +211,12 @@ def save_session(task_idx):
                 "cam_name":    cam_name,
                 "image_name":  img_name,
                 "task_idx":    idx,
-                "arrow_mode":  state.get("arrow_mode", ARROW_LEFT_RIGHT_DEFAULT)
-                               if "state" in globals() else ARROW_LEFT_RIGHT_DEFAULT,
             }, indent=2),
             encoding="utf-8",
         )
     except Exception:
         # Best-effort — never crash the UI over a session-write failure.
         pass
-
-def load_session_arrow_mode():
-    if not SESSION_FILE.exists():
-        return ARROW_LEFT_RIGHT_DEFAULT
-    try:
-        data = json.loads(SESSION_FILE.read_text(encoding="utf-8"))
-        m = data.get("arrow_mode", ARROW_LEFT_RIGHT_DEFAULT)
-        return m if m in ("crop", "image") else ARROW_LEFT_RIGHT_DEFAULT
-    except Exception:
-        return ARROW_LEFT_RIGHT_DEFAULT
 
 def load_initial_task_idx():
     """Pick up where the previous run ended. Match (cam, image) first; fall
@@ -308,47 +299,23 @@ def get_badge(label):
 # all listed characters trigger that action. Arrow keys are detected from
 # raw key codes elsewhere and are not configurable here.
 KEYS = {
-    "prev_image":        ("a", "A"),
-    "next_image":        ("d", "D"),
-    "scroll_up":         ("w", "W"),
-    "scroll_down":       ("s", "S"),
+    # Mode toggle: switch between IMAGE_NAV (default — arrows nav images +
+    # scroll grid; label keys batch all unlabeled) and CROP_NAV (arrows move
+    # crop selection; label keys label only the selected crop).
+    "nav_mode_toggle":   ("r", "R"),
     "preview":           ("p", "P"),
     "clear_image":       ("c", "C"),
     "quit":              ("q", "Q"),
-    # Flip Left/Right arrow behaviour between image-nav and crop-nav.
-    # Mirrored by the "<-/-> : 0=image 1=crop" trackbar at the top.
-    "arrow_mode_toggle": ("r", "R"),
-    # Single-crop label (applies to the selected crop; falls back to "label
-    # all unlabeled" when no crop is selected — same toggle-undo as batch).
-    "label_background":  ("b",),
+    # Label keys. Behaviour depends on nav mode:
+    #   IMAGE_NAV → label all unlabeled in current image (same key twice = undo)
+    #   CROP_NAV  → label only the selected crop, then advance to next
+    "label_background":  ("b", "B"),
     "label_bumblebee":   ("1",),
     "label_fly":         ("2",),
     "label_butterfly":   ("3",),
     "label_other":       ("4",),
-    "label_unsure":      ("u",),
-    # Batch toggle: press once to enter batch mode (header shows BATCH),
-    # then any label key applies to ALL unlabeled crops in the current image.
-    # Pressing the same label key twice in batch mode reverts the previous
-    # batch. Pressing the toggle again while in batch mode cancels.
-    # Tab is included for convenience but some HighGUI builds swallow it for
-    # widget focus traversal — use `e` (or click the BATCH trackbar) if so.
-    "batch_mode_toggle": ("\t", "e", "E"),
-    # Optional direct batch chords. Some platforms report Shift+letter as a
-    # different key code, so these chord shortcuts may not fire — use the
-    # Tab toggle if so. Bind any character that your keyboard reports for
-    # the chord you want; defaults are intentionally empty.
-    "batch_background":  (),
-    "batch_bumblebee":   (),
-    "batch_fly":         (),
-    "batch_butterfly":   (),
-    "batch_other":       (),
-    "batch_unsure":      (),
+    "label_unsure":      ("u", "U"),
 }
-
-# Default behaviour of Left/Right arrows. "image" = previous/next image,
-# "crop" = move crop selection. Flip at runtime via the trackbar at the top
-# of the window; the choice is persisted in session.json.
-ARROW_LEFT_RIGHT_DEFAULT = "image"
 
 KEY_ORDS = {action: tuple(ord(c) for c in chars) for action, chars in KEYS.items()}
 LABEL_KEY_ORDS = {
@@ -356,31 +323,10 @@ LABEL_KEY_ORDS = {
     for action, chars in KEYS.items() if action.startswith("label_")
     for c in chars
 }
-BATCH_KEY_ORDS = {
-    ord(c): action[len("batch_"):]
-    for action, chars in KEYS.items()
-    if action.startswith("batch_") and action != "batch_mode_toggle"
-    for c in chars
-}
 
 def _key_label(action):
     """First character bound to `action`, uppercased — for help-text display."""
     return KEYS.get(action, ("?",))[0].upper()
-
-HELP_TEXT = (
-    f"{_key_label('label_background')}=bg  "
-    f"{_key_label('label_bumblebee')}=BB  "
-    f"{_key_label('label_fly')}=fly  "
-    f"{_key_label('label_butterfly')}=but  "
-    f"{_key_label('label_other')}=other  "
-    f"{_key_label('label_unsure')}=unsure  "
-    f"{_key_label('clear_image')}=clear  "
-    f"{_key_label('preview')}=preview  |  "
-    f"{_key_label('prev_image')}/{_key_label('next_image')} = prev/next image  |  "
-    f"<-/-> = prev/next image (R = toggle crop)  |  "
-    f"{_key_label('scroll_up')}/{_key_label('scroll_down')} or wheel = scroll  |  "
-    f"{_key_label('quit')}=quit"
-)
 
 # ── Thumbnail cache ───────────────────────────────────────────────────────────
 # Filled lazily by render() on first access — preloading every crop at startup
@@ -526,16 +472,15 @@ state = {
     "scroll_row":  0,
     "overlay":     None,   # None  or  numpy array to draw fullscreen over canvas
     "overlay_kind": None,
-    # Most recent batch-label action — when the same label key is pressed
-    # twice in a row on the same image with nothing selected, the second
-    # press reverts the first. Cleared on image change or single-crop label.
+    # Most recent batch-label action — pressing the same label key twice in
+    # a row in IMAGE_NAV mode reverts the first press. Cleared on image
+    # change or when a CROP_NAV single-crop label is applied.
     "last_batch":  None,   # {"task_idx": int, "label": str, "crops": [str]}
-    # When True, the next label keypress is treated as a batch action.
-    # Toggled by the batch_mode_toggle key (Tab by default).
-    "batch_mode":  False,
-    "arrow_mode":  ARROW_LEFT_RIGHT_DEFAULT,   # set from session.json below
+    # Navigation mode. "image" (default): arrows nav images + scroll grid;
+    # label keys batch every unlabeled crop. "crop": arrows move crop
+    # selection; label keys label only the selected crop. Toggle with R.
+    "nav_mode":    "image",
 }
-state["arrow_mode"] = load_session_arrow_mode()
 click_buf = [None]
 trackbar_buf = [None]
 
@@ -802,14 +747,16 @@ def render():
              f"  ({done_this}/{len(crops)} labeled){more_txt}")
     cv2.putText(canvas, title, (10, 24),
                 cv2.FONT_HERSHEY_SIMPLEX, 0.55, (220, 220, 220), 1)
-    if state.get("batch_mode"):
-        (tw_b, th_b), _ = cv2.getTextSize("BATCH", cv2.FONT_HERSHEY_SIMPLEX, 0.55, 2)
+    nav = state.get("nav_mode", "image")
+    badge = "CROP NAV" if nav == "crop" else None
+    if badge:
+        (tw_b, th_b), _ = cv2.getTextSize(badge, cv2.FONT_HERSHEY_SIMPLEX, 0.55, 2)
         bx1 = WIN_W - tw_b - 24
         bx2 = WIN_W - 8
         by1 = 4
         by2 = by1 + th_b + 10
         cv2.rectangle(canvas, (bx1, by1), (bx2, by2), (40, 200, 255), -1)
-        cv2.putText(canvas, "BATCH", (bx1 + 8, by2 - 5),
+        cv2.putText(canvas, badge, (bx1 + 8, by2 - 5),
                     cv2.FONT_HERSHEY_SIMPLEX, 0.55, (0, 0, 0), 2)
     bg_k  = _key_label('label_background')
     bb_k  = _key_label('label_bumblebee')
@@ -817,14 +764,18 @@ def render():
     but_k = _key_label('label_butterfly')
     oth_k = _key_label('label_other')
     un_k  = _key_label('label_unsure')
+    if nav == "crop":
+        arrows_help = "<-/-> = prev/next crop | up/down = up/down row"
+        label_help  = "label = label selected crop"
+    else:
+        arrows_help = "<-/-> = prev/next image | up/down = scroll grid"
+        label_help  = "label = batch all unlabeled (twice = undo)"
     instruction = (
         f"{bg_k}=bg {bb_k}=BB {fly_k}=fly {but_k}=but {oth_k}=other {un_k}=unsure"
-        f" | Tab/E=batch | {_key_label('clear_image')}=clear "
-        f"{_key_label('preview')}=preview"
-        f" | {_key_label('prev_image')}/{_key_label('next_image')}=prev/next img"
-        f" | <-/->=img (R=toggle crop)"
-        f" | {_key_label('scroll_up')}/{_key_label('scroll_down')} or wheel=scroll"
-        f" | {_key_label('quit')}=quit"
+        f" | R = toggle CROP NAV"
+        f" | {arrows_help}"
+        f" | {label_help}"
+        f" | {_key_label('clear_image')}=clear {_key_label('preview')}=preview {_key_label('quit')}=quit"
     )
     instr_fs = 0.44
     while cv2.getTextSize(instruction, cv2.FONT_HERSHEY_SIMPLEX, instr_fs, 1)[0][0] > WIN_W - 20:
@@ -912,24 +863,20 @@ def render():
         border_color = (180, 0, 255) if i == sel else color
         cv2.rectangle(canvas, (tx - 2, ty - 2), (tx + th_w + 2, ty + th_h + 2), border_color, border)
 
-        # Translucent colour wash + label text on the thumbnail when labelled
+        # Bold label text near the top of the crop when labelled. The
+        # coloured border (drawn just above) is the main visual signal;
+        # we keep the image itself fully visible.
         if label is not None and clip > 0:
-            ovr_x2 = min(tx + th_w, WIN_W - 15)
-            if ovr_x2 > tx and ty >= 0:
-                roi  = canvas[ty:ty + clip, tx:ovr_x2]
-                tint = np.full_like(roi, color)
-                canvas[ty:ty + clip, tx:ovr_x2] = cv2.addWeighted(tint, 0.30, roi, 0.70, 0)
             ovr_text = get_badge(label)
             if ovr_text:
                 ovr_fs = 0.75
                 (otw, oth), _ = cv2.getTextSize(ovr_text, cv2.FONT_HERSHEY_SIMPLEX, ovr_fs, 2)
                 ox = tx + (th_w - otw) // 2
-                oy = ty + (th_h + oth) // 2
-                # Black shadow for readability over arbitrary backgrounds
-                cv2.putText(canvas, ovr_text, (ox + 1, oy + 1),
-                            cv2.FONT_HERSHEY_SIMPLEX, ovr_fs, (0, 0, 0), 4)
-                cv2.putText(canvas, ovr_text, (ox, oy),
-                            cv2.FONT_HERSHEY_SIMPLEX, ovr_fs, (255, 255, 255), 2)
+                oy = ty + oth + 8
+                cv2.putText(canvas, ovr_text, (ox, oy),  # black outline
+                            cv2.FONT_HERSHEY_SIMPLEX, ovr_fs, (0, 0, 0), 5)
+                cv2.putText(canvas, ovr_text, (ox, oy),  # label colour on top
+                            cv2.FONT_HERSHEY_SIMPLEX, ovr_fs, color, 2)
 
         # Label badge
         badge = get_badge(label)
@@ -994,18 +941,6 @@ cv2.createTrackbar("Image", WINDOW, 0, max(1, total_images - 1), on_trackbar)
 if initial_task_idx > 0:
     cv2.setTrackbarPos("Image", WINDOW, initial_task_idx)
 
-def on_arrow_mode_trackbar(val):
-    state["arrow_mode"] = "crop" if val else "image"
-    save_session(state["task_idx"])
-
-cv2.createTrackbar("<-/-> : 0=image 1=crop", WINDOW,
-                   1 if state["arrow_mode"] == "crop" else 0, 1,
-                   on_arrow_mode_trackbar)
-
-def on_batch_trackbar(val):
-    state["batch_mode"] = bool(val)
-
-cv2.createTrackbar("BATCH mode (next label = all)", WINDOW, 0, 1, on_batch_trackbar)
 cv2.setMouseCallback(WINDOW, on_mouse)
 
 while True:
@@ -1016,7 +951,7 @@ while True:
         trackbar_buf[0] = None
     if tb_val != state["task_idx"] and click_buf[0] is None:
         load_progress_for_task(tb_val); save_session(tb_val)
-        state.update({"task_idx": tb_val, "selected_idx": None, "scroll_row": 0, "last_batch": None, "batch_mode": False,
+        state.update({"task_idx": tb_val, "selected_idx": None, "scroll_row": 0, "last_batch": None,
                       "overlay": None, "overlay_kind": None})
 
     if click_buf[0] is not None:
@@ -1045,11 +980,6 @@ while True:
             state["selected_idx"] = val
 
     cv2.imshow(WINDOW, render())
-    # Keep the BATCH trackbar position in sync with state["batch_mode"] —
-    # it gets flipped by Tab/E, and reset after a batch action completes.
-    _bt_desired = 1 if state["batch_mode"] else 0
-    if cv2.getTrackbarPos("BATCH mode (next label = all)", WINDOW) != _bt_desired:
-        cv2.setTrackbarPos("BATCH mode (next label = all)", WINDOW, _bt_desired)
     key_raw = cv2.waitKeyEx(30)
 
     prev_keys = (65361, 2424832, 63234)
@@ -1073,40 +1003,43 @@ while True:
     if os.environ.get("DEBUG_KEYS") and key_raw != -1:
         print(f"[DEBUG_KEYS] key_raw={key_raw} ascii_key={ascii_key}")
 
+    # Helper: switch image, reset per-image state. Used in both nav mode
+    # arrow handlers and the debug-overlay navigation.
+    def go_to_image(new_idx, overlay=None, overlay_kind=None):
+        load_progress_for_task(new_idx); save_session(new_idx)
+        state.update({
+            "task_idx":     new_idx,
+            "selected_idx": None,
+            "scroll_row":   0,
+            "last_batch":   None,
+            "overlay":      overlay,
+            "overlay_kind": overlay_kind,
+        })
+        cv2.setTrackbarPos("Image", WINDOW, new_idx)
+
     # Any key press dismisses overlay, except debug overlay navigation
     if state["overlay"] is not None:
         if key_raw != -1:
-            if state["overlay_kind"] == "debug" and (
-                ascii_key in KEY_ORDS["next_image"] or key_raw in next_keys
-            ):
+            if state["overlay_kind"] == "debug" and key_raw in next_keys:
                 new = min(state["task_idx"] + 1, total_images - 1)
-                load_progress_for_task(new); save_session(new)
-                state.update({"task_idx": new, "selected_idx": None, "scroll_row": 0, "last_batch": None, "batch_mode": False,
-                              "overlay": build_debug_overlay(new), "overlay_kind": "debug"})
-                cv2.setTrackbarPos("Image", WINDOW, new)
-            elif state["overlay_kind"] == "debug" and (
-                ascii_key in KEY_ORDS["prev_image"] or key_raw in prev_keys
-            ):
+                go_to_image(new, build_debug_overlay(new), "debug")
+            elif state["overlay_kind"] == "debug" and key_raw in prev_keys:
                 new = max(state["task_idx"] - 1, 0)
-                load_progress_for_task(new); save_session(new)
-                state.update({"task_idx": new, "selected_idx": None, "scroll_row": 0, "last_batch": None, "batch_mode": False,
-                              "overlay": build_debug_overlay(new), "overlay_kind": "debug"})
-                cv2.setTrackbarPos("Image", WINDOW, new)
+                go_to_image(new, build_debug_overlay(new), "debug")
             else:
                 state["overlay"] = None
                 state["overlay_kind"] = None
         continue
 
+    _, _, crops, _, _ = tasks[state["task_idx"]]
+
     if ascii_key in KEY_ORDS["preview"]:
         sel = state["selected_idx"]
-        if sel is not None:
-            _, _, crops, _, _ = tasks[state["task_idx"]]
-            if sel < len(crops):
-                state["overlay"] = build_preview_overlay(*crops[sel])
-                state["overlay_kind"] = "preview"
+        if sel is not None and sel < len(crops):
+            state["overlay"] = build_preview_overlay(*crops[sel])
+            state["overlay_kind"] = "preview"
 
     elif ascii_key in KEY_ORDS["clear_image"]:
-        _, _, crops, _, _ = tasks[state["task_idx"]]
         removed = 0
         for _, crop_fn in crops:
             if crop_fn in progress:
@@ -1119,82 +1052,61 @@ while True:
             save_progress(force=True)
             print(f"Cleared {removed} crops in current image")
         state["selected_idx"] = None
+        state["last_batch"]   = None
 
     elif ascii_key in KEY_ORDS["quit"]:
         save_progress(force=True)
         save_session(state["task_idx"])
         break
 
-    elif ascii_key in KEY_ORDS["batch_mode_toggle"]:
-        state["batch_mode"] = not state["batch_mode"]
-
-    elif ascii_key in KEY_ORDS["arrow_mode_toggle"]:
-        state["arrow_mode"] = "crop" if state["arrow_mode"] == "image" else "image"
-        cv2.setTrackbarPos("<-/-> : 0=image 1=crop", WINDOW,
-                           1 if state["arrow_mode"] == "crop" else 0)
-        save_session(state["task_idx"])
-
-    elif ascii_key in BATCH_KEY_ORDS:
-        # Direct batch chord (rare — most platforms drop modifier-flagged keys).
-        label = BATCH_KEY_ORDS[ascii_key]
-        batch_label_or_undo(state, label, tasks, progress, LABELED_DIR, save_progress, apply_label)
-        state["batch_mode"] = False
+    elif ascii_key in KEY_ORDS["nav_mode_toggle"]:
+        if state["nav_mode"] == "image":
+            state["nav_mode"] = "crop"
+            # Initialize selection so arrow keys have somewhere to start.
+            if state["selected_idx"] is None and crops:
+                state["selected_idx"] = state["scroll_row"] * CROP_COLS
+        else:
+            state["nav_mode"] = "image"
+            state["selected_idx"] = None
 
     elif ascii_key in LABEL_KEY_ORDS:
         label = LABEL_KEY_ORDS[ascii_key]
-        _, _, crops, _, _ = tasks[state["task_idx"]]
-        sel = state["selected_idx"]
-        # Tab toggle promotes any label keypress to batch.
-        if state["batch_mode"]:
-            batch_label_or_undo(state, label, tasks, progress, LABELED_DIR, save_progress, apply_label)
-            state["batch_mode"] = False
-        elif sel is not None and sel < len(crops):
-            apply_label(crops[sel][1], crops[sel][0], label)
-            # Advance selection to the next crop so consecutive label keys
-            # work without resetting to crop 0 on the next arrow press.
-            new_sel = min(sel + 1, len(crops) - 1)
-            state["selected_idx"] = new_sel
-            sel_row = new_sel // CROP_COLS
-            max_scroll = max(0, get_total_rows() - ROWS_VISIBLE)
-            if sel_row >= state["scroll_row"] + ROWS_VISIBLE:
-                state["scroll_row"] = min(sel_row - ROWS_VISIBLE + 1, max_scroll)
-            elif sel_row < state["scroll_row"]:
-                state["scroll_row"] = sel_row
-            state["last_batch"] = None  # single-crop label exits batch-undo mode
-        else:
-            batch_label_or_undo(state, label, tasks, progress, LABELED_DIR, save_progress, apply_label)
-
-    elif key_raw in next_keys:
-        if state["arrow_mode"] == "image":
-            new = min(state["task_idx"] + 1, total_images - 1)
-            load_progress_for_task(new); save_session(new)
-            state.update({"task_idx": new, "selected_idx": None,
-                          "scroll_row": 0, "last_batch": None, "batch_mode": False})
-            cv2.setTrackbarPos("Image", WINDOW, new)
-        else:
-            # Right arrow: move crop selection forward by one
-            _, _, crops, _, _ = tasks[state["task_idx"]]
-            if crops:
-                sel = state["selected_idx"]
-                new_sel = 0 if sel is None else min(sel + 1, len(crops) - 1)
+        if state["nav_mode"] == "crop":
+            sel = state["selected_idx"]
+            if sel is not None and sel < len(crops):
+                apply_label(crops[sel][1], crops[sel][0], label)
+                # Advance selection to the next crop.
+                new_sel = min(sel + 1, len(crops) - 1)
                 state["selected_idx"] = new_sel
-                max_scroll = max(0, get_total_rows() - ROWS_VISIBLE)
                 sel_row = new_sel // CROP_COLS
+                max_scroll = max(0, get_total_rows() - ROWS_VISIBLE)
                 if sel_row >= state["scroll_row"] + ROWS_VISIBLE:
                     state["scroll_row"] = min(sel_row - ROWS_VISIBLE + 1, max_scroll)
                 elif sel_row < state["scroll_row"]:
                     state["scroll_row"] = sel_row
+                state["last_batch"] = None
+        else:
+            # IMAGE_NAV: label every unlabeled crop in this image, with
+            # toggle-undo if the same label key is pressed twice in a row.
+            batch_label_or_undo(state, label, tasks, progress, LABELED_DIR, save_progress, apply_label)
+
+    elif key_raw in next_keys:
+        if state["nav_mode"] == "crop":
+            if crops:
+                sel = state["selected_idx"]
+                new_sel = 0 if sel is None else min(sel + 1, len(crops) - 1)
+                state["selected_idx"] = new_sel
+                sel_row = new_sel // CROP_COLS
+                max_scroll = max(0, get_total_rows() - ROWS_VISIBLE)
+                if sel_row >= state["scroll_row"] + ROWS_VISIBLE:
+                    state["scroll_row"] = min(sel_row - ROWS_VISIBLE + 1, max_scroll)
+                elif sel_row < state["scroll_row"]:
+                    state["scroll_row"] = sel_row
+        else:
+            go_to_image(min(state["task_idx"] + 1, total_images - 1))
 
     elif key_raw in prev_keys:
-        if state["arrow_mode"] == "image":
-            new = max(state["task_idx"] - 1, 0)
-            load_progress_for_task(new); save_session(new)
-            state.update({"task_idx": new, "selected_idx": None,
-                          "scroll_row": 0, "last_batch": None, "batch_mode": False})
-            cv2.setTrackbarPos("Image", WINDOW, new)
-        else:
-            # Left arrow: move crop selection back by one
-            _, _, crops, _, _ = tasks[state["task_idx"]]
+        if state["nav_mode"] == "crop":
             if crops:
                 sel = state["selected_idx"]
                 new_sel = len(crops) - 1 if sel is None else max(sel - 1, 0)
@@ -1204,25 +1116,35 @@ while True:
                     state["scroll_row"] = sel_row
                 elif sel_row >= state["scroll_row"] + ROWS_VISIBLE:
                     state["scroll_row"] = sel_row
+        else:
+            go_to_image(max(state["task_idx"] - 1, 0))
 
-    elif ascii_key in KEY_ORDS["next_image"]:
-        new = min(state["task_idx"] + 1, total_images - 1)
-        load_progress_for_task(new); save_session(new)
-        state.update({"task_idx": new, "selected_idx": None, "scroll_row": 0, "last_batch": None, "batch_mode": False})
-        cv2.setTrackbarPos("Image", WINDOW, new)
+    elif key_raw in down_keys:
+        if state["nav_mode"] == "crop":
+            if crops:
+                sel = state["selected_idx"]
+                new_sel = (state["scroll_row"] * CROP_COLS) if sel is None \
+                          else min(sel + CROP_COLS, len(crops) - 1)
+                state["selected_idx"] = new_sel
+                sel_row = new_sel // CROP_COLS
+                max_scroll = max(0, get_total_rows() - ROWS_VISIBLE)
+                if sel_row >= state["scroll_row"] + ROWS_VISIBLE:
+                    state["scroll_row"] = min(sel_row - ROWS_VISIBLE + 1, max_scroll)
+        else:
+            max_scroll = max(0, get_total_rows() - ROWS_VISIBLE)
+            state["scroll_row"] = min(state["scroll_row"] + 1, max_scroll)
 
-    elif ascii_key in KEY_ORDS["prev_image"]:
-        new = max(state["task_idx"] - 1, 0)
-        load_progress_for_task(new); save_session(new)
-        state.update({"task_idx": new, "selected_idx": None, "scroll_row": 0, "last_batch": None, "batch_mode": False})
-        cv2.setTrackbarPos("Image", WINDOW, new)
-
-    elif ascii_key in KEY_ORDS["scroll_up"] or key_raw in up_keys:
-        state["scroll_row"] = max(0, state["scroll_row"] - 1)
-
-    elif ascii_key in KEY_ORDS["scroll_down"] or key_raw in down_keys:
-        max_scroll = max(0, get_total_rows() - ROWS_VISIBLE)
-        state["scroll_row"] = min(state["scroll_row"] + 1, max_scroll)
+    elif key_raw in up_keys:
+        if state["nav_mode"] == "crop":
+            if crops:
+                sel = state["selected_idx"]
+                new_sel = 0 if sel is None else max(sel - CROP_COLS, 0)
+                state["selected_idx"] = new_sel
+                sel_row = new_sel // CROP_COLS
+                if sel_row < state["scroll_row"]:
+                    state["scroll_row"] = sel_row
+        else:
+            state["scroll_row"] = max(0, state["scroll_row"] - 1)
 
 cv2.destroyAllWindows()
 save_progress()
