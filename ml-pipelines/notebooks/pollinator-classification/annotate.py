@@ -685,13 +685,20 @@ def apply_label(crop_fn, crop_path, label):
 
 def batch_label_or_undo(state, label, tasks, progress, labeled_dir,
                         save_progress, apply_label):
-    """Label every unlabeled crop in the current image. If the previous
-    batch on this image used the same label, revert it instead — so pressing
-    the same batch key twice toggles the action off."""
+    """Three behaviours, depending on the previous batch.
+
+    1. No recent batch on this image → label every unlabeled crop with `label`.
+    2. Same image, same label as the previous batch → revert it (toggle off).
+    3. Same image, different label → relabel the previous batch's crops with
+       the new label (so pressing 'b' then '4' replaces background with other
+       on those same crops, instead of being a no-op because they're now
+       already labelled).
+    """
     _, _, crops, _, _ = tasks[state["task_idx"]]
     last = state.get("last_batch")
-    if (last and last["task_idx"] == state["task_idx"]
-            and last["label"] == label):
+    same_image = bool(last and last["task_idx"] == state["task_idx"])
+
+    if same_image and last["label"] == label:
         undone = 0
         for crop_fn in last["crops"]:
             if progress.get(crop_fn) == label:
@@ -704,6 +711,23 @@ def batch_label_or_undo(state, label, tasks, progress, labeled_dir,
             save_progress(force=True)
             print(f"Reverted {undone} batch labels in current image")
         state["last_batch"] = None
+        return
+
+    if same_image and last["label"] != label:
+        path_by_fn = {fn: path for path, fn in crops}
+        relabeled = []
+        for crop_fn in last["crops"]:
+            path = path_by_fn.get(crop_fn)
+            if path is not None and progress.get(crop_fn) == last["label"]:
+                apply_label(crop_fn, path, label)
+                relabeled.append(crop_fn)
+        if relabeled:
+            print(f"Re-batched {len(relabeled)} crops "
+                  f"from {last['label']} to {label}")
+        state["last_batch"] = (
+            {"task_idx": state["task_idx"], "label": label, "crops": relabeled}
+            if relabeled else None
+        )
         return
 
     just_labeled = []
