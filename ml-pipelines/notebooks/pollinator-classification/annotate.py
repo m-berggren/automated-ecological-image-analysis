@@ -9,8 +9,8 @@ Controls:
   IMAGE_NAV (default — header has no badge)
     Left / Right    -> previous / next image
     Up   / Down     -> scroll the crop grid up / down
-    b 1 2 3 4 u     -> label EVERY unlabeled crop in the current image
-                       (press the same key again on the same image to revert)
+    b 1 2 3 4 u     -> label every unlabeled crop in the current image,
+                       or clear every crop already carrying that label
     Click a crop    -> select it (also flips behavior to selected-crop labels)
 
   CROP_NAV (header shows "CROP NAV" badge)
@@ -472,13 +472,10 @@ state = {
     "scroll_row":  0,
     "overlay":     None,   # None  or  numpy array to draw fullscreen over canvas
     "overlay_kind": None,
-    # Most recent batch-label action — pressing the same label key twice in
-    # a row in IMAGE_NAV mode reverts the first press. Cleared on image
-    # change or when a CROP_NAV single-crop label is applied.
-    "last_batch":  None,   # {"task_idx": int, "label": str, "crops": [str]}
     # Navigation mode. "image" (default): arrows nav images + scroll grid;
-    # label keys batch every unlabeled crop. "crop": arrows move crop
-    # selection; label keys label only the selected crop. Toggle with R.
+    # label keys batch every unlabeled crop or clear ones already labeled
+    # with that label. "crop": arrows move crop selection; label keys label
+    # only the selected crop. Toggle with R.
     "nav_mode":    "image",
 }
 click_buf = [None]
@@ -685,49 +682,21 @@ def apply_label(crop_fn, crop_path, label):
 
 def batch_label_or_undo(state, label, tasks, progress, labeled_dir,
                         save_progress, apply_label):
-    """Three behaviours, depending on the previous batch.
-
-    1. No recent batch on this image → label every unlabeled crop with `label`.
-    2. Same image, same label as the previous batch → revert it (toggle off).
-    3. Same image, different label → relabel the previous batch's crops with
-       the new label (so pressing 'b' then '4' replaces background with other
-       on those same crops, instead of being a no-op because they're now
-       already labelled).
-    """
+    """In IMAGE_NAV mode, label every unlabeled crop with `label`. If any
+    crops in this image already carry `label`, clear those instead — works
+    regardless of which images you switched between (no batch history)."""
     _, _, crops, _, _ = tasks[state["task_idx"]]
-    last = state.get("last_batch")
-    same_image = bool(last and last["task_idx"] == state["task_idx"])
 
-    if same_image and last["label"] == label:
-        undone = 0
-        for crop_fn in last["crops"]:
-            if progress.get(crop_fn) == label:
-                old = labeled_dir / progress[crop_fn] / crop_fn
-                if old.exists():
-                    old.unlink()
-                del progress[crop_fn]
-                undone += 1
-        if undone:
-            save_progress(force=True)
-            print(f"Reverted {undone} batch labels in current image")
-        state["last_batch"] = None
-        return
-
-    if same_image and last["label"] != label:
-        path_by_fn = {fn: path for path, fn in crops}
-        relabeled = []
-        for crop_fn in last["crops"]:
-            path = path_by_fn.get(crop_fn)
-            if path is not None and progress.get(crop_fn) == last["label"]:
-                apply_label(crop_fn, path, label)
-                relabeled.append(crop_fn)
-        if relabeled:
-            print(f"Re-batched {len(relabeled)} crops "
-                  f"from {last['label']} to {label}")
-        state["last_batch"] = (
-            {"task_idx": state["task_idx"], "label": label, "crops": relabeled}
-            if relabeled else None
-        )
+    matching = [crop_fn for _, crop_fn in crops
+                if progress.get(crop_fn) == label]
+    if matching:
+        for crop_fn in matching:
+            old = labeled_dir / progress[crop_fn] / crop_fn
+            if old.exists():
+                old.unlink()
+            del progress[crop_fn]
+        save_progress(force=True)
+        print(f"Cleared {len(matching)} '{label}' labels in current image")
         return
 
     just_labeled = []
@@ -735,10 +704,8 @@ def batch_label_or_undo(state, label, tasks, progress, labeled_dir,
         if crop_fn not in progress:
             apply_label(crop_fn, crop_path, label)
             just_labeled.append(crop_fn)
-    state["last_batch"] = (
-        {"task_idx": state["task_idx"], "label": label, "crops": just_labeled}
-        if just_labeled else None
-    )
+    if just_labeled:
+        print(f"Labeled {len(just_labeled)} crops as '{label}' in current image")
 
 # ── Render ────────────────────────────────────────────────────────────────────
 def render():
@@ -975,7 +942,7 @@ while True:
         trackbar_buf[0] = None
     if tb_val != state["task_idx"] and click_buf[0] is None:
         load_progress_for_task(tb_val); save_session(tb_val)
-        state.update({"task_idx": tb_val, "selected_idx": None, "scroll_row": 0, "last_batch": None,
+        state.update({"task_idx": tb_val, "selected_idx": None, "scroll_row": 0,
                       "overlay": None, "overlay_kind": None})
 
     if click_buf[0] is not None:
@@ -1035,7 +1002,7 @@ while True:
             "task_idx":     new_idx,
             "selected_idx": None,
             "scroll_row":   0,
-            "last_batch":   None,
+            
             "overlay":      overlay,
             "overlay_kind": overlay_kind,
         })
@@ -1076,7 +1043,6 @@ while True:
             save_progress(force=True)
             print(f"Cleared {removed} crops in current image")
         state["selected_idx"] = None
-        state["last_batch"]   = None
 
     elif ascii_key in KEY_ORDS["quit"]:
         save_progress(force=True)
@@ -1119,10 +1085,9 @@ while True:
                         state["scroll_row"] = min(sel_row - ROWS_VISIBLE + 1, max_scroll)
                     elif sel_row < state["scroll_row"]:
                         state["scroll_row"] = sel_row
-                state["last_batch"] = None
         else:
-            # IMAGE_NAV: label every unlabeled crop in this image, with
-            # toggle-undo if the same label key is pressed twice in a row.
+            # IMAGE_NAV: label every unlabeled crop, or clear all crops
+            # already carrying this label.
             batch_label_or_undo(state, label, tasks, progress, LABELED_DIR, save_progress, apply_label)
 
     elif key_raw in next_keys:
