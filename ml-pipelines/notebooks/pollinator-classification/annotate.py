@@ -1098,16 +1098,27 @@ while True:
         if state["nav_mode"] == "crop":
             sel = state["selected_idx"]
             if sel is not None and sel < len(crops):
-                apply_label(crops[sel][1], crops[sel][0], label)
-                # Advance selection to the next crop.
-                new_sel = min(sel + 1, len(crops) - 1)
-                state["selected_idx"] = new_sel
-                sel_row = new_sel // CROP_COLS
-                max_scroll = max(0, get_total_rows() - ROWS_VISIBLE)
-                if sel_row >= state["scroll_row"] + ROWS_VISIBLE:
-                    state["scroll_row"] = min(sel_row - ROWS_VISIBLE + 1, max_scroll)
-                elif sel_row < state["scroll_row"]:
-                    state["scroll_row"] = sel_row
+                crop_path, crop_fn = crops[sel]
+                if progress.get(crop_fn) == label:
+                    # Same label pressed twice on this crop → toggle off,
+                    # stay on it so the user can apply a different label.
+                    old = LABELED_DIR / progress[crop_fn] / crop_fn
+                    if old.exists():
+                        old.unlink()
+                    del progress[crop_fn]
+                    save_progress()
+                    print(f"Unlabeled {crop_fn}")
+                else:
+                    apply_label(crop_fn, crop_path, label)
+                    # Advance selection to the next crop.
+                    new_sel = min(sel + 1, len(crops) - 1)
+                    state["selected_idx"] = new_sel
+                    sel_row = new_sel // CROP_COLS
+                    max_scroll = max(0, get_total_rows() - ROWS_VISIBLE)
+                    if sel_row >= state["scroll_row"] + ROWS_VISIBLE:
+                        state["scroll_row"] = min(sel_row - ROWS_VISIBLE + 1, max_scroll)
+                    elif sel_row < state["scroll_row"]:
+                        state["scroll_row"] = sel_row
                 state["last_batch"] = None
         else:
             # IMAGE_NAV: label every unlabeled crop in this image, with
