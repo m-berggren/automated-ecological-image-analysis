@@ -255,16 +255,25 @@ print(f"bbox entries: {bbox_total}/{total_crops}"
       + (" -- WARNING: no bbox data, left-right sync disabled" if bbox_total == 0 else ""))
 
 # ── UI constants ──────────────────────────────────────────────────────────────
+# Layout: header on top, full-width debug image below, then a horizontal strip
+# of CROP_COLS crops at the bottom, then a status footer. Scroll moves the
+# strip one row at a time (= CROP_COLS crops per page).
 WIN_W, WIN_H = 1800, 1100
-DEBUG_W      = 920
-PANEL_W      = WIN_W - DEBUG_W
 PAD          = 8
-CROP_COLS    = 3
-CROP_SIZE    = max(1, (PANEL_W - PAD * CROP_COLS - 15) // CROP_COLS)
-CROP_META_H  = 66
+CROP_COLS    = 6
+CROP_SIZE    = 220                         # smaller than width-fill so the
+                                           # debug image up top gets more height
+CROP_META_H  = 60
 HEADER_H     = 86
 FOOTER_H     = 58
-ROWS_VISIBLE = max(1, (WIN_H - HEADER_H - FOOTER_H - PAD) // (CROP_SIZE + PAD + CROP_META_H))
+CROP_STRIP_H = CROP_SIZE + CROP_META_H + PAD
+DEBUG_TOP    = HEADER_H
+DEBUG_BOTTOM = WIN_H - FOOTER_H - CROP_STRIP_H
+DEBUG_W      = WIN_W                       # debug spans full width now
+ROWS_VISIBLE = 1                           # one row of CROP_COLS crops at a time
+# Distribute the extra horizontal space evenly: equal gap on left, between,
+# and right of the crops, so the strip looks centered.
+CROP_PAD_X   = max(PAD, (WIN_W - CROP_SIZE * CROP_COLS) // (CROP_COLS + 1))
 
 # ── Colours & badges ──────────────────────────────────────────────────────────
 COLORS = {
@@ -273,7 +282,7 @@ COLORS = {
     "butterfly":  (255,   0, 200),
     "other":      (200, 200,   0),
     "insect":     (0,   200, 150),   # legacy
-    "background": (50,   50, 210),
+    "background": (40,   40, 240),    # bright red (BGR)
     "unsure":     (100, 100, 100),
     None:         (60,   60,  60),
 }
@@ -379,35 +388,44 @@ def read_debug_transform(debug_path) -> tuple:
 debug_cache: dict = {}
 
 def load_debug_base(path):
-    """Return (canvas_copy, coord_scale, ox, oy)."""
-    tw, th = DEBUG_W, WIN_H
+    """Return (canvas_copy, coord_scale, ox, oy, draw_x). Debug area spans
+    the full window width between the header and the crop strip; the image
+    is centred horizontally so the empty right-side strip you'd otherwise
+    see disappears. `draw_x` is added to bbox positions when drawing /
+    hit-testing so they line up with the centred image."""
+    tw = DEBUG_W
+    th = DEBUG_BOTTOM - DEBUG_TOP
     if path is None or not Path(path).exists():
         blank = np.zeros((th, tw, 3), dtype=np.uint8)
         cv2.putText(blank, "No debug image", (20, th // 2),
                     cv2.FONT_HERSHEY_SIMPLEX, 0.8, (160, 160, 160), 2)
-        return blank, 1.0, 0, 0
+        return blank, 1.0, 0, 0, 0
     key = str(path)
     if key not in debug_cache:
         img = cv2.imread(key)
         if img is None:
-            debug_cache[key] = (np.zeros((th, tw, 3), dtype=np.uint8), 1.0, 0, 0)
+            debug_cache[key] = (np.zeros((th, tw, 3), dtype=np.uint8), 1.0, 0, 0, 0)
         else:
             h, w   = img.shape[:2]
             view_scale = min(tw / w, th / h)
             nw, nh = int(w * view_scale), int(h * view_scale)
             scaled = cv2.resize(img, (nw, nh), interpolation=cv2.INTER_AREA)
             canvas = np.zeros((th, tw, 3), dtype=np.uint8)
-            canvas[:nh, :nw] = scaled
+            draw_x = (tw - nw) // 2
+            canvas[:nh, draw_x:draw_x + nw] = scaled
             ox, oy, storage_scale = read_debug_transform(path)
             coord_scale = view_scale * storage_scale
-            debug_cache[key] = (canvas, coord_scale, ox, oy)
-    base, coord_scale, ox, oy = debug_cache[key]
-    return base.copy(), coord_scale, ox, oy
+            debug_cache[key] = (canvas, coord_scale, ox, oy, draw_x)
+    base, coord_scale, ox, oy, draw_x = debug_cache[key]
+    return base.copy(), coord_scale, ox, oy, draw_x
 
 # ── Bbox overlay helper ───────────────────────────────────────────────────────
 def draw_bbox_overlay(img, crops, bbox_map, crops_labels, sel, scale, ox, oy,
-                      num_fs=0.22, show_all_numbers=False):
-    """Draw selected bbox plus labels already assigned."""
+                      num_fs=0.22, show_all_numbers=False, draw_x=0):
+    """Draw selected bbox plus colored borders for already-labelled crops.
+    No label-name text is drawn — colour alone signals the label.
+    `draw_x` is the horizontal offset where the underlying image starts in
+    the canvas (for centred layouts)."""
     SEL_COLOR = (180, 0, 255)   # bright magenta
 
     for i, (_, crop_fn) in enumerate(crops):
@@ -415,28 +433,18 @@ def draw_bbox_overlay(img, crops, bbox_map, crops_labels, sel, scale, ox, oy,
         if label is None or crop_fn not in bbox_map:
             continue
         bx, by, bw, bh = bbox_map[crop_fn]
-        dx = int((bx - ox) * scale)
+        dx = int((bx - ox) * scale) + draw_x
         dy = int((by - oy) * scale)
         dw = int(bw * scale)
         dh = int(bh * scale)
-        color = get_color(label)
-        if label != "background":
-            cv2.rectangle(img, (dx, dy), (dx + dw, dy + dh), color, 2)
-
-        badge = get_badge(label)
-        fs = max(0.18, num_fs - 0.02) if label == "background" else max(0.24, num_fs + 0.05)
-        (tw_b, th_b), _ = cv2.getTextSize(badge, cv2.FONT_HERSHEY_SIMPLEX, fs, 1)
-        tx = max(1, dx)
-        ty = max(th_b + 4, dy - 4 if label != "background" else dy + th_b + 3)
-        cv2.rectangle(img, (tx - 2, ty - th_b - 3), (tx + tw_b + 4, ty + 3), color, -1)
-        cv2.putText(img, badge, (tx, ty), cv2.FONT_HERSHEY_SIMPLEX, fs, (0, 0, 0), 1)
+        cv2.rectangle(img, (dx, dy), (dx + dw, dy + dh), get_color(label), 2)
 
     if show_all_numbers:
         for i, (_, crop_fn) in enumerate(crops):
             if crop_fn not in bbox_map:
                 continue
             bx, by, bw, bh = bbox_map[crop_fn]
-            dx = int((bx - ox) * scale)
+            dx = int((bx - ox) * scale) + draw_x
             dy = int((by - oy) * scale)
             num_txt = str(i)
             (tw_n, th_n), _ = cv2.getTextSize(num_txt, cv2.FONT_HERSHEY_SIMPLEX, num_fs, 1)
@@ -453,7 +461,7 @@ def draw_bbox_overlay(img, crops, bbox_map, crops_labels, sel, scale, ox, oy,
     if crop_fn not in bbox_map:
         return
     bx, by, bw, bh = bbox_map[crop_fn]
-    dx = int((bx - ox) * scale)
+    dx = int((bx - ox) * scale) + draw_x
     dy = int((by - oy) * scale)
     dw = int(bw * scale)
     dh = int(bh * scale)
@@ -600,63 +608,56 @@ def on_mouse(event, x, y, flags, param):
     if event != cv2.EVENT_LBUTTONDOWN:
         return
 
-    # Scrollbar
-    if x >= WIN_W - 14 and total_rows > ROWS_VISIBLE:
-        ratio = (y - HEADER_H) / max(1, WIN_H - FOOTER_H - HEADER_H)
-        state["scroll_row"] = max(0, min(int(ratio * total_rows), max_scroll))
-        return
-
-    # Debug panel — hit-test bboxes first, fall back to large view
-    if x < DEBUG_W:
+    # Click in the top half: debug panel — hit-test bboxes first, fall back
+    # to opening the large debug overlay.
+    if DEBUG_TOP <= y < DEBUG_BOTTOM:
         debug_path = tasks[state["task_idx"]][0]
         key_dp = str(debug_path) if debug_path else ""
         if key_dp in debug_cache:
-            _, dbg_scale, dbg_ox, dbg_oy = debug_cache[key_dp]
+            _, dbg_scale, dbg_ox, dbg_oy, dbg_draw_x = debug_cache[key_dp]
             _, _, crops, _, bbox_map = tasks[state["task_idx"]]
-            PAD_HIT = 4   # extra px tolerance around each bbox
+            PAD_HIT = 4
+            local_y = y - DEBUG_TOP    # bboxes are drawn relative to canvas top
             for i, (_, crop_fn) in enumerate(crops):
                 if crop_fn not in bbox_map:
                     continue
                 bx, by, bw, bh = bbox_map[crop_fn]
-                dx = int((bx - dbg_ox) * dbg_scale)
+                dx = int((bx - dbg_ox) * dbg_scale) + dbg_draw_x
                 dy = int((by - dbg_oy) * dbg_scale)
                 dw = int(bw * dbg_scale)
                 dh = int(bh * dbg_scale)
                 if (dx - PAD_HIT <= x <= dx + dw + PAD_HIT and
-                        dy - PAD_HIT <= y <= dy + dh + PAD_HIT):
+                        dy - PAD_HIT <= local_y <= dy + dh + PAD_HIT):
                     click_buf[0] = ("bbox", i)
                     return
         click_buf[0] = -2
         return
 
-    # Crop grid
-    for i in range(len(crops)):
-        x1, y1, x2, y2 = crop_rect(i)
-        if y1 < HEADER_H or y2 + CROP_META_H > WIN_H - FOOTER_H - PAD:
-            continue
-        if x1 <= x <= x2 and y1 <= y <= y2:
-            click_buf[0] = -3 if state["selected_idx"] == i else i
-            return
+    # Click in the bottom strip: crop grid
+    if y >= DEBUG_BOTTOM:
+        for i in range(len(crops)):
+            x1, y1, x2, y2 = crop_rect(i)
+            if y1 < 0:    # off-screen sentinel from crop_rect
+                continue
+            if x1 <= x <= x2 and y1 <= y <= y2:
+                click_buf[0] = -3 if state["selected_idx"] == i else i
+                return
     click_buf[0] = -1
 
 # ── Layout helper ─────────────────────────────────────────────────────────────
 def crop_rect(idx: int):
-    """(x1, y1, x2, y2). Returns off-screen sentinel if crop is above scroll."""
+    """(x1, y1, x2, y2) for a crop in the bottom strip. Returns an off-screen
+    sentinel if the crop's row is not the currently visible one."""
     col        = idx % CROP_COLS
     row_of_idx = idx // CROP_COLS
-    heights    = get_row_heights(state["task_idx"])
 
-    # Crop is scrolled above visible area — return sentinel so it's ignored
-    if row_of_idx < state["scroll_row"]:
+    # Only the row at scroll_row is visible — anything else is off-screen.
+    if row_of_idx != state["scroll_row"]:
         return 0, -9999, CROP_SIZE, -9999 + CROP_SIZE
 
-    y = HEADER_H + PAD
-    for r in range(row_of_idx - state["scroll_row"]):
-        actual_r = r + state["scroll_row"]
-        if actual_r < len(heights):
-            y += heights[actual_r] + PAD + CROP_META_H
-
-    x1 = DEBUG_W + PAD + col * (CROP_SIZE + PAD)
+    # Strip starts right below the debug area, ends above the footer.
+    y = DEBUG_BOTTOM + PAD
+    x1 = CROP_PAD_X + col * (CROP_SIZE + CROP_PAD_X)
 
     _, _, crops, _, _ = tasks[state["task_idx"]]
     if idx < len(crops):
@@ -723,11 +724,13 @@ def render():
 
     canvas = np.zeros((WIN_H, WIN_W, 3), dtype=np.uint8)
 
-    # ── Left panel: debug image + bbox overlay ─────────────────────────────────
-    debug_panel, dbg_scale, dbg_ox, dbg_oy = load_debug_base(debug_path)
+    # ── Top: debug image + bbox overlay (full width) ───────────────────────────
+    debug_panel, dbg_scale, dbg_ox, dbg_oy, dbg_draw_x = load_debug_base(debug_path)
     draw_bbox_overlay(debug_panel, crops, bbox_map, crops_labels,
-                      sel, dbg_scale, dbg_ox, dbg_oy, num_fs=0.20)
-    canvas[:, :DEBUG_W] = debug_panel
+                      sel, dbg_scale, dbg_ox, dbg_oy, num_fs=0.20,
+                      draw_x=dbg_draw_x)
+    dh, dw = debug_panel.shape[:2]
+    canvas[DEBUG_TOP:DEBUG_TOP + dh, :dw] = debug_panel
 
     # ── Header ─────────────────────────────────────────────────────────────────
     cv2.rectangle(canvas, (0, 0), (WIN_W, HEADER_H - 2), (25, 25, 25), -1)
@@ -777,50 +780,37 @@ def render():
                 cv2.FONT_HERSHEY_SIMPLEX, instr_fs, (180, 180, 180), 1)
 
     # ── Footer ─────────────────────────────────────────────────────────────────
-    cv2.rectangle(canvas, (DEBUG_W, WIN_H - FOOTER_H), (WIN_W, WIN_H), (20, 20, 20), -1)
+    cv2.rectangle(canvas, (0, WIN_H - FOOTER_H), (WIN_W, WIN_H), (20, 20, 20), -1)
+    # Page indicator bar — bright segment shows current page position; spans
+    # the full width so a glance tells you whether there are pages left.
+    if total_rows > 0:
+        bar_y1 = WIN_H - FOOTER_H + 4
+        bar_y2 = bar_y1 + 10
+        bar_x1 = 8
+        bar_x2 = WIN_W - 8
+        cv2.rectangle(canvas, (bar_x1, bar_y1), (bar_x2, bar_y2), (45, 45, 55), -1)
+        seg_w  = max(8, (bar_x2 - bar_x1) // max(1, total_rows))
+        seg_x1 = bar_x1 + state["scroll_row"] * seg_w
+        seg_x2 = min(seg_x1 + seg_w, bar_x2)
+        # Yellow when there's still more after the current page; cyan once
+        # you're on the last page (signals "you've seen everything").
+        on_last = state["scroll_row"] >= total_rows - 1
+        seg_color = (0, 215, 255) if not on_last else (180, 220, 90)
+        cv2.rectangle(canvas, (seg_x1, bar_y1), (seg_x2, bar_y2), seg_color, -1)
+        cv2.rectangle(canvas, (bar_x1, bar_y1), (bar_x2, bar_y2), (0, 0, 0), 1)
+    page_txt = (f"Page {state['scroll_row']+1}/{max(1, total_rows)}"
+                if total_rows else "Page 0/0")
     cv2.putText(canvas,
-                f"Total: {g_done}/{total_crops}"
-                f"  |  Rows {state['scroll_row']+1}-"
-                f"{min(state['scroll_row']+ROWS_VISIBLE, total_rows)}/{total_rows}"
-                "  |  double-click crop = large preview",
-                (DEBUG_W + 10, WIN_H - 12),
+                f"Total: {g_done}/{total_crops}  |  {page_txt}"
+                "  |  up/down = scroll page  |  double-click crop = large preview",
+                (10, WIN_H - 8),
                 cv2.FONT_HERSHEY_SIMPLEX, 0.40, (130, 130, 130), 1)
-    if total_rows > state["scroll_row"] + ROWS_VISIBLE:
-        msg = "v v v   MORE CROPS BELOW   v v v"
-        fs = 0.75
-        (tw_m, th_m), _ = cv2.getTextSize(msg, cv2.FONT_HERSHEY_SIMPLEX, fs, 2)
-        mx1 = DEBUG_W + 12
-        mx2 = WIN_W - 24
-        my1 = WIN_H - FOOTER_H + 4
-        my2 = WIN_H - 4
-        cv2.rectangle(canvas, (mx1, my1), (mx2, my2), (0, 180, 255), -1)
-        cv2.rectangle(canvas, (mx1, my1), (mx2, my2), (0, 0, 0), 2)
-        tx = mx1 + max(10, (mx2 - mx1 - tw_m) // 2)
-        cv2.putText(canvas, msg, (tx, my1 + th_m + 7),
-                    cv2.FONT_HERSHEY_SIMPLEX, fs, (0, 0, 0), 2)
 
-    # ── Scrollbar ──────────────────────────────────────────────────────────────
-    if total_rows > ROWS_VISIBLE:
-        sb_x         = WIN_W - 12
-        sb_y1, sb_y2 = HEADER_H, WIN_H - FOOTER_H
-        sb_h         = sb_y2 - sb_y1
-        cv2.rectangle(canvas, (sb_x, sb_y1), (sb_x + 10, sb_y2), (40, 40, 40), -1)
-        thumb_h   = max(20, int(sb_h * ROWS_VISIBLE / total_rows))
-        thumb_top = sb_y1 + int(
-            (sb_h - thumb_h) * state["scroll_row"] / max(1, total_rows - ROWS_VISIBLE)
-        )
-        cv2.rectangle(canvas, (sb_x, thumb_top), (sb_x + 10, thumb_top + thumb_h),
-                      (140, 140, 180), -1)
-        cv2.putText(canvas, "^", (sb_x + 1, sb_y1 + 14),
-                    cv2.FONT_HERSHEY_SIMPLEX, 0.4, (180, 180, 180), 1)
-        cv2.putText(canvas, "v", (sb_x + 1, sb_y2 - 4),
-                    cv2.FONT_HERSHEY_SIMPLEX, 0.4, (180, 180, 180), 1)
-
-    # ── Right panel: crop thumbnails ──────────────────────────────────────────
-    grid_bottom = WIN_H - FOOTER_H - PAD
+    # ── Bottom strip: crop thumbnails (one row) ───────────────────────────────
+    grid_bottom = WIN_H - FOOTER_H
     for i, (crop_path, crop_fn) in enumerate(crops):
         x1, y1, x2, y2 = crop_rect(i)
-        if y2 < HEADER_H or y1 >= grid_bottom:
+        if y1 < 0:    # off-screen sentinel
             continue
         if x2 > WIN_W:
             continue
@@ -841,11 +831,11 @@ def render():
         thumb, orig_w, orig_h, _ = entry
         th_h, th_w = thumb.shape[:2]
         tx, ty     = x1, y1
-        if ty < HEADER_H or ty + th_h + CROP_META_H > grid_bottom:
+        if ty < DEBUG_BOTTOM or ty + th_h + CROP_META_H > grid_bottom:
             continue
 
         clip = min(th_h, grid_bottom - CROP_META_H - ty)
-        if ty >= 0 and clip > 0 and tx + th_w <= WIN_W - 15:
+        if ty >= 0 and clip > 0 and tx + th_w <= WIN_W:
             canvas[ty : ty + clip, tx : tx + th_w] = thumb[:clip]
 
         label  = crops_labels.get(crop_fn)
