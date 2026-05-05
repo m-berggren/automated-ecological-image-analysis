@@ -23,6 +23,8 @@ export interface UploadOptions {
   module: string
   purpose?: 'training' | 'inference'
   concurrency?: number
+  /** Attach uploaded images to this Upload row (sent as `upload` form field). */
+  uploadId?: number
 }
 
 export function createUploader(opts: UploadOptions) {
@@ -62,6 +64,7 @@ export function createUploader(opts: UploadOptions) {
       fd.append('file', item.file)
       fd.append('module', opts.module)
       fd.append('purpose', opts.purpose ?? 'inference')
+      if (opts.uploadId) fd.append('upload', String(opts.uploadId))
       const res = await api('/api/datasets/images/', { method: 'POST', body: fd })
       if (!res.ok) {
         const text = await res.text()

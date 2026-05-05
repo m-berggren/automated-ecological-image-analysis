@@ -136,7 +136,15 @@ const modules: ModuleItem[] = [
       { to: '/seeds/models', label: 'Models', staffOnly: true },
     ],
   },
-  { to: '/pollinators', label: 'Pollinators', icon: Bug },
+  {
+    to: '/pollinators',
+    label: 'Pollinators',
+    icon: Bug,
+    children: [
+      { to: '/pollinators/upload', label: 'Upload' },
+      { to: '/pollinators/runs', label: 'Runs' },
+    ],
+  },
   { to: '/pollen', label: 'Pollen', icon: Sparkles, paused: true },
   { to: '/flowers', label: 'Flowers', icon: Flower2, paused: true },
 ]
