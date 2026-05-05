@@ -4,14 +4,25 @@ from django.db import models
 from apps.datasets.models import Module
 
 
+class ModelKind(models.TextChoices):
+    DETECTOR = 'detector', 'Detector'
+    CLASSIFIER = 'classifier', 'Classifier'
+    PREPROCESSING = 'preprocessing', 'Preprocessing'
+
+
 class ModelVersion(models.Model):
     """A trained model artifact for a given module.
 
-    At most one ModelVersion per module may have is_active=True; this is
+    At most one ModelVersion per (module, kind) may have is_active=True;
     enforced in save().
     """
 
     module = models.CharField(max_length=20, choices=Module.choices)
+    kind = models.CharField(
+        max_length=20,
+        choices=ModelKind.choices,
+        default=ModelKind.DETECTOR,
+    )
     version_name = models.CharField(max_length=100, unique=True)
     model_file_path = models.CharField(max_length=255)
 
@@ -40,12 +51,14 @@ class ModelVersion(models.Model):
     class Meta:
         indexes = [
             models.Index(fields=['module', 'is_active']),
+            models.Index(fields=['module', 'kind']),
         ]
 
     def save(self, *args, **kwargs):
         if self.is_active:
             ModelVersion.objects.filter(
                 module=self.module,
+                kind=self.kind,
                 is_active=True,
             ).exclude(pk=self.pk).update(is_active=False)
         super().save(*args, **kwargs)
@@ -99,21 +112,52 @@ class TrainingJob(models.Model):
 
 
 class InferenceRun(models.Model):
+    """One inference attempt over an Upload (or, for seeds, a manually
+    chosen image set) with a frozen pipeline configuration.
+
+    For pollinators, multiple model versions are referenced via
+    ``config`` (a JSON snapshot) rather than the single ``model_version``
+    FK, which is kept for the simpler seeds case. ``upload`` is the
+    canonical image set for new runs; ``images`` is retained for
+    backward compatibility with seeds.
+    """
+
     module = models.CharField(max_length=20, choices=Module.choices)
+    name = models.CharField(max_length=200, blank=True)
+
+    upload = models.ForeignKey(
+        'datasets.Upload',
+        on_delete=models.PROTECT,
+        null=True,
+        blank=True,
+        related_name='runs',
+    )
+
     model_version = models.ForeignKey(
         ModelVersion,
         on_delete=models.PROTECT,
+        null=True,
+        blank=True,
         related_name='inference_runs',
+        help_text='Single-model runs (e.g. seeds). Multi-model runs use config.',
     )
+    config = models.JSONField(
+        default=dict,
+        blank=True,
+        help_text='Frozen pipeline config: detector toggles, model_version IDs, thresholds.',
+    )
+
     status = models.CharField(
         max_length=20,
         choices=JobStatus.choices,
         default=JobStatus.PENDING,
     )
+    archived = models.BooleanField(default=False)
 
     images = models.ManyToManyField(
         'datasets.ImageAsset',
         related_name='inference_runs',
+        blank=True,
     )
 
     initiated_by = models.ForeignKey(
@@ -124,7 +168,15 @@ class InferenceRun(models.Model):
         related_name='initiated_inference_runs',
     )
     created_at = models.DateTimeField(auto_now_add=True)
+    started_at = models.DateTimeField(null=True, blank=True)
     completed_at = models.DateTimeField(null=True, blank=True)
+
+    class Meta:
+        indexes = [
+            models.Index(fields=['module', 'status']),
+            models.Index(fields=['upload']),
+            models.Index(fields=['archived']),
+        ]
 
     def __str__(self) -> str:
         return f'InferenceRun<{self.module} #{self.pk} {self.status}>'

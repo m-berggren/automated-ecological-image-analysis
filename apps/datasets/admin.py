@@ -1,6 +1,14 @@
 from django.contrib import admin
 
-from .models import Annotation, FlowerMarker, ImageAsset
+from .models import Annotation, FlowerMarker, ImageAsset, Upload
+
+
+@admin.register(Upload)
+class UploadAdmin(admin.ModelAdmin):
+    list_display = ('id', 'module', 'name', 'status', 'created_by', 'created_at')
+    list_filter = ('module', 'status')
+    search_fields = ('name', 'notes')
+    readonly_fields = ('created_at',)
 
 
 @admin.register(ImageAsset)
@@ -9,6 +17,7 @@ class ImageAssetAdmin(admin.ModelAdmin):
         'id',
         'module',
         'purpose',
+        'upload',
         'file',
         'captured_at',
         'weather',

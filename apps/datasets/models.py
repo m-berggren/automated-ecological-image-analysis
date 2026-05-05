@@ -31,7 +31,52 @@ class ExclusionReason(models.TextChoices):
     OTHER = 'other', 'Other'
 
 
+class UploadStatus(models.TextChoices):
+    DRAFT = 'draft', 'Draft (uploading)'
+    READY = 'ready', 'Ready'
+    DISCARDED = 'discarded', 'Discarded'
+
+
+class Upload(models.Model):
+    """A user-supplied image set for one module.
+
+    Created in DRAFT when the user opens the Upload page and starts
+    attaching files. Transitions to READY when the first InferenceRun
+    is launched against it. Multiple runs can reference the same
+    Upload (re-run with different configs without re-uploading).
+    """
+
+    module = models.CharField(max_length=20, choices=Module.choices)
+    name = models.CharField(max_length=200, blank=True)
+    status = models.CharField(
+        max_length=20,
+        choices=UploadStatus.choices,
+        default=UploadStatus.DRAFT,
+    )
+
+    created_by = models.ForeignKey(
+        settings.AUTH_USER_MODEL,
+        on_delete=models.SET_NULL,
+        null=True,
+        blank=True,
+        related_name='uploads',
+    )
+    created_at = models.DateTimeField(auto_now_add=True)
+    notes = models.TextField(blank=True)
+
+    class Meta:
+        indexes = [
+            models.Index(fields=['module', 'status']),
+            models.Index(fields=['created_at']),
+        ]
+
+    def __str__(self) -> str:
+        return f'Upload<{self.module} #{self.pk} {self.name or "(unnamed)"}>'
+
+
 def image_upload_path(instance: 'ImageAsset', filename: str) -> str:
+    if instance.upload_id:
+        return f'images/{instance.module}/upload-{instance.upload_id}/{filename}'
     return f'images/{instance.module}/{filename}'
 
 
@@ -39,6 +84,14 @@ class ImageAsset(models.Model):
     module = models.CharField(max_length=20, choices=Module.choices)
     file = models.FileField(upload_to=image_upload_path)
     purpose = models.CharField(max_length=20, choices=ImagePurpose.choices)
+
+    upload = models.ForeignKey(
+        Upload,
+        on_delete=models.CASCADE,
+        null=True,
+        blank=True,
+        related_name='images',
+    )
 
     uploaded_by = models.ForeignKey(
         settings.AUTH_USER_MODEL,
@@ -81,6 +134,7 @@ class ImageAsset(models.Model):
             models.Index(fields=['module', 'purpose']),
             models.Index(fields=['module', 'excluded']),
             models.Index(fields=['captured_at']),
+            models.Index(fields=['upload']),
         ]
 
     def __str__(self) -> str:
