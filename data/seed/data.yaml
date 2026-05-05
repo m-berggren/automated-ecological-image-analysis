@@ -1,0 +1,9 @@
+path: ../data/seed ##Relative to running the main.py from ml-pipelines/ folder.
+train: train
+val: val
+
+names:
+  0: cat
+  1: peh
+  2: phyca
+  3: vau

@@ -3,8 +3,23 @@ __pycache__/
 *.pyc
 *.pyo
 
+#yolo seed model
+*.pt
+
 # Virtual environment
 .venv/
+
+# Images and labels
+data/seed/train/
+data/seed/val/
+
+# Jupyter notebook checkpoints
+data/seed/.ipynb_checkpoints/
+ml-pipelines/notebooks/seed-counting/.ipynb_checkpoints/
+
+# YOLO outputs
+runs/
+sahi_results/
 
 # Django
 db.sqlite3
@@ -15,8 +30,6 @@ static/vue/
 
 # Environment variables
 .env
-<<<<<<< Updated upstream
-=======
 
 .DS_Store
 
@@ -24,4 +37,3 @@ static/vue/
 *.txt
 
 *.pth
->>>>>>> Stashed changes
