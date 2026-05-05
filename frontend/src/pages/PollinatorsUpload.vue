@@ -105,8 +105,8 @@
               </label>
             </div>
             <p class="text-[11px] text-muted-foreground">
-              Crops below the binary threshold are dropped as background. Crops above
-              binary but below the species threshold are kept and labeled "uncertain".
+              Crops below the binary threshold are dropped as background. Crops above binary but
+              below the species threshold are kept and labeled "uncertain".
             </p>
           </div>
         </div>
@@ -118,7 +118,10 @@
       >
         {{ showAdvanced ? '▾ Hide advanced' : '▸ Show advanced' }}
       </button>
-      <div v-if="showAdvanced" class="space-y-2 text-xs text-muted-foreground border-t border-border pt-3">
+      <div
+        v-if="showAdvanced"
+        class="space-y-2 text-xs text-muted-foreground border-t border-border pt-3"
+      >
         <p>Crop padding, filter knobs, and other rarely-tuned settings will live here.</p>
       </div>
     </section>
@@ -156,9 +159,7 @@
           />
         </label>
       </p>
-      <p class="text-xs text-muted-foreground mt-1">
-        JPG, PNG — up to ~12,000 images per run
-      </p>
+      <p class="text-xs text-muted-foreground mt-1">JPG, PNG — up to ~12,000 images per run</p>
     </section>
 
     <!-- Upload progress + start -->
@@ -204,7 +205,8 @@
         </li>
       </ul>
       <p v-else class="px-5 py-3 text-xs text-muted-foreground">
-        No failures. (Per-file list hidden at this scale — failures will appear here as they happen.)
+        No failures. (Per-file list hidden at this scale — failures will appear here as they
+        happen.)
       </p>
     </section>
 

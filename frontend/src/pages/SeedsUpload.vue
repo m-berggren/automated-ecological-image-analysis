@@ -3,183 +3,308 @@
   <SeedsStepper current="upload" />
 
   <div class="flex-1 p-8 space-y-6 max-w-3xl mx-auto w-full">
+    <!-- Run details -->
+    <section class="rounded-xl border border-border bg-surface p-5 space-y-3">
+      <h2 class="text-sm font-semibold">Run details</h2>
+      <div class="space-y-2">
+        <label class="block text-xs text-muted-foreground">Name</label>
+        <input
+          v-model="runName"
+          type="text"
+          placeholder="e.g. Seeds B — July 2026"
+          class="w-full px-3 py-2 text-sm rounded-md border border-border bg-background focus:outline-none focus:ring-2 focus:ring-primary/30"
+        />
+      </div>
+    </section>
+
+    <!-- Seed type -->
+    <section class="rounded-xl border border-border bg-surface p-5 space-y-4">
+      <h2 class="text-sm font-semibold">Seed type</h2>
+      <p class="text-xs text-muted-foreground">Each batch must contain a single species.</p>
+
+      <!-- Seed list -->
+      <div class="flex flex-wrap gap-3 pt-1">
+        <div v-for="seed in seedTypes" :key="seed.id" class="relative shrink-0 pt-2 pr-2">
+          <!-- Delete button -->
+          <button
+            v-if="seed.isCustom"
+            @click.stop="removeSeed(seed.id)"
+            class="absolute -top-0 -right-0 w-5 h-5 flex items-center justify-center rounded-full bg-green-900 text-white text-xs z-10"
+          >
+            ×
+          </button>
+
+          <!-- Seed button -->
+          <button
+            @click="selectedSeed = seed.id"
+            :class="[
+              'group w-36 flex items-center px-3 py-2 rounded-lg border-2 text-left transition-all overflow-hidden',
+
+              selectedSeed === seed.id
+                ? 'border-primary bg-primary/5'
+                : 'border-border bg-background hover:border-primary/40',
+            ]"
+          >
+            <span class="text-sm font-semibold shrink-0">
+              {{ seed.id }}
+            </span>
+
+            <span
+              v-if="seed.species"
+              class="ml-2 overflow-hidden whitespace-nowrap text-[11px] text-muted-foreground italic max-w-0 group-hover:max-w-[100px] opacity-0 group-hover:opacity-100 transition-all duration-200"
+            >
+              · {{ seed.species }}
+            </span>
+          </button>
+        </div>
+      </div>
+
+      <!-- Add button -->
+      <button
+        @click="openAddSeed"
+        class="w-full px-4 py-2 rounded-lg border-2 border-dashed border-border text-sm text-muted-foreground hover:border-primary hover:text-primary transition"
+      >
+        + Add new seed type
+      </button>
+
+      <!-- Inline add form -->
+      <div v-if="showAddSeed" class="p-3 border rounded-lg space-y-2 bg-background">
+        <input
+          v-model="newSeedId"
+          placeholder="Code Name (e.g. PEH)"
+          class="w-full px-2 py-1 text-sm border rounded"
+        />
+        <input
+          v-model="newSeedSpecies"
+          placeholder="Species (optional)"
+          class="w-full px-2 py-1 text-sm border rounded"
+        />
+        <div class="flex gap-2">
+          <button @click="addSeed" class="px-3 py-1 text-sm bg-primary text-white rounded-lg">
+            Add
+          </button>
+          <button @click="cancelAddSeed" class="px-3 py-1 text-sm border rounded-lg">Cancel</button>
+        </div>
+      </div>
+    </section>
+
+    <!-- Sample condition -->
+    <section class="rounded-xl border border-border bg-surface p-5 space-y-4">
+      <h2 class="text-sm font-semibold">Sample condition</h2>
+      <div class="flex gap-3">
+        <button
+          v-for="cond in conditions"
+          :key="cond.id"
+          @click="selectedCondition = cond.id"
+          :class="[
+            'flex-1 flex flex-col items-start gap-0.5 px-4 py-3 rounded-lg border-2 text-left transition-all duration-200',
+            selectedCondition === cond.id
+              ? 'border-primary bg-primary/5'
+              : 'border-border bg-background hover:border-primary/40',
+          ]"
+        >
+          <span class="text-sm font-medium">{{ cond.label }}</span>
+          <span class="text-xs text-muted-foreground">{{ cond.desc }}</span>
+        </button>
+      </div>
+    </section>
+
+    <!-- Detection settings -->
+    <section class="rounded-xl border border-border bg-surface p-5 space-y-2">
+      <h2 class="text-sm font-semibold">Detection settings</h2>
+
+      <div class="space-y-2">
+        <label class="text-xs text-muted-foreground">
+          Expected seed count per image (optional)
+        </label>
+        <div class="flex items-center gap-3">
+          <div class="flex items-center gap-2">
+            <span class="text-xs text-muted-foreground">Min</span>
+            <input
+              v-model.number="expectedMin"
+              type="text"
+              inputmode="numeric"
+              placeholder="0"
+              :class="[
+                'w-20 px-2 py-1.5 text-sm rounded-md bg-background',
+                rangeError ? 'border border-red-500' : 'border border-border'
+              ]"
+            />
+          </div>
+
+          <span class="text-muted-foreground text-xs">—</span>
+
+          <div class="flex items-center gap-2">
+            <span class="text-xs text-muted-foreground">Max</span>
+            <input
+              v-model.number="expectedMax"
+              type="text"
+              inputmode="numeric"
+              placeholder="100"
+              :class="[
+                'w-20 px-2 py-1.5 text-sm rounded-md bg-background',
+                rangeError ? 'border border-red-500' : 'border border-border'
+              ]"
+            />
+          </div>
+
+          <span class="text-xs text-muted-foreground">seeds</span>
+        </div>
+
+        <p v-if="rangeError" class="text-xs text-red-500 mt-1">
+          {{ rangeError }}
+        </p>
+      </div>
+
+      <label class="flex items-start gap-3 cursor-pointer">
+        <input v-model="overlapping" type="checkbox" class="mt-0.5" />
+        <div>
+          <div class="text-sm font-medium">Overlapping seeds expected</div>
+          <p class="text-xs text-muted-foreground">
+            Enables Watershed separation for touching seeds.
+          </p>
+        </div>
+      </label>
+    </section>
+
+    <!-- Drop zone -->
     <section
       class="rounded-xl border-2 border-dashed border-border bg-surface p-10 text-center transition-colors"
-      :class="{ 'border-primary bg-primary/5': dragOver }"
+      :class="{ 'border-primary bg-primary/5': dragOver, 'opacity-60': creatingUpload }"
       @dragover.prevent="dragOver = true"
       @dragleave.prevent="dragOver = false"
       @drop.prevent="onDrop"
     >
       <UploadCloud class="w-10 h-10 mx-auto text-muted-foreground" />
       <p class="mt-3 text-sm font-medium">
-        Drop seed images here, or
+        Drop a folder or images here, or
         <label class="text-primary cursor-pointer hover:underline">
-          browse
-          <input type="file" multiple accept="image/*" class="hidden" @change="onPick" />
+          browse files
+          <input
+            type="file"
+            multiple
+            accept="image/*"
+            class="hidden"
+            @change="onPick($event, false)"
+          />
+        </label>
+        /
+        <label class="text-primary cursor-pointer hover:underline">
+          browse folder
+          <input
+            ref="folderInput"
+            type="file"
+            multiple
+            class="hidden"
+            @change="onPick($event, true)"
+          />
         </label>
       </p>
-      <p class="text-xs text-muted-foreground mt-1">
-        JPG, PNG - uploads
-        {{
-          uploader.items.length ? `(${doneCount}/${uploader.items.length} done)` : 'in batches of 4'
-        }}
-      </p>
+      <p class="text-xs text-muted-foreground mt-1">JPG, PNG — up to ~100 images per run</p>
     </section>
-
-    <section v-if="uploader.items.length" class="rounded-xl border border-border bg-surface">
-      <header class="flex items-center justify-between px-5 py-3 border-b border-border">
-        <div class="text-sm">
-          <span class="font-medium">{{ doneCount }}</span>
-          <span class="text-muted-foreground"> of </span>
-          <span class="font-medium">{{ uploader.items.length }}</span>
-          <span class="text-muted-foreground"> uploaded</span>
-          <span v-if="failedCount" class="ml-3 text-red-600"> {{ failedCount }} failed </span>
-        </div>
-        <div class="flex items-center gap-2">
-          <button
-            v-if="doneCount"
-            @click="uploader.clearDone"
-            class="text-xs px-2 py-1 rounded hover:bg-muted text-muted-foreground"
-          >
-            Clear done
-          </button>
-          <button
-            :disabled="!doneCount || running"
-            @click="runInference"
-            class="px-3 py-1.5 rounded-md text-sm font-medium bg-primary text-primary-foreground hover:bg-primary/90 disabled:opacity-50 disabled:cursor-not-allowed"
-          >
-            <span v-if="!running">Run detection</span>
-            <span v-else>Running…</span>
-          </button>
-        </div>
-      </header>
-      <ul class="max-h-80 overflow-auto divide-y divide-border">
-        <li
-          v-for="item in uploader.items"
-          :key="item.id"
-          class="flex items-center gap-3 px-5 py-2 text-sm"
-        >
-          <component
-            :is="iconFor(item.status)"
-            class="w-4 h-4 shrink-0"
-            :class="colorFor(item.status)"
-          />
-          <span class="truncate flex-1">{{ item.file.name }}</span>
-          <span class="text-xs text-muted-foreground shrink-0">
-            {{ formatSize(item.file.size) }}
-          </span>
-          <span v-if="item.status === 'failed'" class="text-xs text-red-600 truncate max-w-[200px]">
-            {{ item.error }}
-          </span>
-          <button
-            v-if="item.status === 'failed'"
-            @click="uploader.retry(item.id)"
-            class="text-xs px-2 py-0.5 rounded border border-border hover:bg-muted"
-          >
-            Retry
-          </button>
-          <button
-            v-if="item.status !== 'uploading'"
-            @click="uploader.remove(item.id)"
-            class="p-1 rounded hover:bg-muted text-muted-foreground"
-            title="Remove"
-          >
-            <X class="w-3.5 h-3.5" />
-          </button>
-        </li>
-      </ul>
-    </section>
-
-    <p v-if="error" class="text-sm text-red-600">{{ error }}</p>
   </div>
 </template>
 
 <script setup lang="ts">
-import { computed, ref } from 'vue'
-import { useRouter } from 'vue-router'
+import { ref, computed } from 'vue'
 import PageHeader from '@/components/PageHeader.vue'
 import SeedsStepper from '@/components/SeedsStepper.vue'
-import { createUploader } from '@/lib/uploader'
-import { api } from '@/api'
-import { UploadCloud, CheckCircle2, XCircle, Loader2, Clock, X } from 'lucide-vue-next'
+import { UploadCloud } from 'lucide-vue-next'
 
-const router = useRouter()
-const uploader = createUploader({ module: 'seeds' })
+const runName = ref('')
 const dragOver = ref(false)
-const running = ref(false)
-const error = ref('')
 
-const doneCount = computed(() => uploader.items.filter((i) => i.status === 'done').length)
-const failedCount = computed(() => uploader.items.filter((i) => i.status === 'failed').length)
+const selectedSeed = ref<string | null>(null)
+const selectedCondition = ref<'clean' | 'mixed'>('clean')
+const overlapping = ref(true)
+
+const expectedMin = ref<number | null>(null)
+const expectedMax = ref<number | null>(null)
+
+const showAddSeed = ref(false)
+const newSeedSpecies = ref('')
+const newSeedId = ref('')
+
+const seedTypes = ref([
+  { id: 'PEH', species: 'Pisum sativum', isCustom: false },
+  { id: 'PHYCA', species: 'Phacelia tanacetifolia', isCustom: false },
+  { id: 'VAU', species: 'Vicia sativa', isCustom: false },
+  { id: 'CAT', species: 'Carthamus tinctorius', isCustom: false },
+])
+
+const conditions = [
+  { id: 'clean', label: 'Clean', desc: 'Minimal debris expected' },
+  { id: 'mixed', label: 'Mixed', desc: 'Debris or dust likely present' },
+]
+
+const rangeError = computed(() => {
+  const minRaw = expectedMin.value
+  const maxRaw = expectedMax.value
+  const min = Number(minRaw)
+  const max = Number(maxRaw)
+
+  const minInvalid = minRaw !== '' && Number.isNaN(min)
+  const maxInvalid = maxRaw !== '' && Number.isNaN(max)
+
+  if (minInvalid || maxInvalid) {
+    return 'Input must be a number'
+  }
+
+  if (minRaw === '' || maxRaw === '') return null
+  if (min > max) {
+    return 'Min cannot be greater than Max'
+  }
+
+  return null
+})
+
+function openAddSeed() {
+  showAddSeed.value = true
+}
+
+function cancelAddSeed() {
+  showAddSeed.value = false
+  newSeedId.value = ''
+  newSeedSpecies.value = ''
+}
+
+function addSeed() {
+  if (!newSeedId.value) return
+
+  seedTypes.value.push({
+    id: newSeedId.value,
+    species: newSeedSpecies.value,
+    isCustom: true,
+  })
+
+  cancelAddSeed()
+}
+
+function removeSeed(id: string) {
+  seedTypes.value = seedTypes.value.filter((s) => s.id !== id)
+
+  if (selectedSeed.value === id) {
+    selectedSeed.value = null
+  }
+}
 
 function onPick(e: Event) {
   const target = e.target as HTMLInputElement
-  if (target.files) uploader.enqueue(Array.from(target.files))
-  target.value = ''
+  if (target.files) {
+    console.log('picked files:', target.files)
+  }
 }
 
 function onDrop(e: DragEvent) {
   dragOver.value = false
-  if (e.dataTransfer?.files) uploader.enqueue(Array.from(e.dataTransfer.files))
-}
-
-function iconFor(s: string) {
-  switch (s) {
-    case 'done':
-      return CheckCircle2
-    case 'failed':
-      return XCircle
-    case 'uploading':
-      return Loader2
-    default:
-      return Clock
+  if (e.dataTransfer?.files) {
+    console.log('dropped files:', e.dataTransfer.files)
   }
 }
 
-function colorFor(s: string) {
-  switch (s) {
-    case 'done':
-      return 'text-green-600'
-    case 'failed':
-      return 'text-red-600'
-    case 'uploading':
-      return 'text-primary animate-spin'
-    default:
-      return 'text-muted-foreground'
-  }
-}
-
-function formatSize(bytes: number) {
-  if (bytes < 1024) return `${bytes} B`
-  if (bytes < 1024 * 1024) return `${(bytes / 1024).toFixed(0)} KB`
-  return `${(bytes / 1024 / 1024).toFixed(1)} MB`
-}
-
-async function runInference() {
-  error.value = ''
-  const ids = uploader.items
-    .filter((i) => i.status === 'done' && i.imageId !== undefined)
-    .map((i) => i.imageId!)
-  if (!ids.length) {
-    error.value = 'No uploaded images to run on.'
-    return
-  }
-  running.value = true
-  try {
-    const res = await api('/api/analysis/seeds/inference/', {
-      method: 'POST',
-      body: JSON.stringify({ image_ids: ids }),
-    })
-    if (!res.ok) {
-      error.value = (await res.text()) || `HTTP ${res.status}`
-      return
-    }
-    const data = await res.json()
-    router.push(`/seeds/runs/${data.id}/detect`)
-  } catch (err) {
-    error.value = err instanceof Error ? err.message : String(err)
-  } finally {
-    running.value = false
+function onDragLeave(e: DragEvent) {
+  if (!(e.currentTarget as HTMLElement).contains(e.relatedTarget as Node)) {
+    dragOver.value = false
   }
 }
 </script>

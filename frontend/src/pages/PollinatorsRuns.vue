@@ -25,22 +25,15 @@
     </div>
 
     <ul v-else class="rounded-xl border border-border bg-surface divide-y divide-border">
-      <li
-        v-for="run in runs"
-        :key="run.id"
-        class="flex items-center gap-4 px-5 py-3 text-sm"
-      >
+      <li v-for="run in runs" :key="run.id" class="flex items-center gap-4 px-5 py-3 text-sm">
         <div class="flex-1 min-w-0">
           <div class="font-medium truncate">{{ run.name || `Run #${run.id}` }}</div>
           <div class="text-xs text-muted-foreground">
-            {{ run.image_count }} images · {{ run.detection_count }} detections ·
-            created {{ formatDate(run.created_at) }}
+            {{ run.image_count }} images · {{ run.detection_count }} detections · created
+            {{ formatDate(run.created_at) }}
           </div>
         </div>
-        <span
-          class="text-xs px-2 py-0.5 rounded-full"
-          :class="statusClass(run.status)"
-        >
+        <span class="text-xs px-2 py-0.5 rounded-full" :class="statusClass(run.status)">
           {{ run.status }}
         </span>
         <RouterLink
