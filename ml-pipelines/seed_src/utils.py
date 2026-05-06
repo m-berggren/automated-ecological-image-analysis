@@ -1,3 +1,4 @@
+import glob
 import os
 
 from PIL import Image
@@ -68,7 +69,7 @@ def load_ground_truth(img_path):
 
 def update_class_labels(directory, new_id):
     """
-    Updates the class ID in each label.txt file to match what is expected in data.yaml
+    Updates the class ID in each label.txt file to match what is expected in data.yaml.
     """
 
     if not os.path.exists(directory):
@@ -90,3 +91,17 @@ def update_class_labels(directory, new_id):
                         parts[0] = str(new_id)
                         f.write(' '.join(parts) + '\n')
             count += 1
+
+
+def get_latest_model_path(base_path='runs/obb'):
+    """
+    Finds the latest 'train' folder and returns the path to its best.pt weights.
+    """
+    folders = glob.glob(os.path.join(base_path, 'train*'))
+    if not folders:
+        return None
+
+    latest_folder = max(folders, key=os.path.getctime)
+    best_weights = os.path.join(latest_folder, 'weights', 'best.pt')
+
+    return best_weights if os.path.exists(best_weights) else None

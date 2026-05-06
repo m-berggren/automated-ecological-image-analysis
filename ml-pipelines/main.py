@@ -4,11 +4,18 @@ from collections import defaultdict
 from seed_src.metrics import calculate_tp_fp_fn
 from seed_src.train import train_model
 from seed_src.utils import (
+    get_latest_model_path,
     load_ground_truth,
     load_model,
     run_sahi,
     update_class_labels,
 )
+
+# -------------------------
+# SETTINGS
+# -------------------------
+PREPARE_LABELS = False  # Set to True to run the label update on newly added label files
+RETRAIN = False  # Set to True to train a new model, False to use existing weights
 
 # -------------------------
 # LABEL PREPARATION
@@ -25,17 +32,25 @@ def prepare_data_labels():
             update_class_labels(path, folder_id)
 
 
-prepare_data_labels()
-print(f'Class labels prepared')
+if PREPARE_LABELS:
+    prepare_data_labels()
+    print(f'Class labels prepared')
+
 
 # -------------------------
 # TRAIN
 # -------------------------
-train_results = train_model()
-best_model_path = os.path.join(train_results.save_dir, 'weights/best.pt')
-
-# skipped training when the trained model already exists:
-# best_model_path = 'runs/obb/train-2/weights/best.pt'
+if RETRAIN:
+    print('Training started...')
+    train_results = train_model()
+    best_model_path = os.path.join(train_results.save_dir, 'weights/best.pt')
+else:
+    best_model_path = get_latest_model_path()
+    if best_model_path:
+        print(f'Skipping Training. Loading latest model: {best_model_path}')
+    else:
+        print('No trained model found. Training a new model.')
+        train_restuls = train_model()
 
 # -------------------------
 # LOAD MODEL
@@ -62,9 +77,6 @@ for species in os.listdir(VAL_DIR):
 results = defaultdict(
     lambda: {'total_error': 0, 'total_gt': 0, 'images': 0, 'tp': 0, 'fp': 0, 'fn': 0}
 )
-
-# Debug: inspect model metadata
-print('Model Class Names:', model.model.names)
 
 # -------------------------
 # LOOP
