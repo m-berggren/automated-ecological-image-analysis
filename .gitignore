@@ -10,8 +10,10 @@ __pycache__/
 .venv/
 
 # Images and labels
-data/seed/train/
-data/seed/val/
+data/seed/train/phyca/
+data/seed/train/vau/
+data/seed/val/phyca/
+data/seed/val/vau
 
 # Jupyter notebook checkpoints
 data/seed/.ipynb_checkpoints/
