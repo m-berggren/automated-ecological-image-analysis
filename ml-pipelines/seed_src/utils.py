@@ -64,3 +64,29 @@ def load_ground_truth(img_path):
             gt_boxes.append(pixel_coords)
 
     return gt_boxes
+
+
+def update_class_labels(directory, new_id):
+    """
+    Updates the class ID in each label.txt file to match what is expected in data.yaml
+    """
+
+    if not os.path.exists(directory):
+        print(f'Directory not found: {directory}')
+        return
+
+    count = 0
+    for filename in os.listdir(directory):
+        if filename.endswith('.txt') and filename != 'classes.txt':
+            file_path = os.path.join(directory, filename)
+
+            with open(file_path, 'r') as f:
+                lines = f.readlines()
+
+            with open(file_path, 'w') as f:
+                for line in lines:
+                    parts = line.split()
+                    if len(parts) > 0:
+                        parts[0] = str(new_id)
+                        f.write(' '.join(parts) + '\n')
+            count += 1

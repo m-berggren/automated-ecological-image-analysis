@@ -1,10 +1,32 @@
 import os
 from collections import defaultdict
 
-import pandas as pd
 from seed_src.metrics import calculate_tp_fp_fn
 from seed_src.train import train_model
-from seed_src.utils import load_ground_truth, load_model, run_sahi
+from seed_src.utils import (
+    load_ground_truth,
+    load_model,
+    run_sahi,
+    update_class_labels,
+)
+
+# -------------------------
+# LABEL PREPARATION
+# -------------------------
+SPECIES_IDS = {'cat': 0, 'peh': 1, 'phyca': 2, 'vau': 3}
+SPLITS = ['train', 'val']
+BASE_PATH = '../data/seed'
+
+
+def prepare_data_labels():
+    for split in SPLITS:
+        for species, folder_id in SPECIES_IDS.items():
+            path = os.path.join(BASE_PATH, split, species, 'labels')
+            update_class_labels(path, folder_id)
+
+
+prepare_data_labels()
+print(f'Class labels prepared')
 
 # -------------------------
 # TRAIN
