@@ -1,11 +1,12 @@
 from ultralytics import YOLO
+import os
 
 def train_model():
     model = YOLO("yolo26n-obb.pt")
 
-    results = model.train(
-       data="../data/seed/data.yaml",
-        epochs=100,
+    model.train(
+        data="../data/seed/data.yaml",
+        epochs=300,
         imgsz=768,
         batch=2,
         crop_fraction=0.2,
@@ -14,4 +15,7 @@ def train_model():
         plots=True
     )
 
-    return results
+    save_dir = model.trainer.save_dir
+    best_path = os.path.join(save_dir, "weights", "best.pt")
+
+    return best_path

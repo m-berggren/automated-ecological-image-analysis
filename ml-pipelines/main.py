@@ -15,7 +15,7 @@ from seed_src.utils import (
 # SETTINGS
 # -------------------------
 PREPARE_LABELS = False  # Set to True to run the label update on newly added label files
-RETRAIN = False  # Set to True to train a new model, False to use existing weights
+RETRAIN = True  # Set to True to train a new model, False to use existing weights
 
 # -------------------------
 # LABEL PREPARATION
@@ -40,17 +40,18 @@ if PREPARE_LABELS:
 # -------------------------
 # TRAIN
 # -------------------------
+
 if RETRAIN:
     print('Training started...')
-    train_results = train_model()
-    best_model_path = os.path.join(train_results.save_dir, 'weights/best.pt')
+    best_model_path = train_model()
+
 else:
     best_model_path = get_latest_model_path()
     if best_model_path:
         print(f'Skipping Training. Loading latest model: {best_model_path}')
     else:
         print('No trained model found. Training a new model.')
-        train_restuls = train_model()
+        best_model_path = train_model()
 
 # -------------------------
 # LOAD MODEL
