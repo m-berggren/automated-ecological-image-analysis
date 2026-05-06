@@ -23,7 +23,7 @@
       <p class="text-xs text-muted-foreground">Each batch must contain a single species.</p>
 
       <!-- Seed list -->
-      <div class="flex flex-wrap gap-3 pt-1">
+      <div class="grid grid-cols-4 gap-3 pt-1 max-h-[10rem] overflow-y-auto">
         <div v-for="seed in seedTypes" :key="seed.id" class="relative shrink-0 pt-2 pr-2">
           <!-- Delete button -->
           <button
@@ -114,7 +114,7 @@
       <h2 class="text-sm font-semibold">Detection settings</h2>
 
       <div class="space-y-2">
-        <label class="text-xs text-muted-foreground">
+        <label class="text-xs text-muted-foreground mb-2">
           Expected seed count per image (optional)
         </label>
         <div class="flex items-center gap-3">
