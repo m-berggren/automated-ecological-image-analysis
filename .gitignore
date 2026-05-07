@@ -23,6 +23,18 @@ ml-pipelines/notebooks/seed-counting/.ipynb_checkpoints/
 runs/
 sahi_results/
 
+# Images and labels
+data/seed/train/
+data/seed/val/
+
+# Jupyter notebook checkpoints
+data/seed/.ipynb_checkpoints/
+ml-pipelines/notebooks/seed-counting/.ipynb_checkpoints/
+
+# YOLO outputs
+runs/
+sahi_results/
+debug_outputs/
 # Django
 db.sqlite3
 staticfiles/
