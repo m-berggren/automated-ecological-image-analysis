@@ -14,8 +14,8 @@ from seed_src.utils import (
 # -------------------------
 # SETTINGS
 # -------------------------
-PREPARE_LABELS = False  # Set to True to run the label update on newly added label files
-RETRAIN = True  # Set to True to train a new model, False to use existing weights
+PREPARE_LABELS = True  # Set to True to run the label update on newly added label files
+RETRAIN = False  # Set to True to train a new model, False to use existing weights
 
 # -------------------------
 # LABEL PREPARATION
@@ -47,11 +47,12 @@ if RETRAIN:
 
 else:
     best_model_path = get_latest_model_path()
-    if best_model_path:
-        print(f'Skipping Training. Loading latest model: {best_model_path}')
-    else:
-        print('No trained model found. Training a new model.')
+
+    if not best_model_path:
+        print("No model found → training new one")
         best_model_path = train_model()
+
+print(f"Using model: {best_model_path}")
 
 # -------------------------
 # LOAD MODEL
@@ -114,12 +115,11 @@ for species, img_path in image_paths:
             else:
                 flat_poly = [float(c) for c in poly]
 
-            # Ensure 8 coordinates for OBB IoU
-            if len(flat_poly) == 8:
-                preds.append(flat_poly)
-            elif len(flat_poly) > 8:
-                # Simplification: if it's a complex mask, take the first 8 points
-                preds.append(flat_poly[:8])
+            preds.append({
+              "poly": flat_poly[:8],
+              "class": pred.category.id if hasattr(pred, "category") else None
+            })
+
 
     tp, fp, fn = calculate_tp_fp_fn(preds, gt_boxes, iou_threshold=0.4)
 

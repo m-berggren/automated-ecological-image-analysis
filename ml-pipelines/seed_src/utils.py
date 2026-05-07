@@ -10,7 +10,7 @@ def load_model(model_path):
     return AutoDetectionModel.from_pretrained(
         model_type='ultralytics',
         model_path=model_path,
-        confidence_threshold=0.5,
+        confidence_threshold=0.3,
         device='cpu',
     )
 
@@ -25,7 +25,7 @@ def run_sahi(image_path, model):
         overlap_width_ratio=0.4,
         postprocess_type='NMS',
         postprocess_match_metric='IOU',
-        postprocess_match_threshold=0.15,
+        postprocess_match_threshold=0.25,
     )
 
 
@@ -88,7 +88,8 @@ def update_class_labels(directory, new_id):
                 for line in lines:
                     parts = line.split()
                     if len(parts) > 0:
-                        parts[0] = str(new_id)
+                        if parts[0] != str(new_id):
+                            parts[0] = str(new_id)
                         f.write(' '.join(parts) + '\n')
             count += 1
 

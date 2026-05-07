@@ -6,13 +6,13 @@ def train_model():
 
     model.train(
         data="../data/seed/data.yaml",
-        epochs=300,
+        epochs=200,
         imgsz=768,
         batch=2,
-        crop_fraction=0.2,
         mosaic=0.0,
         close_mosaic=0,
-        plots=True
+        plots=True,
+        augment=True #Augmentation
     )
 
     save_dir = model.trainer.save_dir

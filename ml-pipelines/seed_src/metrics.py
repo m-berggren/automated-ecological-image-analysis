@@ -35,7 +35,7 @@ def calculate_tp_fp_fn(preds, gts, iou_threshold=0.5):
         for i, g_box in enumerate(gts):
             if i in matched_gt_indices:
                 continue
-            iou = get_iou(p_box, g_box)
+            iou = get_iou(p_box["poly"], g_box)
             if iou > best_iou:
                 best_iou = iou
                 best_gt_idx = i
