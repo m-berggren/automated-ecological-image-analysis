@@ -1,0 +1,6 @@
+path: ../data/seed/phyca_model
+train: train
+val: val
+
+names:
+  0: phyca

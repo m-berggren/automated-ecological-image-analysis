@@ -1,0 +1,7 @@
+path: ../data/seed/cat_model
+train: train
+val: val
+
+names:
+  0: cat
+
