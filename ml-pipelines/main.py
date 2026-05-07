@@ -2,9 +2,8 @@ import os
 from collections import defaultdict
 
 from seed_src.metrics import calculate_tp_fp_fn
-from seed_src.train import train_model
+from seed_src.train import train_species_model
 from seed_src.utils import (
-    get_latest_model_path,
     load_ground_truth,
     load_model,
     run_sahi,
@@ -16,6 +15,9 @@ from seed_src.utils import (
 # -------------------------
 PREPARE_LABELS = True  # Set to True to run the label update on newly added label files
 RETRAIN = False  # Set to True to train a new model, False to use existing weights
+SPECIES_LIST = ['cat', 'peh', 'phyca', 'vau']
+# Map species to their specific yaml files
+CONFIG_MAP = {s: f'../data/seed/{s}_model/{s}.yaml' for s in SPECIES_LIST}
 
 # -------------------------
 # LABEL PREPARATION
@@ -26,10 +28,14 @@ BASE_PATH = '../data/seed'
 
 
 def prepare_data_labels():
-    for split in SPLITS:
-        for species, folder_id in SPECIES_IDS.items():
-            path = os.path.join(BASE_PATH, split, species, 'labels')
-            update_class_labels(path, folder_id)
+    for species, folder_id in SPECIES_IDS.items():
+        for split in SPLITS:
+            path = os.path.join(BASE_PATH, f'{species}_model', split, 'labels')
+            if os.path.exists(path):
+                update_class_labels(path, 0)
+                print(f'  - Updated labels for {species} ({split}) to ID 0')
+            else:
+                print(f'  - Path not found {path}')
 
 
 if PREPARE_LABELS:
@@ -41,29 +47,40 @@ if PREPARE_LABELS:
 # TRAIN
 # -------------------------
 
-if RETRAIN:
-    print('Training started...')
-    best_model_path = train_model()
+best_model_paths = {}
 
-else:
-    best_model_path = get_latest_model_path()
+for species in SPECIES_LIST:
+    expected_path = os.path.join('runs', 'obb', 'species', 'weights', 'best.pt')
 
-    if not best_model_path:
-        print("No model found → training new one")
-        best_model_path = train_model()
+    if RETRAIN:
+        print(f'Training started on {species}...')
+        best_model_paths[species] = train_species_model(species, CONFIG_MAP[species])
 
-print(f"Using model: {best_model_path}")
+    else:
+        best_model_paths[species] = expected_path
+
+        if not best_model_paths[species]:
+            print('No model found → training new one')
+            best_model_paths[species] = train_species_model(
+                species, CONFIG_MAP[species]
+            )
+
+    print(f'Using model: {best_model_paths[species]}')
+
 
 # -------------------------
 # LOAD MODEL
 # -------------------------
-model = load_model(best_model_path)
+# model = load_model(best_model_path)
+models = {s: load_model(path) for s, path in best_model_paths.items()}
 
 
 # -------------------------
 # LOAD DATA
 # -------------------------
-VAL_DIR = '../data/seed/val'
+VAL_DIR = (
+    '../data/seed/val'  # TODO: Potentially change this depending on the path we decide
+)
 
 image_paths = []
 
@@ -83,10 +100,21 @@ results = defaultdict(
 # -------------------------
 # LOOP
 # -------------------------
-for species, img_path in image_paths:
-    gt_boxes = load_ground_truth(img_path)
 
-    result = run_sahi(img_path, model)
+for species in SPECIES_LIST:
+    species_img_dir = os.path.join(VAL_DIR, species, 'images')
+    if not os.path.exists(species_img_dir):
+        continue
+
+    # Select the model specialized for this species
+    current_model = models[species]
+
+    for img_name in os.listdir(species_img_dir):
+        img_path = os.path.join(species_img_dir, img_name)
+        gt_boxes = load_ground_truth(img_path)
+
+        # Run inference using the specific species model
+        result = run_sahi(img_path, current_model)
 
     # Debug image output to see what the model catches, classification, confidence score
     result.export_visuals(export_dir='debug_outputs/')
@@ -115,11 +143,12 @@ for species, img_path in image_paths:
             else:
                 flat_poly = [float(c) for c in poly]
 
-            preds.append({
-              "poly": flat_poly[:8],
-              "class": pred.category.id if hasattr(pred, "category") else None
-            })
-
+            preds.append(
+                {
+                    'poly': flat_poly[:8],
+                    'class': pred.category.id if hasattr(pred, 'category') else None,
+                }
+            )
 
     tp, fp, fn = calculate_tp_fp_fn(preds, gt_boxes, iou_threshold=0.4)
 
