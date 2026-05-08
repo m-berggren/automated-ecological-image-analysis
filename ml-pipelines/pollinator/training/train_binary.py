@@ -6,11 +6,17 @@ Train binary classifier: insect vs background.
 Uses two model architectures:
     - EfficientNet-B2: standard image classifier, all layers trainable, ImageNet pretrained weights.
     - InsectNet:      custom insect classifier, last block + fc trainable, pretrained on 2526 insect classes.
-
 Result shows EfficientNet-B2 performs better in identifying insects vs background
 
-Background sampling is balanced across (site, species, plot: hdd/site/species/plot) groups to
-prevent any single camera plot from dominating the training data.
+
+Background crops are sampled evenly across camera plots .
+each plot gets an equal quota, so no single plot dominates the training data.
+Steps below:
+1. Parse each background crop's filename to extract its camera plot key hdd/site/species/plot (e.g. hdd1_cg_Vamy_p1)
+2. Group all background crops by plot key
+3. Compute a per-plot quota = total_background_target / n_plots
+4. Sample up to quota crops from each plot (take all if a plot has fewer than quota)
+5. Shuffle and return — total background ≈ n_insect × bg_ratio (default 3:1)
 
 Usage (CLI):
     python -m pollinator.training.train_binary \
