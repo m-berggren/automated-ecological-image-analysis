@@ -200,7 +200,7 @@
           />
         </label>
       </p>
-      <p class="text-xs text-muted-foreground mt-1">JPG, PNG — up to ~100 images per run</p>
+      <p class="text-xs text-muted-foreground mt-1">JPG, PNG - uploads in batches of 4</p>
     </section>
   </div>
 </template>
