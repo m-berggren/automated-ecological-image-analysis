@@ -9,6 +9,9 @@ Uses two model architectures:
 
 Result shows EfficientNet-B2 performs better in identifying insects vs background
 
+Background sampling is balanced across (site, species, plot: hdd/site/species/plot) groups to
+prevent any single camera plot from dominating the training data.
+
 Usage (CLI):
     python -m pollinator.training.train_binary \
         --data_ls   path/to/labeled_ls \
@@ -26,6 +29,7 @@ Usage (as module):
 import argparse
 import json
 import logging
+import re
 import time
 from pathlib import Path
 from typing import Optional
@@ -48,7 +52,7 @@ INSECT_FOLDERS = ["bumblebee", "fly", "butterfly", "other"]
 DEFAULT_BG_RATIO = 3
 
 
-# ── Dataset helpers ────────────────────────────────────────────────────────
+# ── Dataset ────────────────────────────────────────────────────────────────
 def letterbox(img: Image.Image, size: int) -> Image.Image:
     w, h  = img.size
     max_s = max(w, h)
@@ -70,53 +74,109 @@ class CropDataset(Dataset):
         return self.transform(img), label
 
 
-def _collect_samples(labeled_dir: Path, bg_ratio: int, rng, bg_counts_per_plot: dict):
-    """Collect (path, label) pairs with per-plot background quota sampling."""
-    samples = []
+# ── Background sampling ────────────────────────────────────────────────────
+def parse_plot_key(path: Path) -> str:
+    """
+    Extract (hdd, site, species, plot) key from crop filename.
 
-    # Insect crops (all subfolders except background and unsure)
+    Handles two formats:
+      hdd_1_2025_cg_Vamy_p1_101_WSCT__...
+      hdd_2_2025_desert_Asa_p2_20250729_102_WSCT__...
+
+    Returns e.g. 'hdd1_cg_Vamy_p1'
+    """
+    parts = path.stem.split("_")
+    try:
+        if parts[0] == "hdd" and len(parts) > 6:
+            hdd     = parts[1]
+            site    = parts[3]
+            species = parts[4]
+            plot    = parts[5]
+            return f"hdd{hdd}_{site}_{species}_{plot}"
+    except IndexError:
+        pass
+    return "unknown"
+
+
+def sample_background_balanced(bg_dir: Path, n_total: int, seed: int) -> list:
+    """
+    Sample n_total background crops evenly across (hdd, site, species, plot) groups.
+    Each group gets an equal quota; remainder is distributed round-robin.
+    This prevents any single camera plot from dominating the training data.
+    """
+    all_bg = []
+    for ext in ("*.jpg", "*.jpeg", "*.png"):
+        all_bg.extend(bg_dir.glob(ext))
+
+    groups = {}
+    for p in all_bg:
+        key = parse_plot_key(p)
+        groups.setdefault(key, []).append(p)
+
+    rng = np.random.default_rng(seed)
+    for key in groups:
+        rng.shuffle(groups[key])
+
+    n_groups  = len(groups)
+    if n_groups == 0 or n_total == 0:
+        return []
+
+    quota     = n_total // n_groups
+    remainder = n_total % n_groups
+
+    logger.info(f"Background sampling: {n_groups} groups, quota={quota}/group, remainder={remainder}")
+    for key, imgs in sorted(groups.items()):
+        logger.info(f"  {key:30}: {len(imgs):>5} available")
+
+    sampled = []
+    keys = sorted(groups.keys())
+    for i, key in enumerate(keys):
+        imgs = groups[key]
+        take = quota + (1 if i < remainder else 0)
+        take = min(take, len(imgs))
+        sampled.extend(imgs[:take])
+
+    rng.shuffle(sampled)
+    logger.info(f"Sampled {len(sampled)} background crops (target {n_total})")
+    return sampled
+
+
+# ── Data loading ───────────────────────────────────────────────────────────
+def load_and_split(
+    labeled_dir: Path,
+    val_frac:    float = 0.2,
+    test_frac:   float = 0.1,
+    bg_ratio:    int   = DEFAULT_BG_RATIO,
+    seed:        int   = 42,
+) -> tuple:
+    """
+    Collect insect + background samples from a labeled directory.
+    Background is sampled evenly across camera plots (per-plot quota).
+    Returns stratified train/val/test split.
+    """
+    # Collect insect crops
+    insect_paths = []
     for folder in INSECT_FOLDERS:
         d = labeled_dir / folder
         if not d.exists():
             continue
         for ext in ("*.jpg", "*.jpeg", "*.png"):
-            for p in d.glob(ext):
-                samples.append((p, 1))  # 1 = insect
+            insect_paths.extend(d.glob(ext))
 
-    n_insect = sum(1 for _, l in samples if l == 1)
-    quota    = n_insect * bg_ratio
+    n_insect    = len(insect_paths)
+    n_bg_target = n_insect * bg_ratio
 
-    # Background crops — sample per plot
-    bg_dir = labeled_dir / "background"
-    if bg_dir.exists():
-        # Group by plot (parent folder name encoded in filename)
-        all_bg = list(bg_dir.glob("*.jpg")) + list(bg_dir.glob("*.png"))
-        rng.shuffle(all_bg)
-        # Simple random sample capped at quota
-        sampled = all_bg[:quota]
-        for p in sampled:
-            samples.append((p, 0))  # 0 = background
+    # Per-plot balanced background sampling
+    bg_dir   = labeled_dir / "background"
+    bg_paths = sample_background_balanced(bg_dir, n_bg_target, seed)
 
-    n_bg = sum(1 for _, l in samples if l == 0)
-    logger.info(f"  {labeled_dir.name}: insect={n_insect} background={n_bg}")
-    return samples
+    all_samples = [(p, 0) for p in bg_paths] + [(p, 1) for p in insect_paths]
 
-
-def load_and_split(
-    labeled_dirs: list,
-    val_frac:     float = 0.2,
-    test_frac:    float = 0.1,
-    bg_ratio:     int   = DEFAULT_BG_RATIO,
-    seed:         int   = 42,
-) -> tuple:
-    rng = np.random.default_rng(seed)
-    all_samples = []
-    for d in labeled_dirs:
-        all_samples += _collect_samples(Path(d), bg_ratio, rng, {})
-
-    rng.shuffle(all_samples)
+    if n_insect < 150:
+        logger.warning(f"Only {n_insect} insect crops — annotate more before training")
 
     # Stratified split
+    rng      = np.random.default_rng(seed)
     by_class = {0: [], 1: []}
     for i, (_, lbl) in enumerate(all_samples):
         by_class[lbl].append(i)
@@ -131,8 +191,7 @@ def load_and_split(
         val_idx.extend(idxs[n_test:n_test + n_val])
         train_idx.extend(idxs[n_test + n_val:])
 
-    counts = {0: sum(1 for _, l in all_samples if l == 0),
-              1: sum(1 for _, l in all_samples if l == 1)}
+    counts = {0: len(by_class[0]), 1: len(by_class[1])}
 
     def split_counts(idx):
         bg  = sum(1 for i in idx if all_samples[i][1] == 0)
@@ -143,18 +202,19 @@ def load_and_split(
     va_bg, va_ins = split_counts(val_idx)
     te_bg, te_ins = split_counts(test_idx)
 
-    logger.info(f"\nDataset split summary:")
-    logger.info(f"  Strategy: stratified by class, test={test_frac:.0%}, val={val_frac:.0%}")
-    logger.info(f"  {'Split':8}  {'Background':>12}  {'Insect':>8}  {'Total':>8}")
-    logger.info(f"  {'Train':8}  {tr_bg:>12}  {tr_ins:>8}  {len(train_idx):>8}")
-    logger.info(f"  {'Val':8}  {va_bg:>12}  {va_ins:>8}  {len(val_idx):>8}")
-    logger.info(f"  {'Test':8}  {te_bg:>12}  {te_ins:>8}  {len(test_idx):>8}")
-    logger.info(f"  Background:insect ratio = {counts[0]/max(1,counts[1]):.1f}:1")
+    logger.info(f"\nDataset split ({labeled_dir.name}):")
+    logger.info(f"  strategy: stratified, test={test_frac:.0%}, val={val_frac:.0%}")
+    logger.info(f"  {'split':8}  {'background':>12}  {'insect':>8}  {'total':>8}")
+    logger.info(f"  {'train':8}  {tr_bg:>12}  {tr_ins:>8}  {len(train_idx):>8}")
+    logger.info(f"  {'val':8}  {va_bg:>12}  {va_ins:>8}  {len(val_idx):>8}")
+    logger.info(f"  {'test':8}  {te_bg:>12}  {te_ins:>8}  {len(test_idx):>8}")
+    logger.info(f"  background:insect ratio = {counts[0]/max(1,counts[1]):.1f}:1")
 
     return all_samples, train_idx, val_idx, test_idx, counts
 
 
-def make_loaders(all_samples, train_idx, val_idx, test_idx, counts, img_size, batch):
+def make_loaders(all_samples, train_idx, val_idx, test_idx,
+                 counts, img_size, batch) -> tuple:
     train_tf = T.Compose([
         T.Lambda(lambda img: letterbox(img, img_size)),
         T.RandomHorizontalFlip(),
@@ -181,10 +241,8 @@ def make_loaders(all_samples, train_idx, val_idx, test_idx, counts, img_size, ba
     sample_w = [cls_w[l] for l in labels]
     sampler  = WeightedRandomSampler(sample_w, len(sample_w))
 
-    # Weighted loss
-    w = torch.tensor([1.0 / max(1, counts[i]) for i in range(2)])
-    w = w / w.sum()
-    criterion = nn.CrossEntropyLoss(weight=w)
+    w         = torch.tensor([1.0 / max(1, counts[i]) for i in range(2)])
+    criterion = nn.CrossEntropyLoss(weight=w / w.sum())
 
     train_loader = DataLoader(CropDataset(train_samples, train_tf),
                               batch_size=batch, sampler=sampler, num_workers=0)
@@ -196,7 +254,7 @@ def make_loaders(all_samples, train_idx, val_idx, test_idx, counts, img_size, ba
 
 
 # ── Model builders ─────────────────────────────────────────────────────────
-def build_efficientnet_b2():
+def build_efficientnet_b2() -> tuple:
     logger.info("Building EfficientNet-B2 (ImageNet, 256px, all layers trainable)")
     model = torchvision.models.efficientnet_b2(weights="IMAGENET1K_V1")
     in_f  = model.classifier[-1].in_features
@@ -204,8 +262,8 @@ def build_efficientnet_b2():
     return model, 256
 
 
-def build_insectnet(weights_path: str, unfreeze_last: bool = False):
-    logger.info(f"Building InsectNet binary (RegNet-Y-32GF, 224px)")
+def build_insectnet(weights_path: str) -> tuple:
+    logger.info("Building InsectNet binary (RegNet-Y-32GF, 224px)")
     model    = torchvision.models.regnet_y_32gf()
     model.fc = nn.Linear(3712, 2526)
     state    = torch.load(weights_path, map_location="cpu", weights_only=False)
@@ -214,19 +272,13 @@ def build_insectnet(weights_path: str, unfreeze_last: bool = False):
     nn.init.xavier_uniform_(model.fc.weight)
     for name, p in model.named_parameters():
         p.requires_grad = name.startswith("fc.")
-    if unfreeze_last:
-        for name, p in model.named_parameters():
-            if "trunk_output.block4" in name or name.startswith("fc."):
-                p.requires_grad = True
-        logger.info("Backbone: last block + fc unfrozen")
-    else:
-        logger.info("Backbone: FROZEN (only fc layer trainable)")
+    logger.info("Backbone: FROZEN (only fc layer trainable)")
     return model, 224
 
 
-# ── Training loop ──────────────────────────────────────────────────────────
+# ── Eval ───────────────────────────────────────────────────────────────────
 @torch.no_grad()
-def eval_epoch(model, loader, criterion, device):
+def eval_epoch(model, loader, criterion, device) -> dict:
     model.eval()
     loss_sum = correct = total = 0
     tp = fp = fn = tn = 0
@@ -244,28 +296,33 @@ def eval_epoch(model, loader, criterion, device):
     prec = tp / max(1, tp + fp)
     rec  = tp / max(1, tp + fn)
     f1   = 2 * prec * rec / max(1e-8, prec + rec)
-    return {"loss": loss_sum / total, "acc": correct / total,
-            "precision": prec, "recall": rec, "f1": f1,
-            "tp": tp, "fp": fp, "fn": fn, "tn": tn}
+    return {
+        "loss": loss_sum / max(1, total), "acc": correct / max(1, total),
+        "precision": prec, "recall": rec, "f1": f1,
+        "tp": tp, "fp": fp, "fn": fn, "tn": tn,
+    }
 
 
 def train_binary(
-    data_ls:         Optional[str] = None,
-    data_mb:         Optional[str] = None,
-    mode:            str   = "combined",
-    model_type:      str   = "efficientnet",
+    data_ls:           Optional[str] = None,
+    data_mb:           Optional[str] = None,
+    mode:              str   = "combined",
+    model_type:        str   = "efficientnet",
     insectnet_weights: Optional[str] = None,
-    output_dir:      str   = "models",
-    epochs:          int   = 20,
-    batch:           int   = 32,
-    lr:              float = 1e-3,
-    val_frac:        float = 0.2,
-    test_frac:       float = 0.1,
-    bg_ratio:        int   = DEFAULT_BG_RATIO,
-    seed:            int   = 42,
+    output_dir:        str   = "models",
+    epochs:            int   = 20,
+    batch:             int   = 32,
+    lr:                float = 1e-3,
+    val_frac:          float = 0.2,
+    test_frac:         float = 0.1,
+    bg_ratio:          int   = DEFAULT_BG_RATIO,
+    seed:              int   = 42,
 ) -> dict:
     """
     Train binary insect/background classifier.
+
+    Background crops are sampled evenly across camera plots to avoid
+    any single plot dominating the training data.
 
     Args:
         data_ls:   Path to labeled_ls folder (Lian's data).
@@ -273,7 +330,7 @@ def train_binary(
         mode:      "ls", "mb", or "combined".
         model_type: "efficientnet" or "insectnet".
         insectnet_weights: Path to InsectNet model.pth (required for insectnet).
-        output_dir: Where to save checkpoints and curves.
+        output_dir: Where to save checkpoints and results.
         epochs, batch, lr, val_frac, test_frac, bg_ratio, seed: training params.
 
     Returns:
@@ -286,40 +343,53 @@ def train_binary(
     out_dir = Path(output_dir)
     out_dir.mkdir(parents=True, exist_ok=True)
 
-    # Collect data dirs
-    dirs = []
-    if mode in ("ls", "combined") and data_ls:
-        dirs.append(data_ls)
-    if mode in ("mb", "combined") and data_mb:
-        dirs.append(data_mb)
-    if not dirs:
-        raise ValueError("No data directories provided")
-
     torch.manual_seed(seed)
     np.random.seed(seed)
 
-    all_samples, train_idx, val_idx, test_idx, counts = load_and_split(
-        dirs, val_frac, test_frac, bg_ratio, seed
-    )
-    img_size = 256 if model_type == "efficientnet" else 224
-    train_loader, val_loader, test_loader, criterion = make_loaders(
-        all_samples, train_idx, val_idx, test_idx, counts, img_size, batch
-    )
+    # ── Collect data ───────────────────────────────────────────────────────
+    if mode == "combined":
+        if not data_ls or not data_mb:
+            raise ValueError("combined mode requires both --data_ls and --data_mb")
+        s1, t1, v1, te1, c1 = load_and_split(Path(data_ls), val_frac, test_frac, bg_ratio, seed)
+        s2, t2, v2, te2, c2 = load_and_split(Path(data_mb), val_frac, test_frac, bg_ratio, seed)
+        offset      = len(s1)
+        all_samples = s1 + s2
+        train_idx   = t1 + [i + offset for i in t2]
+        val_idx     = v1 + [i + offset for i in v2]
+        test_idx    = te1 + [i + offset for i in te2]
+        counts      = {0: c1[0] + c2[0], 1: c1[1] + c2[1]}
+        logger.info(f"\nCombined — background: {counts[0]}  insect: {counts[1]}")
+    elif mode == "ls":
+        if not data_ls:
+            raise ValueError("ls mode requires --data_ls")
+        all_samples, train_idx, val_idx, test_idx, counts = load_and_split(
+            Path(data_ls), val_frac, test_frac, bg_ratio, seed
+        )
+    else:  # mb
+        if not data_mb:
+            raise ValueError("mb mode requires --data_mb")
+        all_samples, train_idx, val_idx, test_idx, counts = load_and_split(
+            Path(data_mb), val_frac, test_frac, bg_ratio, seed
+        )
 
-    # Build model
+    # ── Build model ────────────────────────────────────────────────────────
     if model_type == "insectnet":
         if not insectnet_weights:
-            raise ValueError("insectnet_weights path required for insectnet model")
+            raise ValueError("insectnet_weights required for insectnet model")
         model, img_size = build_insectnet(insectnet_weights)
     else:
         model, img_size = build_efficientnet_b2()
     model = model.to(device)
 
+    train_loader, val_loader, test_loader, criterion = make_loaders(
+        all_samples, train_idx, val_idx, test_idx, counts, img_size, batch
+    )
+    criterion = criterion.to(device)
+
     optimizer = torch.optim.Adam(
         filter(lambda p: p.requires_grad, model.parameters()), lr=lr
     )
     scheduler = torch.optim.lr_scheduler.CosineAnnealingLR(optimizer, T_max=epochs)
-    criterion = criterion.to(device)
 
     ckpt_path = out_dir / f"{model_type}_binary_best.pth"
     best_f1   = 0.0
@@ -345,21 +415,25 @@ def train_binary(
         tr_loss /= len(train_loader.dataset)
         scheduler.step()
 
-        v = eval_epoch(model, val_loader, criterion, device)
-        history["tr_loss"].append(tr_loss)
-        history["val_loss"].append(v["loss"])
-        history["val_f1"].append(v["f1"])
-        history["val_acc"].append(v["acc"])
-
+        v    = eval_epoch(model, val_loader, criterion, device)
         star = ""
         if v["f1"] > best_f1:
             best_f1 = v["f1"]
             torch.save({
-                "epoch": ep, "model_name": model_type, "img_size": img_size,
+                "epoch":      ep,
+                "model_name": model_type,
+                "img_size":   img_size,
                 "state_dict": model.state_dict(),
-                "val_f1": v["f1"], "val_acc": v["acc"],
+                "val_f1":     v["f1"],
+                "val_recall": v["recall"],
+                "val_precision": v["precision"],
             }, ckpt_path)
             star = " *"
+
+        history["tr_loss"].append(tr_loss)
+        history["val_loss"].append(v["loss"])
+        history["val_f1"].append(v["f1"])
+        history["val_acc"].append(v["acc"])
 
         logger.info(f"{ep:>3}  {tr_loss:>7.4f}  {v['loss']:>7.4f}  "
                     f"{v['precision']:>6.3f}  {v['recall']:>6.3f}  "
@@ -370,17 +444,14 @@ def train_binary(
     # Final test evaluation
     ckpt = torch.load(ckpt_path, map_location=device, weights_only=False)
     model.load_state_dict(ckpt["state_dict"])
-    test_metrics = eval_epoch(model, test_loader, criterion, device)
+    test = eval_epoch(model, test_loader, criterion, device)
 
-    logger.info(f"\n--- Test set results (best checkpoint epoch {ckpt['epoch']}) ---")
-    logger.info(f"  F1={test_metrics['f1']:.3f}  "
-                f"Recall={test_metrics['recall']:.3f}  "
-                f"Precision={test_metrics['precision']:.3f}  "
-                f"Acc={test_metrics['acc']:.3f}")
-    logger.info(f"  TP={test_metrics['tp']}  FP={test_metrics['fp']}  "
-                f"FN={test_metrics['fn']}  TN={test_metrics['tn']}")
+    logger.info(f"\n--- test set (best checkpoint epoch {ckpt['epoch']}) ---")
+    logger.info(f"  F1={test['f1']:.3f}  Recall={test['recall']:.3f}  "
+                f"Precision={test['precision']:.3f}  Acc={test['acc']:.3f}")
+    logger.info(f"  TP={test['tp']}  FP={test['fp']}  FN={test['fn']}  TN={test['tn']}")
 
-    # Save training curves
+    # ── Save curves ────────────────────────────────────────────────────────
     fig, axes = plt.subplots(1, 2, figsize=(12, 4))
     axes[0].plot(history["tr_loss"], label="train")
     axes[0].plot(history["val_loss"], label="val")
@@ -392,14 +463,21 @@ def train_binary(
     plt.savefig(out_dir / f"{model_type}_binary_curves.png", dpi=100)
     plt.close()
 
-    # Save results JSON
+    # ── Save results JSON ──────────────────────────────────────────────────
     results = {
-        "model": model_type, "mode": mode, "img_size": img_size,
-        "best_epoch": ckpt["epoch"], "best_val_f1": best_f1,
-        "test_f1":        test_metrics["f1"],
-        "test_recall":    test_metrics["recall"],
-        "test_precision": test_metrics["precision"],
-        "test_acc":       test_metrics["acc"],
+        "model":          model_type,
+        "mode":           mode,
+        "img_size":       img_size,
+        "best_epoch":     ckpt["epoch"],
+        "best_val_f1":    best_f1,
+        "test_f1":        test["f1"],
+        "test_recall":    test["recall"],
+        "test_precision": test["precision"],
+        "test_acc":       test["acc"],
+        "test_tp":        test["tp"],
+        "test_fp":        test["fp"],
+        "test_fn":        test["fn"],
+        "test_tn":        test["tn"],
     }
     (out_dir / f"{model_type}_binary_results.json").write_text(
         json.dumps(results, indent=2)
@@ -411,15 +489,19 @@ def train_binary(
 # ── CLI ────────────────────────────────────────────────────────────────────
 if __name__ == "__main__":
     parser = argparse.ArgumentParser()
-    parser.add_argument("--data_ls",   help="Path to labeled_ls")
-    parser.add_argument("--data_mb",   help="Path to labeled_mb")
-    parser.add_argument("--mode",      default="combined", choices=["ls", "mb", "combined"])
-    parser.add_argument("--model",     default="efficientnet", choices=["efficientnet", "insectnet"])
+    parser.add_argument("--data_ls",           help="Path to labeled_ls")
+    parser.add_argument("--data_mb",           help="Path to labeled_mb")
+    parser.add_argument("--mode",              default="combined",
+                        choices=["ls", "mb", "combined"])
+    parser.add_argument("--model",             default="efficientnet",
+                        choices=["efficientnet", "insectnet"])
     parser.add_argument("--insectnet_weights", help="Path to InsectNet model.pth")
-    parser.add_argument("--output",    default="models")
-    parser.add_argument("--epochs",    type=int,   default=20)
-    parser.add_argument("--batch",     type=int,   default=32)
-    parser.add_argument("--lr",        type=float, default=1e-3)
+    parser.add_argument("--output",            default="models")
+    parser.add_argument("--epochs",            type=int,   default=20)
+    parser.add_argument("--batch",             type=int,   default=32)
+    parser.add_argument("--lr",                type=float, default=1e-3)
+    parser.add_argument("--bg_ratio",          type=int,   default=DEFAULT_BG_RATIO,
+                        help="Background:insect sampling ratio (default 3)")
     args = parser.parse_args()
 
     train_binary(
@@ -432,4 +514,5 @@ if __name__ == "__main__":
         epochs            = args.epochs,
         batch             = args.batch,
         lr                = args.lr,
+        bg_ratio          = args.bg_ratio,
     )
