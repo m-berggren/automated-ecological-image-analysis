@@ -50,7 +50,7 @@ if PREPARE_LABELS:
 best_model_paths = {}
 
 for species in SPECIES_LIST:
-    expected_path = os.path.join('runs', 'obb', 'species', 'weights', 'best.pt')
+    expected_path = os.path.join('runs', 'obb', species, 'weights', 'best.pt')
 
     if RETRAIN:
         print(f'Training started on {species}...')
