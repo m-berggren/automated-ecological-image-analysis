@@ -1,5 +1,8 @@
 <template>
-  <PageHeader title="Training" subtitle="Retrain the pollinator pipeline on accumulated review data" />
+  <PageHeader
+    title="Training"
+    subtitle="Retrain the pollinator pipeline on accumulated review data"
+  />
 
   <div class="flex-1 overflow-auto">
     <div v-if="loading" class="p-8 text-sm text-muted-foreground">Loading…</div>
@@ -17,7 +20,9 @@
 
         <!-- Step 1: Pick model -->
         <div class="px-5 py-4 border-b border-border">
-          <div class="text-[11px] font-semibold uppercase tracking-wider text-muted-foreground mb-3">
+          <div
+            class="text-[11px] font-semibold uppercase tracking-wider text-muted-foreground mb-3"
+          >
             1. Pick a model to retrain
           </div>
           <div class="space-y-2">
@@ -25,16 +30,13 @@
               v-for="track in tracks"
               :key="track.id"
               class="flex items-start gap-3 p-3 rounded-lg border cursor-pointer transition-colors"
-              :class="selectedTrackId === track.id
-                ? 'border-primary bg-primary/5'
-                : 'border-border hover:border-primary/40'"
+              :class="
+                selectedTrackId === track.id
+                  ? 'border-primary bg-primary/5'
+                  : 'border-border hover:border-primary/40'
+              "
             >
-              <input
-                type="radio"
-                :value="track.id"
-                v-model="selectedTrackId"
-                class="mt-0.5"
-              />
+              <input type="radio" :value="track.id" v-model="selectedTrackId" class="mt-0.5" />
               <div class="flex-1 min-w-0">
                 <div class="flex items-baseline gap-2 flex-wrap">
                   <span class="font-medium text-sm">{{ track.label }}</span>
@@ -58,10 +60,7 @@
                     {{ formatMetric(activeMainMetric(track)) }}
                   </span>
                   · {{ track.data_pool.total_samples.toLocaleString() }} samples available
-                  <span
-                    v-if="track.data_pool.new_since_active > 0"
-                    class="text-primary"
-                  >
+                  <span v-if="track.data_pool.new_since_active > 0" class="text-primary">
                     (+{{ track.data_pool.new_since_active }} new since active)
                   </span>
                 </div>
@@ -72,7 +71,9 @@
 
         <!-- Step 2: Choose data -->
         <div v-if="selectedTrack" class="px-5 py-4 border-b border-border">
-          <div class="text-[11px] font-semibold uppercase tracking-wider text-muted-foreground mb-3">
+          <div
+            class="text-[11px] font-semibold uppercase tracking-wider text-muted-foreground mb-3"
+          >
             2. Choose training data
           </div>
           <!-- Pool summary card -->
@@ -83,15 +84,12 @@
                   {{ totalPoolSamples.toLocaleString() }} samples in pool
                 </div>
                 <div class="text-xs text-muted-foreground">
-                  {{ selectedTrack.data_pool.total_samples.toLocaleString() }} from review
-                  · {{ uploadedFiles.length }}
-                  uploaded {{ uploadedFiles.length === 1 ? 'file' : 'files' }}
+                  {{ selectedTrack.data_pool.total_samples.toLocaleString() }} from review ·
+                  {{ uploadedFiles.length }} uploaded
+                  {{ uploadedFiles.length === 1 ? 'file' : 'files' }}
                 </div>
               </div>
-              <button
-                class="text-xs text-primary hover:underline"
-                @click="openReviewDrawer"
-              >
+              <button class="text-xs text-primary hover:underline" @click="openReviewDrawer">
                 Browse pool →
               </button>
             </div>
@@ -124,9 +122,7 @@
             @drop.prevent="onDrop"
             @click="triggerFilePicker"
           >
-            <div class="text-sm font-medium">
-              Drop crops or a folder here, or click to browse
-            </div>
+            <div class="text-sm font-medium">Drop crops or a folder here, or click to browse</div>
             <div class="text-xs text-muted-foreground mt-1">
               Adds to the training pool. Accepts .jpg, .png, or a .zip with per-class folders.
             </div>
@@ -151,10 +147,7 @@
               <span class="text-muted-foreground shrink-0">
                 {{ formatFileSize(file.size) }}
               </span>
-              <button
-                class="text-muted-foreground hover:text-red-600"
-                @click="removeUpload(idx)"
-              >
+              <button class="text-muted-foreground hover:text-red-600" @click="removeUpload(idx)">
                 ✕
               </button>
             </li>
@@ -172,7 +165,9 @@
 
         <!-- Step 3: Settings -->
         <div v-if="selectedTrack" class="px-5 py-4 border-b border-border">
-          <div class="text-[11px] font-semibold uppercase tracking-wider text-muted-foreground mb-3">
+          <div
+            class="text-[11px] font-semibold uppercase tracking-wider text-muted-foreground mb-3"
+          >
             3. Settings
           </div>
           <div class="grid grid-cols-2 lg:grid-cols-4 gap-3">
@@ -180,7 +175,9 @@
               <span>Train %</span>
               <input
                 v-model.number="settings.train_split"
-                type="number" min="50" max="95"
+                type="number"
+                min="50"
+                max="95"
                 class="w-full px-2 py-1 rounded border border-border bg-background text-sm font-mono text-foreground"
               />
             </label>
@@ -188,7 +185,9 @@
               <span>Val %</span>
               <input
                 v-model.number="settings.val_split"
-                type="number" min="0" max="40"
+                type="number"
+                min="0"
+                max="40"
                 class="w-full px-2 py-1 rounded border border-border bg-background text-sm font-mono text-foreground"
               />
             </label>
@@ -196,7 +195,9 @@
               <span>Test %</span>
               <input
                 v-model.number="settings.test_split"
-                type="number" min="0" max="40"
+                type="number"
+                min="0"
+                max="40"
                 class="w-full px-2 py-1 rounded border border-border bg-background text-sm font-mono text-foreground"
               />
             </label>
@@ -204,7 +205,9 @@
               <span>Epochs</span>
               <input
                 v-model.number="settings.epochs"
-                type="number" min="1" max="200"
+                type="number"
+                min="1"
+                max="200"
                 class="w-full px-2 py-1 rounded border border-border bg-background text-sm font-mono text-foreground"
               />
             </label>
@@ -247,11 +250,7 @@
           </h2>
         </header>
         <ul class="divide-y divide-border">
-          <li
-            v-for="entry in activeJobs"
-            :key="entry.track.id"
-            class="px-5 py-4"
-          >
+          <li v-for="entry in activeJobs" :key="entry.track.id" class="px-5 py-4">
             <div class="flex items-baseline gap-3 mb-2">
               <span class="font-medium text-sm">{{ entry.track.label }}</span>
               <span class="text-xs text-muted-foreground">
@@ -265,9 +264,10 @@
               </button>
             </div>
             <div class="text-xs text-muted-foreground mb-2">
-              epoch {{ entry.track.active_job!.current_epoch }} / {{ entry.track.active_job!.total_epochs }} ·
-              loss {{ entry.track.active_job!.loss.toFixed(3) }} ·
-              val acc {{ (entry.track.active_job!.val_accuracy * 100).toFixed(1) }}%
+              epoch {{ entry.track.active_job!.current_epoch }} /
+              {{ entry.track.active_job!.total_epochs }} · loss
+              {{ entry.track.active_job!.loss.toFixed(3) }} · val acc
+              {{ (entry.track.active_job!.val_accuracy * 100).toFixed(1) }}%
             </div>
             <div class="h-1.5 rounded-full bg-muted overflow-hidden max-w-md">
               <div
@@ -276,8 +276,10 @@
               />
             </div>
             <div class="text-xs text-muted-foreground mt-1 font-mono">
-              {{ humanDuration(jobElapsed(entry.track.active_job!)) }} elapsed ·
-              ~{{ humanDuration(jobRemaining(entry.track.active_job!)) }} remaining
+              {{ humanDuration(jobElapsed(entry.track.active_job!)) }} elapsed · ~{{
+                humanDuration(jobRemaining(entry.track.active_job!))
+              }}
+              remaining
             </div>
           </li>
         </ul>
@@ -335,10 +337,7 @@
                   {{ expandedHistory.has(job.id) ? '▾' : '▸' }}
                 </td>
               </tr>
-              <tr
-                v-if="expandedHistory.has(job.id)"
-                class="border-t border-border bg-muted/10"
-              >
+              <tr v-if="expandedHistory.has(job.id)" class="border-t border-border bg-muted/10">
                 <td></td>
                 <td colspan="7" class="px-3 py-4">
                   <dl class="grid grid-cols-[auto_1fr] gap-x-4 gap-y-1 text-xs max-w-md">
@@ -358,7 +357,9 @@
                     </template>
                   </dl>
                   <div v-if="chartsForJob(job)" class="mt-4 pt-3 border-t border-border">
-                    <div class="text-[11px] font-semibold uppercase tracking-wider text-muted-foreground mb-2">
+                    <div
+                      class="text-[11px] font-semibold uppercase tracking-wider text-muted-foreground mb-2"
+                    >
                       Charts
                     </div>
                     <TrainingCharts :charts="chartsForJob(job)" />
@@ -385,10 +386,10 @@
       >
         <div class="flex-1 bg-black/40" />
         <aside class="w-[640px] max-w-full bg-card border-l border-border shadow-2xl flex flex-col">
-          <header class="px-5 py-3 border-b border-border bg-primary/[0.22] flex items-center gap-3">
-            <h2 class="font-bold text-base tracking-tight">
-              Review training pool
-            </h2>
+          <header
+            class="px-5 py-3 border-b border-border bg-primary/[0.22] flex items-center gap-3"
+          >
+            <h2 class="font-bold text-base tracking-tight">Review training pool</h2>
             <span v-if="selectedTrack" class="text-xs text-muted-foreground">
               {{ selectedTrack.label }} ·
               {{ selectedTrack.data_pool.total_samples.toLocaleString() }} samples
@@ -406,9 +407,11 @@
               v-for="cls in drawerClasses"
               :key="cls.value"
               class="px-2 py-1 rounded font-medium transition-colors"
-              :class="drawerFilter === cls.value
-                ? 'bg-primary text-primary-foreground'
-                : 'text-muted-foreground hover:bg-muted'"
+              :class="
+                drawerFilter === cls.value
+                  ? 'bg-primary text-primary-foreground'
+                  : 'text-muted-foreground hover:bg-muted'
+              "
               @click="drawerFilter = cls.value"
             >
               {{ cls.label }}
@@ -431,8 +434,8 @@
               </div>
             </div>
             <p class="text-xs text-muted-foreground mt-4 text-center">
-              Showing placeholder thumbnails. Real crops appear here once the
-              training-data manifest is wired up.
+              Showing placeholder thumbnails. Real crops appear here once the training-data manifest
+              is wired up.
             </p>
           </div>
         </aside>
@@ -580,14 +583,22 @@ interface HistoryMock extends Omit<HistoryEntry, 'started_at'> {
 async function loadPreview(_mode: string) {
   if (!import.meta.env.DEV) return null
   const { default: mocks } = await import('@/mocks/pollinator-models.json')
-  const raw = (mocks as unknown as Record<string, { tracks: TrackMock[]; training_history: HistoryMock[] } | undefined>).default
+  const raw = (
+    mocks as unknown as Record<
+      string,
+      { tracks: TrackMock[]; training_history: HistoryMock[] } | undefined
+    >
+  ).default
   if (!raw) return null
   const now = Date.now()
   const isoFromOffset = (offset: number): string => new Date(now + offset * 1000).toISOString()
   return {
     tracks: raw.tracks.map((t) => ({
       ...t,
-      versions: t.versions.map((v) => ({ ...v, trained_at: isoFromOffset(v.trained_at_offset_seconds) })),
+      versions: t.versions.map((v) => ({
+        ...v,
+        trained_at: isoFromOffset(v.trained_at_offset_seconds),
+      })),
       active_job: t.active_job
         ? { ...t.active_job, started_at: isoFromOffset(t.active_job.started_at_offset_seconds) }
         : null,
@@ -615,18 +626,14 @@ async function loadFromApi() {
   }
 }
 
-const selectedTrack = computed(() =>
-  tracks.value.find((t) => t.id === selectedTrackId.value) ?? null,
+const selectedTrack = computed(
+  () => tracks.value.find((t) => t.id === selectedTrackId.value) ?? null,
 )
 
-const splitTotal = computed(
-  () => settings.train_split + settings.val_split + settings.test_split,
-)
+const splitTotal = computed(() => settings.train_split + settings.val_split + settings.test_split)
 
 const activeJobs = computed(() =>
-  tracks.value
-    .filter((t) => t.active_job !== null)
-    .map((track) => ({ track })),
+  tracks.value.filter((t) => t.active_job !== null).map((track) => ({ track })),
 )
 
 const canSubmit = computed(() => {
@@ -699,12 +706,18 @@ function formatRelative(iso: string): string {
 
 function statusClass(s: string): string {
   switch (s) {
-    case 'completed': return 'bg-green-200 text-green-800'
-    case 'running': return 'bg-blue-200 text-blue-800'
-    case 'failed': return 'bg-red-200 text-red-800'
-    case 'cancelled': return 'bg-muted text-muted-foreground'
-    case 'pending': return 'bg-amber-200 text-amber-800'
-    default: return 'bg-muted text-muted-foreground'
+    case 'completed':
+      return 'bg-green-200 text-green-800'
+    case 'running':
+      return 'bg-blue-200 text-blue-800'
+    case 'failed':
+      return 'bg-red-200 text-red-800'
+    case 'cancelled':
+      return 'bg-muted text-muted-foreground'
+    case 'pending':
+      return 'bg-amber-200 text-amber-800'
+    default:
+      return 'bg-muted text-muted-foreground'
   }
 }
 

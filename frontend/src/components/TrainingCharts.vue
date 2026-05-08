@@ -23,10 +23,29 @@
           opacity="0.5"
         />
         <!-- axes -->
-        <line :x1="MARGIN_L" :y1="MARGIN_T" :x2="MARGIN_L" :y2="CHART_H - MARGIN_B" class="stroke-border" />
-        <line :x1="MARGIN_L" :y1="CHART_H - MARGIN_B" :x2="CHART_W - MARGIN_R" :y2="CHART_H - MARGIN_B" class="stroke-border" />
+        <line
+          :x1="MARGIN_L"
+          :y1="MARGIN_T"
+          :x2="MARGIN_L"
+          :y2="CHART_H - MARGIN_B"
+          class="stroke-border"
+        />
+        <line
+          :x1="MARGIN_L"
+          :y1="CHART_H - MARGIN_B"
+          :x2="CHART_W - MARGIN_R"
+          :y2="CHART_H - MARGIN_B"
+          class="stroke-border"
+        />
         <!-- y-axis labels -->
-        <text v-for="g in [0, 0.5, 1]" :key="g" :x="MARGIN_L - 4" :y="yScale(g) + 3" text-anchor="end" class="fill-muted-foreground text-[9px] font-mono">
+        <text
+          v-for="g in [0, 0.5, 1]"
+          :key="g"
+          :x="MARGIN_L - 4"
+          :y="yScale(g) + 3"
+          text-anchor="end"
+          class="fill-muted-foreground text-[9px] font-mono"
+        >
           {{ g.toFixed(1) }}
         </text>
         <!-- loss line -->
@@ -42,10 +61,20 @@
           <text x="22" y="25" class="fill-foreground text-[9px]">val metric</text>
         </g>
         <!-- x-axis epoch labels -->
-        <text :x="MARGIN_L" :y="CHART_H - 4" text-anchor="start" class="fill-muted-foreground text-[9px] font-mono">
+        <text
+          :x="MARGIN_L"
+          :y="CHART_H - 4"
+          text-anchor="start"
+          class="fill-muted-foreground text-[9px] font-mono"
+        >
           epoch {{ xMin }}
         </text>
-        <text :x="CHART_W - MARGIN_R" :y="CHART_H - 4" text-anchor="end" class="fill-muted-foreground text-[9px] font-mono">
+        <text
+          :x="CHART_W - MARGIN_R"
+          :y="CHART_H - 4"
+          text-anchor="end"
+          class="fill-muted-foreground text-[9px] font-mono"
+        >
           {{ xMax }}
         </text>
       </svg>
@@ -95,13 +124,14 @@
         Per-class metric
       </div>
       <div class="space-y-1.5">
-        <div v-for="row in charts.per_class" :key="row.label" class="flex items-center gap-2 text-xs">
+        <div
+          v-for="row in charts.per_class"
+          :key="row.label"
+          class="flex items-center gap-2 text-xs"
+        >
           <span class="w-20 text-muted-foreground">{{ row.label }}</span>
           <div class="flex-1 h-3 bg-muted rounded-sm overflow-hidden max-w-[200px]">
-            <div
-              class="h-full bg-primary"
-              :style="{ width: (row.value * 100) + '%' }"
-            />
+            <div class="h-full bg-primary" :style="{ width: row.value * 100 + '%' }" />
           </div>
           <span class="font-mono">{{ row.value.toFixed(2) }}</span>
         </div>

@@ -28,8 +28,8 @@
         </div>
         <div class="text-xs text-muted-foreground flex items-center justify-between">
           <span>
-            {{ filteredDetections.length }} of {{ detections.length }} detections ·
-            sorted by ascending InsectNet confidence
+            {{ filteredDetections.length }} of {{ detections.length }} detections · sorted by
+            ascending InsectNet confidence
           </span>
           <button
             class="text-primary hover:underline"
@@ -53,10 +53,7 @@
         >
           Confirm
         </button>
-        <button
-          class="px-2 py-1 rounded border border-border hover:bg-muted"
-          @click="bulkReject"
-        >
+        <button class="px-2 py-1 rounded border border-border hover:bg-muted" @click="bulkReject">
           Reject
         </button>
         <select
@@ -69,17 +66,16 @@
             {{ classLabel(cls) }}
           </option>
         </select>
-        <button
-          class="ml-auto text-muted-foreground hover:text-foreground"
-          @click="clearBulk"
-        >
+        <button class="ml-auto text-muted-foreground hover:text-foreground" @click="clearBulk">
           Clear
         </button>
       </div>
 
       <div class="flex-1 overflow-auto">
         <div v-for="group in groupedDetections" :key="group.label" class="border-b border-border">
-          <header class="px-4 py-2 text-xs font-semibold uppercase tracking-wide text-muted-foreground bg-surface/50 sticky top-0">
+          <header
+            class="px-4 py-2 text-xs font-semibold uppercase tracking-wide text-muted-foreground bg-surface/50 sticky top-0"
+          >
             {{ group.label }} <span class="font-normal">({{ group.detections.length }})</span>
           </header>
           <div class="grid grid-cols-5 gap-1 p-2">
@@ -88,7 +84,9 @@
               :key="d.id"
               class="rounded-md overflow-hidden border-2 transition-all"
               :class="[
-                selectedId === d.id ? 'border-primary ring-2 ring-primary' : 'border-transparent hover:border-border',
+                selectedId === d.id
+                  ? 'border-primary ring-2 ring-primary'
+                  : 'border-transparent hover:border-border',
                 reviewedFade(d) ? 'opacity-50' : '',
               ]"
             >
@@ -101,7 +99,9 @@
                 @click="selectedId = d.id"
                 @keydown.enter.prevent="selectedId = d.id"
               >
-                <div class="absolute inset-0 flex items-center justify-center text-2xl font-bold opacity-30">
+                <div
+                  class="absolute inset-0 flex items-center justify-center text-2xl font-bold opacity-30"
+                >
                   {{ classGlyph(d.yolo_class) }}
                 </div>
                 <span
@@ -112,8 +112,11 @@
                   v-if="hasDisagreement(d)"
                   class="absolute top-1 right-1 text-amber-600 text-xs leading-none"
                   title="YOLO and InsectNet disagree"
-                >⚠</span>
-                <span class="absolute bottom-2 left-1 text-[9px] text-muted-foreground/70 font-mono">
+                  >⚠</span
+                >
+                <span
+                  class="absolute bottom-2 left-1 text-[9px] text-muted-foreground/70 font-mono"
+                >
                   {{ d.source === 'preprocessing' ? 'P' : d.source === 'both' ? 'YP' : 'Y' }}
                 </span>
                 <div
@@ -126,9 +129,11 @@
                 :aria-checked="bulkIds.has(d.id)"
                 tabindex="0"
                 class="h-5 flex items-center justify-center text-xs cursor-pointer transition-colors"
-                :class="bulkIds.has(d.id)
-                  ? 'bg-primary text-primary-foreground'
-                  : 'bg-surface text-muted-foreground hover:bg-muted'"
+                :class="
+                  bulkIds.has(d.id)
+                    ? 'bg-primary text-primary-foreground'
+                    : 'bg-surface text-muted-foreground hover:bg-muted'
+                "
                 @click="toggleBulk(d.id)"
                 @keydown.space.prevent="toggleBulk(d.id)"
               >
@@ -158,7 +163,8 @@
           <span
             class="ml-auto text-xs px-2 py-0.5 rounded-full shrink-0"
             :class="statusBadgeClass(selected.reviewer_status)"
-          >{{ statusLabel(selected.reviewer_status) }}</span>
+            >{{ statusLabel(selected.reviewer_status) }}</span
+          >
         </header>
 
         <div class="flex-1 overflow-auto">
@@ -178,7 +184,9 @@
           <div class="grid grid-cols-1 xl:grid-cols-2 border-b border-border">
             <!-- Predictions (compact, two-line). Order swap at xl+ via order-2. -->
             <div class="px-5 py-4 border-b border-border xl:border-b-0 xl:order-2">
-              <div class="text-[11px] font-semibold uppercase tracking-wider text-muted-foreground mb-2">
+              <div
+                class="text-[11px] font-semibold uppercase tracking-wider text-muted-foreground mb-2"
+              >
                 Predictions
               </div>
               <div class="space-y-1.5 text-sm">
@@ -212,7 +220,9 @@
 
             <!-- Label (one row per class with checkbox at end). Visually first at xl+ via order-1. -->
             <div class="px-5 py-4 xl:order-1 xl:border-r border-border">
-              <div class="text-[11px] font-semibold uppercase tracking-wider text-muted-foreground mb-2">
+              <div
+                class="text-[11px] font-semibold uppercase tracking-wider text-muted-foreground mb-2"
+              >
                 Label
               </div>
               <div>
@@ -239,7 +249,9 @@
         </div>
 
         <!-- Bottom action bar -->
-        <footer class="border-t border-border bg-surface px-5 py-3 flex items-center justify-between">
+        <footer
+          class="border-t border-border bg-surface px-5 py-3 flex items-center justify-between"
+        >
           <span class="text-[11px] text-muted-foreground font-mono hidden md:block">
             1-4 confirm · x reject · ⏎ suggested · ↑↓ navigate
           </span>
@@ -396,17 +408,19 @@ const groupedDetections = computed(() => {
   }))
 })
 
-const selected = computed(() =>
-  detections.value.find((d) => d.id === selectedId.value) ?? null,
-)
+const selected = computed(() => detections.value.find((d) => d.id === selectedId.value) ?? null)
 
-watch(filteredDetections, (list) => {
-  if (selectedId.value && !list.find((d) => d.id === selectedId.value)) {
-    selectedId.value = list[0]?.id ?? null
-  } else if (!selectedId.value && list.length) {
-    selectedId.value = list[0].id
-  }
-}, { immediate: true })
+watch(
+  filteredDetections,
+  (list) => {
+    if (selectedId.value && !list.find((d) => d.id === selectedId.value)) {
+      selectedId.value = list[0]?.id ?? null
+    } else if (!selectedId.value && list.length) {
+      selectedId.value = list[0].id
+    }
+  },
+  { immediate: true },
+)
 
 watch(selectedId, async (id) => {
   if (id == null) return
@@ -437,18 +451,26 @@ function reviewedFade(d: Detection): boolean {
 }
 function statusDotClass(s: ReviewerStatus): string {
   switch (s) {
-    case 'confirmed': return 'bg-green-500'
-    case 'corrected': return 'bg-blue-500'
-    case 'rejected': return 'bg-red-500'
-    default: return 'bg-muted-foreground/40'
+    case 'confirmed':
+      return 'bg-green-500'
+    case 'corrected':
+      return 'bg-blue-500'
+    case 'rejected':
+      return 'bg-red-500'
+    default:
+      return 'bg-muted-foreground/40'
   }
 }
 function statusBadgeClass(s: ReviewerStatus): string {
   switch (s) {
-    case 'confirmed': return 'bg-green-100 text-green-700'
-    case 'corrected': return 'bg-blue-100 text-blue-700'
-    case 'rejected': return 'bg-red-100 text-red-700'
-    default: return 'bg-muted text-muted-foreground'
+    case 'confirmed':
+      return 'bg-green-100 text-green-700'
+    case 'corrected':
+      return 'bg-blue-100 text-blue-700'
+    case 'rejected':
+      return 'bg-red-100 text-red-700'
+    default:
+      return 'bg-muted text-muted-foreground'
   }
 }
 function statusLabel(s: ReviewerStatus): string {
@@ -544,21 +566,48 @@ function navigate(delta: number) {
 
 function onKeydown(e: KeyboardEvent) {
   if (!selected.value) return
-  if (e.target instanceof HTMLElement && ['INPUT', 'SELECT', 'TEXTAREA'].includes(e.target.tagName)) {
+  if (
+    e.target instanceof HTMLElement &&
+    ['INPUT', 'SELECT', 'TEXTAREA'].includes(e.target.tagName)
+  ) {
     return
   }
   switch (e.key) {
-    case '1': confirmAs('fly'); e.preventDefault(); break
-    case '2': confirmAs('bumblebee'); e.preventDefault(); break
-    case '3': confirmAs('butterfly'); e.preventDefault(); break
-    case '4': confirmAs('other'); e.preventDefault(); break
+    case '1':
+      confirmAs('fly')
+      e.preventDefault()
+      break
+    case '2':
+      confirmAs('bumblebee')
+      e.preventDefault()
+      break
+    case '3':
+      confirmAs('butterfly')
+      e.preventDefault()
+      break
+    case '4':
+      confirmAs('other')
+      e.preventDefault()
+      break
     case 'x':
-    case 'X': reject(); e.preventDefault(); break
-    case 'Enter': confirmAs(suggestedClass(selected.value)); e.preventDefault(); break
+    case 'X':
+      reject()
+      e.preventDefault()
+      break
+    case 'Enter':
+      confirmAs(suggestedClass(selected.value))
+      e.preventDefault()
+      break
     case 'ArrowDown':
-    case 'j': navigate(1); e.preventDefault(); break
+    case 'j':
+      navigate(1)
+      e.preventDefault()
+      break
     case 'ArrowUp':
-    case 'k': navigate(-1); e.preventDefault(); break
+    case 'k':
+      navigate(-1)
+      e.preventDefault()
+      break
   }
 }
 

@@ -1,6 +1,8 @@
 <template>
   <div class="flex min-h-screen bg-background text-foreground">
-    <aside class="flex flex-col w-60 shrink-0 border-r border-border bg-surface h-screen sticky top-0">
+    <aside
+      class="flex flex-col w-60 shrink-0 border-r border-border bg-surface h-screen sticky top-0"
+    >
       <RouterLink to="/" class="flex items-center gap-2 px-5 h-16 border-b border-border">
         <Sprout class="w-6 h-6 text-primary" />
         <span class="font-display font-bold text-xl tracking-tight">

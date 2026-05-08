@@ -15,6 +15,16 @@
           class="w-full px-3 py-2 text-sm rounded-md border border-border bg-background focus:outline-none focus:ring-2 focus:ring-primary/30"
         />
       </div>
+      <div class="space-y-2 pt-2">
+        <label class="block text-xs text-muted-foreground"> Notes (Optional) </label>
+
+        <textarea
+          v-model="runNotes"
+          placeholder="e.g. Dry soil, PEH test v2, camera slightly tilted"
+          class="w-full px-3 py-2 text-sm rounded-md border border-border bg-background focus:outline-none focus:ring-2 focus:ring-primary/30"
+          rows="3"
+        />
+      </div>
     </section>
 
     <!-- Seed type -->
@@ -88,83 +98,38 @@
       </div>
     </section>
 
-    <!-- Sample condition -->
-    <section class="rounded-xl border border-border bg-surface p-5 space-y-4">
-      <h2 class="text-sm font-semibold">Sample condition</h2>
-      <div class="flex gap-3">
-        <button
-          v-for="cond in conditions"
-          :key="cond.id"
-          @click="selectedCondition = cond.id"
-          :class="[
-            'flex-1 flex flex-col items-start gap-0.5 px-4 py-3 rounded-lg border-2 text-left transition-all duration-200',
-            selectedCondition === cond.id
-              ? 'border-primary bg-primary/5'
-              : 'border-border bg-background hover:border-primary/40',
-          ]"
-        >
-          <span class="text-sm font-medium">{{ cond.label }}</span>
-          <span class="text-xs text-muted-foreground">{{ cond.desc }}</span>
-        </button>
-      </div>
-    </section>
-
     <!-- Detection settings -->
-    <section class="rounded-xl border border-border bg-surface p-5 space-y-2">
+    <section class="rounded-xl border border-border bg-surface p-5 space-y-4">
       <h2 class="text-sm font-semibold">Detection settings</h2>
+      <p class="text-xs text-muted-foreground">Select model version.</p>
 
-      <div class="space-y-2">
-        <label class="text-xs text-muted-foreground mb-2">
-          Expected seed count per image (optional)
-        </label>
-        <div class="flex items-center gap-3">
-          <div class="flex items-center gap-2">
-            <span class="text-xs text-muted-foreground">Min</span>
-            <input
-              v-model.number="expectedMin"
-              type="text"
-              inputmode="numeric"
-              placeholder="0"
-              :class="[
-                'w-20 px-2 py-1.5 text-sm rounded-md bg-background',
-                rangeError ? 'border border-red-500' : 'border border-border'
-              ]"
-            />
-          </div>
+      <div class="grid grid-cols-1 md:grid-cols-2 gap-4 pt-2">
+        <div v-for="seed in seedTypes" :key="seed.id" class="space-y-1">
+          <span class="text-xs text-muted-foreground"> {{ seed.id }} model version </span>
 
-          <span class="text-muted-foreground text-xs">—</span>
+          <select
+            v-model="config.models[seed.id].model_version_id"
+            class="w-full px-2 py-1.5 rounded border border-border bg-background text-sm"
+          >
+            <option :value="null" disabled>Select {{ seed.id }} model version</option>
 
-          <div class="flex items-center gap-2">
-            <span class="text-xs text-muted-foreground">Max</span>
-            <input
-              v-model.number="expectedMax"
-              type="text"
-              inputmode="numeric"
-              placeholder="100"
-              :class="[
-                'w-20 px-2 py-1.5 text-sm rounded-md bg-background',
-                rangeError ? 'border border-red-500' : 'border border-border'
-              ]"
-            />
-          </div>
-
-          <span class="text-xs text-muted-foreground">seeds</span>
+            <option v-for="m in []" :key="m.id" :value="m.id">
+              {{ m.version_name }}
+            </option>
+          </select>
         </div>
-
-        <p v-if="rangeError" class="text-xs text-red-500 mt-1">
-          {{ rangeError }}
-        </p>
       </div>
+      <!-- Misc row -->
 
-      <label class="flex items-start gap-3 cursor-pointer">
-        <input v-model="overlapping" type="checkbox" class="mt-0.5" />
-        <div>
-          <div class="text-sm font-medium">Overlapping seeds expected</div>
-          <p class="text-xs text-muted-foreground">
-            Enables Watershed separation for touching seeds.
-          </p>
-        </div>
-      </label>
+      <div class="flex flex-wrap items-center gap-x-6 gap-y-3 pt-3 border-t border-border">
+        <!-- Overlapping seeds -->
+
+        <label class="flex items-center gap-2 text-sm">
+          <input v-model="overlapping" type="checkbox" />
+
+          <span>Overlapping seeds</span>
+        </label>
+      </div>
     </section>
 
     <!-- Drop zone -->
@@ -212,6 +177,7 @@ import SeedsStepper from '@/components/SeedsStepper.vue'
 import { UploadCloud } from 'lucide-vue-next'
 
 const runName = ref('')
+const runNotes = ref('')
 const dragOver = ref(false)
 
 const selectedSeed = ref<string | null>(null)
@@ -232,30 +198,13 @@ const seedTypes = ref([
   { id: 'CAT', species: 'Carthamus tinctorius', isCustom: false },
 ])
 
-const conditions = [
-  { id: 'clean', label: 'Clean', desc: 'Minimal debris expected' },
-  { id: 'mixed', label: 'Mixed', desc: 'Debris or dust likely present' },
-]
-
-const rangeError = computed(() => {
-  const minRaw = expectedMin.value
-  const maxRaw = expectedMax.value
-  const min = Number(minRaw)
-  const max = Number(maxRaw)
-
-  const minInvalid = minRaw !== '' && Number.isNaN(min)
-  const maxInvalid = maxRaw !== '' && Number.isNaN(max)
-
-  if (minInvalid || maxInvalid) {
-    return 'Input must be a number'
-  }
-
-  if (minRaw === '' || maxRaw === '') return null
-  if (min > max) {
-    return 'Min cannot be greater than Max'
-  }
-
-  return null
+const config = ref({
+  models: {
+    PEH: { model_version_id: null },
+    PHYCA: { model_version_id: null },
+    VAU: { model_version_id: null },
+    CAT: { model_version_id: null },
+  },
 })
 
 function openAddSeed() {

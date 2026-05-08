@@ -9,9 +9,11 @@
           v-for="opt in filterOptions"
           :key="opt.value"
           class="px-3 py-1.5 rounded-md font-medium transition-colors"
-          :class="kindFilter === opt.value
-            ? 'bg-primary text-primary-foreground'
-            : 'text-muted-foreground hover:bg-muted'"
+          :class="
+            kindFilter === opt.value
+              ? 'bg-primary text-primary-foreground'
+              : 'text-muted-foreground hover:bg-muted'
+          "
           @click="kindFilter = opt.value"
         >
           {{ opt.label }}
@@ -28,7 +30,10 @@
     <div class="flex-1 overflow-auto">
       <div v-if="loading" class="p-8 text-sm text-muted-foreground">Loading…</div>
       <div v-else-if="loadError" class="p-8 text-sm text-red-600">{{ loadError }}</div>
-      <div v-else-if="!filteredTracks.length" class="p-12 text-center text-sm text-muted-foreground">
+      <div
+        v-else-if="!filteredTracks.length"
+        class="p-12 text-center text-sm text-muted-foreground"
+      >
         No models match this filter.
       </div>
 
@@ -38,7 +43,9 @@
           :key="track.id"
           class="rounded-xl border border-border bg-card overflow-hidden shadow-md"
         >
-          <header class="px-5 py-4 bg-primary/[0.22] border-b border-border flex items-baseline gap-3">
+          <header
+            class="px-5 py-4 bg-primary/[0.22] border-b border-border flex items-baseline gap-3"
+          >
             <h2 class="font-bold text-lg tracking-tight">{{ track.label }}</h2>
             <span class="text-xs text-muted-foreground">
               {{ track.versions.length }} {{ track.versions.length === 1 ? 'version' : 'versions' }}
@@ -95,36 +102,31 @@
                     {{ expandedIds.has(v.id) ? '▾' : '▸' }}
                   </td>
                 </tr>
-                <tr
-                  v-if="expandedIds.has(v.id)"
-                  class="border-t border-border bg-muted/10"
-                >
+                <tr v-if="expandedIds.has(v.id)" class="border-t border-border bg-muted/10">
                   <td></td>
                   <td colspan="5" class="px-3 py-4">
                     <div class="grid grid-cols-2 gap-x-8 gap-y-3 max-w-3xl">
                       <div>
-                        <div class="text-[11px] font-semibold uppercase tracking-wider text-muted-foreground mb-1">
+                        <div
+                          class="text-[11px] font-semibold uppercase tracking-wider text-muted-foreground mb-1"
+                        >
                           Parameters
                         </div>
                         <dl class="text-xs grid grid-cols-[auto_1fr] gap-x-4 gap-y-1">
-                          <template
-                            v-for="(value, key) in v.parameters"
-                            :key="String(key)"
-                          >
+                          <template v-for="(value, key) in v.parameters" :key="String(key)">
                             <dt class="text-muted-foreground">{{ String(key) }}</dt>
                             <dd class="font-mono">{{ formatParam(value) }}</dd>
                           </template>
                         </dl>
                       </div>
                       <div>
-                        <div class="text-[11px] font-semibold uppercase tracking-wider text-muted-foreground mb-1">
+                        <div
+                          class="text-[11px] font-semibold uppercase tracking-wider text-muted-foreground mb-1"
+                        >
                           Metrics
                         </div>
                         <dl class="text-xs grid grid-cols-[auto_1fr] gap-x-4 gap-y-1">
-                          <template
-                            v-for="(value, key) in v.metrics"
-                            :key="String(key)"
-                          >
+                          <template v-for="(value, key) in v.metrics" :key="String(key)">
                             <dt class="text-muted-foreground">{{ String(key) }}</dt>
                             <dd class="font-mono">{{ formatMetric(value) }}</dd>
                           </template>
@@ -269,9 +271,7 @@ async function loadFromApi() {
 }
 
 const filterOptions = computed(() => {
-  const opts = [
-    { value: 'all', label: 'All', count: totalVersions.value },
-  ]
+  const opts = [{ value: 'all', label: 'All', count: totalVersions.value }]
   for (const t of tracks.value) {
     opts.push({ value: t.id, label: t.label, count: t.versions.length })
   }
@@ -283,15 +283,10 @@ const filteredTracks = computed(() => {
   return tracks.value.filter((t) => t.id === kindFilter.value)
 })
 
-const totalVersions = computed(() =>
-  tracks.value.reduce((sum, t) => sum + t.versions.length, 0),
-)
+const totalVersions = computed(() => tracks.value.reduce((sum, t) => sum + t.versions.length, 0))
 
 const activeCount = computed(() =>
-  tracks.value.reduce(
-    (sum, t) => sum + t.versions.filter((v) => v.is_active).length,
-    0,
-  ),
+  tracks.value.reduce((sum, t) => sum + t.versions.filter((v) => v.is_active).length, 0),
 )
 
 function mainMetric(v: Version, metricLabel: string): number | undefined {
@@ -345,5 +340,4 @@ function formatParam(value: unknown): string {
   }
   return String(value)
 }
-
 </script>

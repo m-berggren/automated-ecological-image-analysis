@@ -12,9 +12,7 @@
     "failed_image_count": 0,
     "detections_by_class": {},
     "detections_by_source": {},
-    "activity_log": [
-      { "offset_seconds": 0, "message": "Run queued.", "level": "info" }
-    ],
+    "activity_log": [{ "offset_seconds": 0, "message": "Run queued.", "level": "info" }],
     "config": {
       "yolo": { "enabled": true, "model_version_id": 3, "confidence": 0.4 },
       "preprocessing": { "enabled": true },
@@ -43,12 +41,36 @@
       { "offset_seconds": -2820, "message": "Run started.", "level": "info" },
       { "offset_seconds": -2818, "message": "Loaded YOLO yolo26n.pt · 1.2s", "level": "info" },
       { "offset_seconds": -2813, "message": "Loaded InsectNet b0 v2 · 4.7s", "level": "info" },
-      { "offset_seconds": -2772, "message": "Shard 1/120 complete · 100 images · 4 detections", "level": "info" },
-      { "offset_seconds": -2725, "message": "Shard 2/120 complete · 100 images · 3 detections", "level": "info" },
-      { "offset_seconds": -2678, "message": "Shard 3/120 complete · 100 images · 7 detections", "level": "info" },
-      { "offset_seconds": -2640, "message": "IMG_0481.jpg failed: corrupt EXIF, skipped", "level": "warn" },
-      { "offset_seconds": -2631, "message": "Shard 4/120 complete · 100 images · 2 detections", "level": "info" },
-      { "offset_seconds": -2584, "message": "Shard 5/120 complete · 100 images · 9 detections", "level": "info" }
+      {
+        "offset_seconds": -2772,
+        "message": "Shard 1/120 complete · 100 images · 4 detections",
+        "level": "info"
+      },
+      {
+        "offset_seconds": -2725,
+        "message": "Shard 2/120 complete · 100 images · 3 detections",
+        "level": "info"
+      },
+      {
+        "offset_seconds": -2678,
+        "message": "Shard 3/120 complete · 100 images · 7 detections",
+        "level": "info"
+      },
+      {
+        "offset_seconds": -2640,
+        "message": "IMG_0481.jpg failed: corrupt EXIF, skipped",
+        "level": "warn"
+      },
+      {
+        "offset_seconds": -2631,
+        "message": "Shard 4/120 complete · 100 images · 2 detections",
+        "level": "info"
+      },
+      {
+        "offset_seconds": -2584,
+        "message": "Shard 5/120 complete · 100 images · 9 detections",
+        "level": "info"
+      }
     ],
     "config": {
       "yolo": { "enabled": true, "model_version_id": 3, "confidence": 0.4 },
@@ -79,7 +101,11 @@
       { "offset_seconds": -11633, "message": "Models loaded.", "level": "info" },
       { "offset_seconds": -11580, "message": "Shard 1/120 complete", "level": "info" },
       { "offset_seconds": -120, "message": "All shards complete.", "level": "info" },
-      { "offset_seconds": -60, "message": "Run completed in 3h 14m · 1,847 detections.", "level": "info" }
+      {
+        "offset_seconds": -60,
+        "message": "Run completed in 3h 14m · 1,847 detections.",
+        "level": "info"
+      }
     ],
     "config": {
       "yolo": { "enabled": true, "model_version_id": 3, "confidence": 0.4 },
@@ -109,7 +135,11 @@
       { "offset_seconds": -420, "message": "Run started.", "level": "info" },
       { "offset_seconds": -418, "message": "Loaded YOLO yolo26n.pt · 1.2s", "level": "info" },
       { "offset_seconds": -360, "message": "Shard 1/120 complete", "level": "info" },
-      { "offset_seconds": -60, "message": "Worker exited unexpectedly while loading InsectNet weights.", "level": "error" }
+      {
+        "offset_seconds": -60,
+        "message": "Worker exited unexpectedly while loading InsectNet weights.",
+        "level": "error"
+      }
     ],
     "config": {
       "yolo": { "enabled": true, "model_version_id": 3, "confidence": 0.4 },

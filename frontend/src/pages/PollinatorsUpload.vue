@@ -61,7 +61,10 @@
           <span class="text-xs text-muted-foreground">YOLO confidence</span>
           <input
             v-model.number="config.yolo.confidence"
-            type="number" min="0" max="1" step="0.05"
+            type="number"
+            min="0"
+            max="1"
+            step="0.05"
             class="w-full px-2 py-1.5 rounded border border-border bg-background text-sm font-mono"
           />
         </label>
@@ -69,7 +72,10 @@
           <span class="text-xs text-muted-foreground">InsectNet binary</span>
           <input
             v-model.number="config.classifier.binary_confidence"
-            type="number" min="0" max="1" step="0.05"
+            type="number"
+            min="0"
+            max="1"
+            step="0.05"
             class="w-full px-2 py-1.5 rounded border border-border bg-background text-sm font-mono"
           />
         </label>
@@ -77,7 +83,10 @@
           <span class="text-xs text-muted-foreground">InsectNet species</span>
           <input
             v-model.number="config.classifier.group_confidence"
-            type="number" min="0" max="1" step="0.05"
+            type="number"
+            min="0"
+            max="1"
+            step="0.05"
             class="w-full px-2 py-1.5 rounded border border-border bg-background text-sm font-mono"
           />
         </label>
@@ -93,7 +102,8 @@
           <span class="text-xs text-muted-foreground">Start at image</span>
           <input
             v-model.number="config.start_at_image"
-            type="number" min="1"
+            type="number"
+            min="1"
             class="w-20 px-2 py-1 rounded border border-border bg-background text-sm font-mono"
           />
         </label>
@@ -106,16 +116,16 @@
       >
         {{ showAdvanced ? '▾ Hide advanced' : '▸ Advanced' }}
       </button>
-      <div
-        v-if="showAdvanced"
-        class="border-t border-border pt-3 space-y-3"
-      >
+      <div v-if="showAdvanced" class="border-t border-border pt-3 space-y-3">
         <div class="grid grid-cols-1 md:grid-cols-3 gap-4">
           <label class="space-y-1">
             <span class="text-xs text-muted-foreground">Crop padding</span>
             <input
               v-model.number="config.advanced.crop_padding"
-              type="number" min="0" max="2" step="0.1"
+              type="number"
+              min="0"
+              max="2"
+              step="0.1"
               class="w-full px-2 py-1.5 rounded border border-border bg-background text-sm font-mono"
             />
           </label>
@@ -123,7 +133,9 @@
             <span class="text-xs text-muted-foreground">Background sample size</span>
             <input
               v-model.number="config.advanced.background_sample_size"
-              type="number" min="10" max="500"
+              type="number"
+              min="10"
+              max="500"
               class="w-full px-2 py-1.5 rounded border border-border bg-background text-sm font-mono"
             />
           </label>
@@ -131,7 +143,9 @@
             <span class="text-xs text-muted-foreground">Rolling window (frames)</span>
             <input
               v-model.number="config.advanced.rolling_window"
-              type="number" min="1" max="100"
+              type="number"
+              min="1"
+              max="100"
               class="w-full px-2 py-1.5 rounded border border-border bg-background text-sm font-mono"
             />
           </label>
