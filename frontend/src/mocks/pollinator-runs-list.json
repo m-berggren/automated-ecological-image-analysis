@@ -1,0 +1,125 @@
+{
+  "default": {
+    "uploads": [
+      {
+        "id": 1,
+        "name": "Camera A — July 2026",
+        "image_count": 12000,
+        "created_at_offset_seconds": -259200
+      },
+      {
+        "id": 2,
+        "name": "Camera B — August 2026",
+        "image_count": 8400,
+        "created_at_offset_seconds": -172800
+      },
+      {
+        "id": 3,
+        "name": "Test batch",
+        "image_count": 250,
+        "created_at_offset_seconds": -86400
+      }
+    ],
+    "runs": [
+      {
+        "id": 1,
+        "name": "Default config",
+        "upload": 1,
+        "status": "completed",
+        "image_count": 12000,
+        "processed_image_count": 12000,
+        "detection_count": 1847,
+        "failed_image_count": 7,
+        "detections_by_class": { "fly": 1182, "bumblebee": 358, "butterfly": 187, "other": 120 },
+        "created_at_offset_seconds": -252000,
+        "started_at_offset_seconds": -251940,
+        "completed_at_offset_seconds": -240300
+      },
+      {
+        "id": 2,
+        "name": "Higher YOLO confidence",
+        "upload": 1,
+        "status": "completed",
+        "image_count": 12000,
+        "processed_image_count": 12000,
+        "detection_count": 1421,
+        "failed_image_count": 5,
+        "detections_by_class": { "fly": 894, "bumblebee": 297, "butterfly": 145, "other": 85 },
+        "created_at_offset_seconds": -180000,
+        "started_at_offset_seconds": -179940,
+        "completed_at_offset_seconds": -167900
+      },
+      {
+        "id": 3,
+        "name": "Updated InsectNet v3",
+        "upload": 1,
+        "status": "running",
+        "image_count": 12000,
+        "processed_image_count": 3142,
+        "detection_count": 489,
+        "failed_image_count": 2,
+        "detections_by_class": { "fly": 312, "bumblebee": 94, "butterfly": 51, "other": 32 },
+        "created_at_offset_seconds": -2880,
+        "started_at_offset_seconds": -2820,
+        "completed_at_offset_seconds": null
+      },
+      {
+        "id": 4,
+        "name": "Default config",
+        "upload": 2,
+        "status": "completed",
+        "image_count": 8400,
+        "processed_image_count": 8400,
+        "detection_count": 962,
+        "failed_image_count": 11,
+        "detections_by_class": { "fly": 612, "bumblebee": 198, "butterfly": 94, "other": 58 },
+        "created_at_offset_seconds": -165600,
+        "started_at_offset_seconds": -165540,
+        "completed_at_offset_seconds": -158820
+      },
+      {
+        "id": 5,
+        "name": "Tighter thresholds",
+        "upload": 2,
+        "status": "failed",
+        "image_count": 8400,
+        "processed_image_count": 612,
+        "detection_count": 78,
+        "failed_image_count": 14,
+        "detections_by_class": { "fly": 51, "bumblebee": 18, "butterfly": 6, "other": 3 },
+        "created_at_offset_seconds": -98400,
+        "started_at_offset_seconds": -98340,
+        "completed_at_offset_seconds": null,
+        "error_message": "Worker process exited unexpectedly while loading InsectNet weights."
+      },
+      {
+        "id": 6,
+        "name": "Smoke test",
+        "upload": 3,
+        "status": "completed",
+        "image_count": 250,
+        "processed_image_count": 250,
+        "detection_count": 41,
+        "failed_image_count": 0,
+        "detections_by_class": { "fly": 22, "bumblebee": 11, "butterfly": 5, "other": 3 },
+        "created_at_offset_seconds": -85800,
+        "started_at_offset_seconds": -85740,
+        "completed_at_offset_seconds": -85500
+      },
+      {
+        "id": 7,
+        "name": "Re-run with InsectNet",
+        "upload": 3,
+        "status": "pending",
+        "image_count": 250,
+        "processed_image_count": 0,
+        "detection_count": 0,
+        "failed_image_count": 0,
+        "detections_by_class": {},
+        "created_at_offset_seconds": -120,
+        "started_at_offset_seconds": null,
+        "completed_at_offset_seconds": null
+      }
+    ]
+  }
+}
