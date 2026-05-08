@@ -8,6 +8,8 @@ import PollinatorsUpload from '@/pages/PollinatorsUpload.vue'
 import PollinatorsRuns from '@/pages/PollinatorsRuns.vue'
 import PollinatorsDetect from '@/pages/PollinatorsDetect.vue'
 import PollinatorsReview from '@/pages/PollinatorsReview.vue'
+import PollinatorsModels from '@/pages/PollinatorsModels.vue'
+import PollinatorsTraining from '@/pages/PollinatorsTraining.vue'
 import Pollen from '@/pages/Pollen.vue'
 import Flowers from '@/pages/Flowers.vue'
 import NotFound from '@/pages/NotFound.vue'
@@ -35,6 +37,8 @@ const router = createRouter({
         { path: 'pollinators/runs', component: PollinatorsRuns },
         { path: 'pollinators/runs/:id/detect', component: PollinatorsDetect },
         { path: 'pollinators/runs/:id/review', component: PollinatorsReview },
+        { path: 'pollinators/training', component: PollinatorsTraining },
+        { path: 'pollinators/models', component: PollinatorsModels },
         { path: 'pollen', component: Pollen },
         { path: 'flowers', component: Flowers },
       ],
