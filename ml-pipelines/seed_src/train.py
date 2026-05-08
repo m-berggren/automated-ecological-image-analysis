@@ -28,7 +28,7 @@ def train_species_model(species_name, data_yaml_path, epochs=200):
 
 
 def train_species_model(species_name, data_yaml_path, epochs=90):
-    model = YOLO('yolo11n-obb.pt')  # Using latest YOLO if available
+    model = YOLO('yolo26n-obb.pt')
 
     results = model.train(
         data=data_yaml_path,
