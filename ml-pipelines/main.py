@@ -14,7 +14,7 @@ from seed_src.utils import (
 # SETTINGS
 # -------------------------
 PREPARE_LABELS = True  # Set to True to run the label update on newly added label files
-RETRAIN = False  # Set to True to train a new model, False to use existing weights
+RETRAIN = True  # Set to True to train a new model, False to use existing weights
 SPECIES_LIST = ['cat', 'peh', 'phyca', 'vau']
 # Map species to their specific yaml files
 CONFIG_MAP = {s: f'../data/seed/{s}_model/{s}.yaml' for s in SPECIES_LIST}
@@ -116,39 +116,47 @@ for species in SPECIES_LIST:
         # Run inference using the specific species model
         result = run_sahi(img_path, current_model)
 
-    # Debug image output to see what the model catches, classification, confidence score
-    result.export_visuals(export_dir='debug_outputs/')
+        # Debug image output to see what the model catches, classification, confidence score
+        output_filename = f'debug_{img_name}'
+        result.export_visuals(
+            export_dir='debug_outputs/',
+            file_name=img_name,
+            hide_labels=True,  # Removes class names
+            hide_conf=True,  # Removes confidence scores
+        )
 
-    preds = []
+        preds = []
 
-    for pred in result.object_prediction_list:
-        poly = None
+        for pred in result.object_prediction_list:
+            poly = None
 
-        # Check for explicit polygon points
-        if hasattr(pred, 'polygon') and pred.polygon is not None:
-            poly = pred.polygon.points
+            # Check for explicit polygon points
+            if hasattr(pred, 'polygon') and pred.polygon is not None:
+                poly = pred.polygon.points
 
-        # Check for segmentation mask
-        elif hasattr(pred, 'mask') and pred.mask is not None:
-            poly = pred.mask.segmentation[0]
+            # Check for segmentation mask
+            elif hasattr(pred, 'mask') and pred.mask is not None:
+                poly = pred.mask.segmentation[0]
 
-        # Check for rotated bbox (OBB specific)
-        elif hasattr(pred, 'obb') and pred.obb is not None:
-            poly = pred.obb  # Some handlers use this
+            # Check for rotated bbox (OBB specific)
+            elif hasattr(pred, 'obb') and pred.obb is not None:
+                poly = pred.obb  # Some handlers use this
 
-        if poly is not None:
-            # Standardize to a flat list of floats
-            if isinstance(poly[0], (list, tuple)):
-                flat_poly = [float(c) for point in poly for c in point]
-            else:
-                flat_poly = [float(c) for c in poly]
+            if poly is not None:
+                # Standardize to a flat list of floats
+                if isinstance(poly[0], (list, tuple)):
+                    flat_poly = [float(c) for point in poly for c in point]
+                else:
+                    flat_poly = [float(c) for c in poly]
 
-            preds.append(
-                {
-                    'poly': flat_poly[:8],
-                    'class': pred.category.id if hasattr(pred, 'category') else None,
-                }
-            )
+                preds.append(
+                    {
+                        'poly': flat_poly[:8],
+                        'class': pred.category.id
+                        if hasattr(pred, 'category')
+                        else None,
+                    }
+                )
 
     tp, fp, fn = calculate_tp_fp_fn(preds, gt_boxes, iou_threshold=0.4)
 
