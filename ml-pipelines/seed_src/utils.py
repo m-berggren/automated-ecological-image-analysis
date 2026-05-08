@@ -25,7 +25,7 @@ def run_sahi(image_path, model):
         overlap_width_ratio=0.4,
         postprocess_type='NMS',
         postprocess_match_metric='IOU',
-        postprocess_match_threshold=0.15,
+        postprocess_match_threshold=0.25,
     )
 
 

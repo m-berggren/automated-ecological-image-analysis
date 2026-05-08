@@ -158,24 +158,24 @@ for species in SPECIES_LIST:
                     }
                 )
 
-    tp, fp, fn = calculate_tp_fp_fn(preds, gt_boxes, iou_threshold=0.4)
+        tp, fp, fn = calculate_tp_fp_fn(preds, gt_boxes, iou_threshold=0.4)
 
-    # Detailed per-image logging (for debug to make our lives easier, pls don't remove for now)
-    num_preds = len(preds)
-    num_gts = len(gt_boxes)
-    print(f'  - Found {num_preds} predictions and {num_gts} ground truths.')
-    print(f'  - Matches: TP={tp}, FP={fp}, FN={fn}')
+        # Detailed per-image logging (for debug to make our lives easier, pls don't remove for now)
+        num_preds = len(preds)
+        num_gts = len(gt_boxes)
+        print(f'  - Found {num_preds} predictions and {num_gts} ground truths.')
+        print(f'  - Matches: TP={tp}, FP={fp}, FN={fn}')
 
-    detected = len(preds)
-    expected = len(gt_boxes)
-    diff = detected - expected
+        detected = len(preds)
+        expected = len(gt_boxes)
+        diff = detected - expected
 
-    results[species]['total_error'] += abs(diff)
-    results[species]['total_gt'] += expected
-    results[species]['images'] += 1
-    results[species]['tp'] += tp
-    results[species]['fp'] += fp
-    results[species]['fn'] += fn
+        results[species]['total_error'] += abs(diff)
+        results[species]['total_gt'] += expected
+        results[species]['images'] += 1
+        results[species]['tp'] += tp
+        results[species]['fp'] += fp
+        results[species]['fn'] += fn
 
 # -------------------------
 # RESULTS
