@@ -17,112 +17,129 @@
       </div>
     </section>
 
-    <!-- Detection pipeline configuration -->
+    <!-- Detection settings -->
     <section class="rounded-xl border border-border bg-surface p-5 space-y-4">
-      <h2 class="text-sm font-semibold">Detection pipeline</h2>
+      <h2 class="text-sm font-semibold">Detection settings</h2>
 
-      <label class="flex items-start gap-3">
-        <input v-model="config.yolo.enabled" type="checkbox" class="mt-1" />
-        <div class="flex-1 space-y-2">
-          <div class="text-sm font-medium">YOLO (flies, butterflies)</div>
-          <div v-if="config.yolo.enabled" class="flex items-center gap-3 pl-1">
-            <select
-              v-model="config.yolo.model_version_id"
-              class="text-xs px-2 py-1 rounded border border-border bg-background"
-              :disabled="!detectorModels.length"
-            >
-              <option :value="null" disabled>
-                {{ detectorModels.length ? 'Select model' : 'No detector models yet' }}
-              </option>
-              <option v-for="m in detectorModels" :key="m.id" :value="m.id">
-                {{ m.version_name }}{{ m.is_active ? ' (active)' : '' }}
-              </option>
-            </select>
-            <label class="text-xs text-muted-foreground flex items-center gap-2">
-              Confidence
-              <input
-                v-model.number="config.yolo.confidence"
-                type="number"
-                min="0"
-                max="1"
-                step="0.05"
-                class="w-16 px-2 py-1 rounded border border-border bg-background text-foreground"
-              />
-            </label>
-          </div>
-        </div>
-      </label>
+      <!-- Models row -->
+      <div class="grid grid-cols-1 md:grid-cols-2 gap-4">
+        <label class="space-y-1">
+          <span class="text-xs text-muted-foreground">YOLO model</span>
+          <select
+            v-model="config.yolo.model_version_id"
+            class="w-full px-2 py-1.5 rounded border border-border bg-background text-sm"
+            :disabled="!detectorModels.length"
+          >
+            <option :value="null" disabled>
+              {{ detectorModels.length ? 'Select model' : 'No detector models yet' }}
+            </option>
+            <option v-for="m in detectorModels" :key="m.id" :value="m.id">
+              {{ m.version_name }}{{ m.is_active ? ' (active)' : '' }}
+            </option>
+          </select>
+        </label>
+        <label class="space-y-1">
+          <span class="text-xs text-muted-foreground">InsectNet model</span>
+          <select
+            v-model="config.classifier.model_version_id"
+            class="w-full px-2 py-1.5 rounded border border-border bg-background text-sm"
+            :disabled="!classifierModels.length"
+          >
+            <option :value="null" disabled>
+              {{ classifierModels.length ? 'Select model' : 'No classifier models yet' }}
+            </option>
+            <option v-for="m in classifierModels" :key="m.id" :value="m.id">
+              {{ m.version_name }}{{ m.is_active ? ' (active)' : '' }}
+            </option>
+          </select>
+        </label>
+      </div>
 
-      <label class="flex items-start gap-3">
-        <input v-model="config.preprocessing.enabled" type="checkbox" class="mt-1" />
-        <div class="flex-1">
-          <div class="text-sm font-medium">Classical preprocessing (large insects)</div>
-          <p class="text-xs text-muted-foreground">
-            Background subtraction + contour filtering — finds bumblebees and similar.
-          </p>
-        </div>
-      </label>
+      <!-- Confidence row -->
+      <div class="grid grid-cols-1 md:grid-cols-3 gap-4">
+        <label class="space-y-1">
+          <span class="text-xs text-muted-foreground">YOLO confidence</span>
+          <input
+            v-model.number="config.yolo.confidence"
+            type="number" min="0" max="1" step="0.05"
+            class="w-full px-2 py-1.5 rounded border border-border bg-background text-sm font-mono"
+          />
+        </label>
+        <label class="space-y-1">
+          <span class="text-xs text-muted-foreground">InsectNet binary</span>
+          <input
+            v-model.number="config.classifier.binary_confidence"
+            type="number" min="0" max="1" step="0.05"
+            class="w-full px-2 py-1.5 rounded border border-border bg-background text-sm font-mono"
+          />
+        </label>
+        <label class="space-y-1">
+          <span class="text-xs text-muted-foreground">InsectNet species</span>
+          <input
+            v-model.number="config.classifier.group_confidence"
+            type="number" min="0" max="1" step="0.05"
+            class="w-full px-2 py-1.5 rounded border border-border bg-background text-sm font-mono"
+          />
+        </label>
+      </div>
 
-      <label class="flex items-start gap-3">
-        <input v-model="config.classifier.enabled" type="checkbox" class="mt-1" />
-        <div class="flex-1 space-y-2">
-          <div class="text-sm font-medium">InsectNet classifier</div>
-          <div v-if="config.classifier.enabled" class="space-y-2 pl-1">
-            <select
-              v-model="config.classifier.model_version_id"
-              class="text-xs px-2 py-1 rounded border border-border bg-background"
-              :disabled="!classifierModels.length"
-            >
-              <option :value="null" disabled>
-                {{ classifierModels.length ? 'Select model' : 'No classifier models yet' }}
-              </option>
-              <option v-for="m in classifierModels" :key="m.id" :value="m.id">
-                {{ m.version_name }}{{ m.is_active ? ' (active)' : '' }}
-              </option>
-            </select>
-            <div class="flex flex-wrap items-center gap-x-4 gap-y-2">
-              <label class="text-xs text-muted-foreground flex items-center gap-2">
-                Insect vs background
-                <input
-                  v-model.number="config.classifier.binary_confidence"
-                  type="number"
-                  min="0"
-                  max="1"
-                  step="0.05"
-                  class="w-16 px-2 py-1 rounded border border-border bg-background text-foreground"
-                />
-              </label>
-              <label class="text-xs text-muted-foreground flex items-center gap-2">
-                Species class
-                <input
-                  v-model.number="config.classifier.group_confidence"
-                  type="number"
-                  min="0"
-                  max="1"
-                  step="0.05"
-                  class="w-16 px-2 py-1 rounded border border-border bg-background text-foreground"
-                />
-              </label>
-            </div>
-            <p class="text-[11px] text-muted-foreground">
-              Crops below the binary threshold are dropped as background. Crops above binary but
-              below the species threshold are kept and labeled "uncertain".
-            </p>
-          </div>
-        </div>
-      </label>
+      <!-- Misc row -->
+      <div class="flex flex-wrap items-center gap-x-6 gap-y-3 pt-2 border-t border-border">
+        <label class="flex items-center gap-2 text-sm">
+          <input v-model="config.preprocessing.use_roi" type="checkbox" />
+          Use manual ROI
+        </label>
+        <label class="flex items-center gap-2 text-sm">
+          <span class="text-xs text-muted-foreground">Start at image</span>
+          <input
+            v-model.number="config.start_at_image"
+            type="number" min="1"
+            class="w-20 px-2 py-1 rounded border border-border bg-background text-sm font-mono"
+          />
+        </label>
+      </div>
 
+      <!-- Advanced -->
       <button
         class="text-xs text-muted-foreground hover:text-foreground"
         @click="showAdvanced = !showAdvanced"
       >
-        {{ showAdvanced ? '▾ Hide advanced' : '▸ Show advanced' }}
+        {{ showAdvanced ? '▾ Hide advanced' : '▸ Advanced' }}
       </button>
       <div
         v-if="showAdvanced"
-        class="space-y-2 text-xs text-muted-foreground border-t border-border pt-3"
+        class="border-t border-border pt-3 space-y-3"
       >
-        <p>Crop padding, filter knobs, and other rarely-tuned settings will live here.</p>
+        <div class="grid grid-cols-1 md:grid-cols-3 gap-4">
+          <label class="space-y-1">
+            <span class="text-xs text-muted-foreground">Crop padding</span>
+            <input
+              v-model.number="config.advanced.crop_padding"
+              type="number" min="0" max="2" step="0.1"
+              class="w-full px-2 py-1.5 rounded border border-border bg-background text-sm font-mono"
+            />
+          </label>
+          <label class="space-y-1">
+            <span class="text-xs text-muted-foreground">Background sample size</span>
+            <input
+              v-model.number="config.advanced.background_sample_size"
+              type="number" min="10" max="500"
+              class="w-full px-2 py-1.5 rounded border border-border bg-background text-sm font-mono"
+            />
+          </label>
+          <label class="space-y-1">
+            <span class="text-xs text-muted-foreground">Rolling window (frames)</span>
+            <input
+              v-model.number="config.advanced.rolling_window"
+              type="number" min="1" max="100"
+              class="w-full px-2 py-1.5 rounded border border-border bg-background text-sm font-mono"
+            />
+          </label>
+        </div>
+        <p class="text-[11px] text-muted-foreground">
+          Pre-annotating filter knobs. Defaults match the production pipeline; only change if a
+          specific batch needs tuning.
+        </p>
       </div>
     </section>
 
@@ -248,24 +265,34 @@ const detectorModels = ref<ModelVersion[]>([])
 const classifierModels = ref<ModelVersion[]>([])
 
 interface PipelineConfig {
-  yolo: { enabled: boolean; model_version_id: number | null; confidence: number }
-  preprocessing: { enabled: boolean }
+  yolo: { model_version_id: number | null; confidence: number }
   classifier: {
-    enabled: boolean
     model_version_id: number | null
     binary_confidence: number
     group_confidence: number
   }
+  preprocessing: { use_roi: boolean }
+  start_at_image: number
+  advanced: {
+    crop_padding: number
+    background_sample_size: number
+    rolling_window: number
+  }
 }
 
 const config = ref<PipelineConfig>({
-  yolo: { enabled: true, model_version_id: null, confidence: 0.4 },
-  preprocessing: { enabled: true },
+  yolo: { model_version_id: null, confidence: 0.4 },
   classifier: {
-    enabled: true,
     model_version_id: null,
     binary_confidence: 0.5,
     group_confidence: 0.6,
+  },
+  preprocessing: { use_roi: false },
+  start_at_image: 1,
+  advanced: {
+    crop_padding: 0.3,
+    background_sample_size: 100,
+    rolling_window: 30,
   },
 })
 
@@ -355,12 +382,12 @@ async function startDetection() {
     error.value = 'No upload in progress.'
     return
   }
-  if (config.value.yolo.enabled && !config.value.yolo.model_version_id) {
-    error.value = 'Pick a YOLO model or disable the YOLO detector.'
+  if (!config.value.yolo.model_version_id) {
+    error.value = 'Pick a YOLO model.'
     return
   }
-  if (config.value.classifier.enabled && !config.value.classifier.model_version_id) {
-    error.value = 'Pick an InsectNet model or disable the classifier.'
+  if (!config.value.classifier.model_version_id) {
+    error.value = 'Pick an InsectNet model.'
     return
   }
   starting.value = true
