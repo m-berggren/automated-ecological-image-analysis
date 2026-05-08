@@ -3,8 +3,25 @@ __pycache__/
 *.pyc
 *.pyo
 
+#yolo seed model
+*.pt
+
 # Virtual environment
 .venv/
+
+# Images and labels
+data/seed/images/
+data/seed/labels/
+data/seed/train.txt
+data/seed/val.txt
+
+# Jupyter notebook checkpoints
+data/seed/.ipynb_checkpoints/
+ml-pipelines/notebooks/seed-counting/.ipynb_checkpoints/
+
+# YOLO outputs
+runs/
+sahi_results/
 
 # Django
 db.sqlite3
