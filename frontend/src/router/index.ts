@@ -6,6 +6,8 @@ import SeedsExport from '@/pages/SeedsExport.vue'
 import SeedsModels from '@/pages/SeedsModels.vue'
 import PollinatorsUpload from '@/pages/PollinatorsUpload.vue'
 import PollinatorsRuns from '@/pages/PollinatorsRuns.vue'
+import PollinatorsDetect from '@/pages/PollinatorsDetect.vue'
+import PollinatorsReview from '@/pages/PollinatorsReview.vue'
 import Pollen from '@/pages/Pollen.vue'
 import Flowers from '@/pages/Flowers.vue'
 import NotFound from '@/pages/NotFound.vue'
@@ -31,6 +33,8 @@ const router = createRouter({
         { path: 'pollinators', redirect: '/pollinators/upload' },
         { path: 'pollinators/upload', component: PollinatorsUpload },
         { path: 'pollinators/runs', component: PollinatorsRuns },
+        { path: 'pollinators/runs/:id/detect', component: PollinatorsDetect },
+        { path: 'pollinators/runs/:id/review', component: PollinatorsReview },
         { path: 'pollen', component: Pollen },
         { path: 'flowers', component: Flowers },
       ],
