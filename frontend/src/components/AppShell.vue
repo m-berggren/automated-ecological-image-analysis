@@ -43,11 +43,12 @@
               :key="child.to"
               :to="child.to"
               class="flex items-center justify-between px-3 py-1.5 rounded-md text-sm transition-colors"
-              active-class="text-primary font-medium"
               :class="[
-                isChildDisabled(child)
-                  ? 'text-muted-foreground/60 cursor-not-allowed pointer-events-none'
-                  : 'text-muted-foreground hover:text-foreground hover:bg-muted',
+                isChildActive(child)
+                  ? 'nav-active'
+                  : isChildDisabled(child)
+                    ? 'text-muted-foreground/60 cursor-not-allowed pointer-events-none'
+                    : 'text-muted-foreground hover:text-foreground hover:bg-muted',
               ]"
             >
               {{ child.label }}
@@ -161,6 +162,9 @@ function isModuleExpanded(item: ModuleItem) {
 function isChildDisabled(child: ChildItem) {
   return !!child.staffOnly && !auth.user?.is_staff
 }
+function isChildActive(child: ChildItem) {
+  return route.path === child.to
+}
 function onParentClick(item: ModuleItem) {
   if (!item.children) return
   if (isModuleActive(item)) {
@@ -182,7 +186,7 @@ async function handleLogout() {
 
 <style scoped>
 .nav-active {
-  background-color: color-mix(in srgb, var(--color-primary) 12%, transparent);
+  background-color: color-mix(in srgb, var(--color-primary) 22%, transparent);
   color: var(--color-primary);
 }
 </style>

@@ -11,6 +11,7 @@
   --color-background: hsl(80 25% 97%);
   --color-foreground: hsl(150 30% 12%);
   --color-surface: hsl(0 0% 100%);
+  --color-card: hsl(0 0% 100%);
   --color-border: hsl(120 15% 88%);
   --color-muted: hsl(120 15% 94%);
   --color-muted-foreground: hsl(150 10% 45%);
@@ -47,6 +48,7 @@ html.theme-dark {
   --color-background: hsl(150 10% 10%);
   --color-foreground: hsl(80 15% 92%);
   --color-surface: hsl(150 10% 14%);
+  --color-card: hsl(150 10% 14%);
   --color-border: hsl(150 8% 22%);
   --color-muted: hsl(150 8% 18%);
   --color-muted-foreground: hsl(150 8% 62%);
@@ -57,11 +59,12 @@ html.theme-dark {
 }
 
 html.theme-green {
-  --color-background: hsl(115 22% 93%);
+  --color-background: hsl(115 22% 96%);
   --color-foreground: hsl(125 35% 12%);
-  --color-surface: hsl(125 28% 77%);
-  --color-border: hsl(125 22% 63%);
-  --color-muted: hsl(125 22% 84%);
+  --color-surface: hsl(125 26% 87%);
+  --color-card: hsl(0 0% 100%);
+  --color-border: hsl(125 22% 68%);
+  --color-muted: hsl(125 22% 80%);
   --color-muted-foreground: hsl(125 18% 32%);
   --color-primary: hsl(128 45% 24%);
   --color-primary-foreground: hsl(80 25% 97%);
