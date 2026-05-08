@@ -144,6 +144,8 @@ const modules: ModuleItem[] = [
     children: [
       { to: '/pollinators/upload', label: 'Upload' },
       { to: '/pollinators/runs', label: 'Runs' },
+      { to: '/pollinators/training', label: 'Training' },
+      { to: '/pollinators/models', label: 'Models' },
     ],
   },
   { to: '/pollen', label: 'Pollen', icon: Sparkles, paused: true },
