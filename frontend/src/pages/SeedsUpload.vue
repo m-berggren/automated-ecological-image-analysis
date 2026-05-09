@@ -4,10 +4,17 @@
 
   <div class="flex-1 p-8 space-y-6 max-w-3xl mx-auto w-full">
     <!-- Run details -->
-    <section class="rounded-xl border border-border bg-surface p-5 space-y-3">
-      <h2 class="text-sm font-semibold">Run details</h2>
+    <section class="rounded-xl border border-border bg-surface p-5 space-y-4">
+      <div>
+        <h2 class="text-sm font-semibold">Run details</h2>
+        <p class="text-xs text-muted-foreground mt-1">
+          Configure the seed analysis pipeline before uploading images.
+        </p>
+      </div>
+
       <div class="space-y-2">
-        <label class="block text-xs text-muted-foreground">Name</label>
+        <label class="block text-xs text-muted-foreground">Run name</label>
+
         <input
           v-model="runName"
           type="text"
@@ -15,14 +22,15 @@
           class="w-full px-3 py-2 text-sm rounded-md border border-border bg-background focus:outline-none focus:ring-2 focus:ring-primary/30"
         />
       </div>
-      <div class="space-y-2 pt-2">
-        <label class="block text-xs text-muted-foreground"> Notes (Optional) </label>
+
+      <div class="space-y-2">
+        <label class="block text-xs text-muted-foreground">Run Notes</label>
 
         <textarea
           v-model="runNotes"
+          rows="3"
           placeholder="e.g. Dry soil, PEH test v2, camera slightly tilted"
           class="w-full px-3 py-2 text-sm rounded-md border border-border bg-background focus:outline-none focus:ring-2 focus:ring-primary/30"
-          rows="3"
         />
       </div>
     </section>
@@ -69,136 +77,316 @@
         </div>
       </div>
 
-      <!-- Add button -->
+      <!-- Add seed -->
       <button
-        @click="openAddSeed"
-        class="w-full px-4 py-2 rounded-lg border-2 border-dashed border-border text-sm text-muted-foreground hover:border-primary hover:text-primary transition"
+        @click="showAddSeed = true"
+        class="w-full rounded-lg border-2 border-dashed border-border px-4 py-2 text-sm text-muted-foreground transition hover:border-primary hover:text-primary"
       >
         + Add new seed type
       </button>
 
-      <!-- Inline add form -->
-      <div v-if="showAddSeed" class="p-3 border rounded-lg space-y-2 bg-background">
+      <!-- Add form -->
+      <div v-if="showAddSeed" class="rounded-lg border border-border bg-background p-3 space-y-3">
         <input
           v-model="newSeedId"
-          placeholder="Code Name (e.g. PEH)"
-          class="w-full px-2 py-1 text-sm border rounded"
+          placeholder="Code name (e.g. PEH)"
+          class="w-full px-3 py-2 text-sm border border-border rounded-md"
         />
+
         <input
           v-model="newSeedSpecies"
-          placeholder="Species (optional)"
-          class="w-full px-2 py-1 text-sm border rounded"
+          placeholder="Species name (optional)"
+          class="w-full px-3 py-2 text-sm border border-border rounded-md"
         />
+
         <div class="flex gap-2">
-          <button @click="addSeed" class="px-3 py-1 text-sm bg-primary text-white rounded-lg">
+          <button
+            @click="addSeed"
+            class="px-3 py-1.5 rounded-md text-sm bg-primary text-primary-foreground"
+          >
             Add
           </button>
-          <button @click="cancelAddSeed" class="px-3 py-1 text-sm border rounded-lg">Cancel</button>
+
+          <button
+            @click="cancelAddSeed"
+            class="px-3 py-1.5 rounded-md text-sm border border-border"
+          >
+            Cancel
+          </button>
         </div>
       </div>
     </section>
 
     <!-- Detection settings -->
-    <section class="rounded-xl border border-border bg-surface p-5 space-y-4">
-      <h2 class="text-sm font-semibold">Detection settings</h2>
-      <p class="text-xs text-muted-foreground">Select model version.</p>
+    <section class="rounded-xl border border-border bg-surface p-5 space-y-5">
+      <div>
+        <h2 class="text-sm font-semibold">Detection settings</h2>
 
-      <div class="grid grid-cols-1 md:grid-cols-2 gap-4 pt-2">
-        <div v-for="seed in seedTypes" :key="seed.id" class="space-y-1">
-          <span class="text-xs text-muted-foreground"> {{ seed.id }} model version </span>
+        <p class="text-xs text-muted-foreground mt-1">
+          Configure model selection and inference behavior.
+        </p>
+      </div>
+
+      <!-- Model selectors -->
+      <div class="grid grid-cols-1 md:grid-cols-2 gap-4">
+        <div v-for="seed in seedTypes" :key="seed.id" class="space-y-2">
+          <label class="block text-xs text-muted-foreground"> {{ seed.id }} model version </label>
 
           <select
             v-model="config.models[seed.id].model_version_id"
-            class="w-full px-2 py-1.5 rounded border border-border bg-background text-sm"
+            class="w-full px-3 py-2 rounded-md border border-border bg-background text-sm"
           >
-            <option :value="null" disabled>Select {{ seed.id }} model version</option>
+            <option :value="null" disabled>Select model version</option>
 
-            <option v-for="m in []" :key="m.id" :value="m.id">
-              {{ m.version_name }}
+            <option v-for="model in modelVersions" :key="model.id" :value="model.id">
+              {{ model.version_name }}
             </option>
           </select>
         </div>
       </div>
-      <!-- Misc row -->
 
-      <div class="flex flex-wrap items-center gap-x-6 gap-y-3 pt-3 border-t border-border">
-        <!-- Overlapping seeds -->
+      <!-- Advanced settings -->
+<div class="flex flex-wrap items-center gap-x-6 gap-y-3 pt-2 border-t border-border">
 
-        <label class="flex items-center gap-2 text-sm">
-          <input v-model="overlapping" type="checkbox" />
+  <!-- Confidence -->
+  <label class="flex items-center gap-2 text-sm">
+    <span class="text-xs text-muted-foreground">
+       Confidence threshold
+    </span>
 
-          <span>Overlapping seeds</span>
-        </label>
-      </div>
+    <input
+      v-model.number="config.confidence_threshold"
+      type="number"
+      min="0"
+      max="1"
+      step="0.05"
+      class="w-20 px-2 py-1 rounded border border-border bg-background text-sm font-mono"
+    />
+  </label>
+
+  <!-- Slice overlap -->
+  <label class="flex items-center gap-2 text-sm">
+    <span class="text-xs text-muted-foreground">
+      Slice overlap
+    </span>
+
+    <input
+      v-model.number="config.slice_overlap_ratio"
+      type="number"
+      min="0"
+      max="1"
+      step="0.05"
+      class="w-20 px-2 py-1 rounded border border-border bg-background text-sm font-mono"
+    />
+  </label>
+
+  <!-- Viability -->
+  <label class="flex items-center gap-2 text-sm">
+    <input
+      v-model="config.enable_viability"
+      type="checkbox"
+    />
+    <span>
+      Generate viability report
+    </span>
+  </label>
+</div>
     </section>
 
-    <!-- Drop zone -->
+    <!-- Upload -->
     <section
       class="rounded-xl border-2 border-dashed border-border bg-surface p-10 text-center transition-colors"
-      :class="{ 'border-primary bg-primary/5': dragOver, 'opacity-60': creatingUpload }"
+      :class="{
+        'border-primary bg-primary/5': dragOver,
+        'opacity-60': creatingUpload,
+      }"
       @dragover.prevent="dragOver = true"
-      @dragleave.prevent="dragOver = false"
+      @dragleave.prevent="onDragLeave"
       @drop.prevent="onDrop"
     >
       <UploadCloud class="w-10 h-10 mx-auto text-muted-foreground" />
+
       <p class="mt-3 text-sm font-medium">
         Drop a folder or images here, or
+
         <label class="text-primary cursor-pointer hover:underline">
           browse files
-          <input
-            type="file"
-            multiple
-            accept="image/*"
-            class="hidden"
-            @change="onPick($event, false)"
-          />
+
+          <input type="file" multiple accept="image/*" class="hidden" @change="onPick($event)" />
         </label>
+
         /
+
         <label class="text-primary cursor-pointer hover:underline">
           browse folder
-          <input
-            ref="folderInput"
-            type="file"
-            multiple
-            class="hidden"
-            @change="onPick($event, true)"
-          />
+
+          <input ref="folderInput" type="file" multiple class="hidden" @change="onPick($event)" />
         </label>
       </p>
+
       <p class="text-xs text-muted-foreground mt-1">JPG, PNG - uploads in batches of 4</p>
     </section>
+
+    <!-- Upload progress -->
+    <section
+      v-if="uploader && uploader.items.length"
+      class="rounded-xl border border-border bg-surface"
+    >
+      <header class="flex items-center justify-between px-5 py-3 border-b border-border">
+        <div class="text-sm">
+          <span class="font-medium">{{ doneCount }}</span>
+
+          <span class="text-muted-foreground"> of </span>
+
+          <span class="font-medium">
+            {{ uploader.items.length }}
+          </span>
+
+          <span class="text-muted-foreground"> uploaded </span>
+
+          <span v-if="failedCount" class="ml-3 text-red-600"> {{ failedCount }} failed </span>
+        </div>
+
+        <button
+          :disabled="!doneCount || starting"
+          class="px-3 py-1.5 rounded-md text-sm font-medium bg-primary text-primary-foreground hover:bg-primary/90 disabled:opacity-50 disabled:cursor-not-allowed"
+          @click="startDetection"
+        >
+          <span v-if="!starting"> Start detection </span>
+
+          <span v-else> Starting… </span>
+        </button>
+      </header>
+
+      <ul v-if="recentFailures.length" class="max-h-60 overflow-auto divide-y divide-border">
+        <li
+          v-for="item in recentFailures"
+          :key="item.id"
+          class="flex items-center gap-3 px-5 py-2 text-sm"
+        >
+          <XCircle class="w-4 h-4 shrink-0 text-red-600" />
+
+          <span class="truncate flex-1">
+            {{ item.file.name }}
+          </span>
+
+          <span class="text-xs text-red-600 truncate max-w-[260px]">
+            {{ item.error }}
+          </span>
+
+          <button
+            class="text-xs px-2 py-0.5 rounded border border-border hover:bg-muted"
+            @click="onRetry(item.id)"
+          >
+            Retry
+          </button>
+        </li>
+      </ul>
+
+      <p v-else class="px-5 py-3 text-xs text-muted-foreground">No failures detected.</p>
+    </section>
+
+    <p v-if="error" class="text-sm text-red-600">
+      {{ error }}
+    </p>
   </div>
 </template>
 
 <script setup lang="ts">
-import { ref, computed } from 'vue'
+import { computed, onMounted, ref } from 'vue'
+import { useRouter } from 'vue-router'
+
+import { UploadCloud, XCircle } from 'lucide-vue-next'
+
 import PageHeader from '@/components/PageHeader.vue'
 import SeedsStepper from '@/components/SeedsStepper.vue'
-import { UploadCloud } from 'lucide-vue-next'
+
+import { api } from '@/api'
+import { createUploader, type UploadItem } from '@/lib/uploader'
+
+interface ModelVersion {
+  id: number
+  module: string
+  kind: string
+  version_name: string
+  is_active: boolean
+}
+
+interface SeedType {
+  id: string
+  species: string
+  isCustom: boolean
+}
+
+interface SeedModelConfig {
+  model_version_id: number | null
+}
+
+interface PipelineConfig {
+  confidence_threshold: number
+  slice_overlap_ratio: number
+  postprocess_match_threshold: number
+  enable_viability: boolean
+
+  models: Record<string, SeedModelConfig>
+}
+
+type Uploader = ReturnType<typeof createUploader>
+
+const router = useRouter()
+
+const creatingUpload = ref(false)
+const starting = ref(false)
+const dragOver = ref(false)
+
+const error = ref('')
+
+const uploadId = ref<number | null>(null)
+
+const uploader = ref<Uploader | null>(null)
+
+const folderInput = ref<HTMLInputElement | null>(null)
 
 const runName = ref('')
 const runNotes = ref('')
-const dragOver = ref(false)
 
 const selectedSeed = ref<string | null>(null)
-const selectedCondition = ref<'clean' | 'mixed'>('clean')
-const overlapping = ref(true)
-
-const expectedMin = ref<number | null>(null)
-const expectedMax = ref<number | null>(null)
 
 const showAddSeed = ref(false)
-const newSeedSpecies = ref('')
 const newSeedId = ref('')
+const newSeedSpecies = ref('')
 
-const seedTypes = ref([
-  { id: 'PEH', species: 'Pisum sativum', isCustom: false },
-  { id: 'PHYCA', species: 'Phacelia tanacetifolia', isCustom: false },
-  { id: 'VAU', species: 'Vicia sativa', isCustom: false },
-  { id: 'CAT', species: 'Carthamus tinctorius', isCustom: false },
+const modelVersions = ref<ModelVersion[]>([])
+
+const seedTypes = ref<SeedType[]>([
+  {
+    id: 'PEH',
+    species: 'Pisum sativum',
+    isCustom: false,
+  },
+  {
+    id: 'PHYCA',
+    species: 'Phacelia tanacetifolia',
+    isCustom: false,
+  },
+  {
+    id: 'VAU',
+    species: 'Vicia sativa',
+    isCustom: false,
+  },
+  {
+    id: 'CAT',
+    species: 'Carthamus tinctorius',
+    isCustom: false,
+  },
 ])
 
-const config = ref({
+const config = ref<PipelineConfig>({
+  confidence_threshold: 0.25,
+  slice_overlap_ratio: 0.25,
+  postprocess_match_threshold: 0.15,
+  enable_viability: false,
+
   models: {
     PEH: { model_version_id: null },
     PHYCA: { model_version_id: null },
@@ -207,8 +395,28 @@ const config = ref({
   },
 })
 
-function openAddSeed() {
-  showAddSeed.value = true
+const doneCount = computed(() => {
+  return uploader.value?.items.filter((item: UploadItem) => item.status === 'done').length ?? 0
+})
+
+const failedCount = computed(() => {
+  return uploader.value?.items.filter((item: UploadItem) => item.status === 'failed').length ?? 0
+})
+
+const recentFailures = computed<UploadItem[]>(() => {
+  return (
+    uploader.value?.items.filter((item: UploadItem) => item.status === 'failed').slice(-20) ?? []
+  )
+})
+
+onMounted(() => {
+  if (folderInput.value) {
+    folderInput.value.setAttribute('webkitdirectory', '')
+  }
+})
+
+function onRetry(id: string) {
+  uploader.value?.retry(id)
 }
 
 function cancelAddSeed() {
@@ -218,42 +426,173 @@ function cancelAddSeed() {
 }
 
 function addSeed() {
-  if (!newSeedId.value) return
+  if (!newSeedId.value.trim()) {
+    return
+  }
+
+  const id = newSeedId.value.trim().toUpperCase()
 
   seedTypes.value.push({
-    id: newSeedId.value,
-    species: newSeedSpecies.value,
+    id,
+    species: newSeedSpecies.value.trim(),
     isCustom: true,
   })
+
+  config.value.models[id] = {
+    model_version_id: null,
+  }
 
   cancelAddSeed()
 }
 
 function removeSeed(id: string) {
-  seedTypes.value = seedTypes.value.filter((s) => s.id !== id)
+  seedTypes.value = seedTypes.value.filter((seed) => seed.id !== id)
+
+  delete config.value.models[id]
 
   if (selectedSeed.value === id) {
     selectedSeed.value = null
   }
 }
 
-function onPick(e: Event) {
-  const target = e.target as HTMLInputElement
+async function ensureUpload(): Promise<number | null> {
+  if (uploadId.value) {
+    return uploadId.value
+  }
+
+  if (creatingUpload.value) {
+    return null
+  }
+
+  creatingUpload.value = true
+
+  try {
+    const response = await api('/api/datasets/uploads/', {
+      method: 'POST',
+      body: JSON.stringify({
+        module: 'seeds',
+        name: runName.value,
+      }),
+    })
+
+    if (!response.ok) {
+      error.value = (await response.text()) || `HTTP ${response.status}`
+      return null
+    }
+
+    const data = await response.json()
+
+    uploadId.value = data.id
+
+    uploader.value = createUploader({
+      module: 'seeds',
+      uploadId: data.id,
+    })
+
+    return data.id
+  } catch (e) {
+    error.value = e instanceof Error ? e.message : String(e)
+    return null
+  } finally {
+    creatingUpload.value = false
+  }
+}
+
+async function handleFiles(files: File[]) {
+  if (!files.length) {
+    return
+  }
+
+  const id = await ensureUpload()
+
+  if (!id || !uploader.value) {
+    return
+  }
+
+  uploader.value.enqueue(files)
+}
+
+function onPick(event: Event) {
+  const target = event.target as HTMLInputElement
+
   if (target.files) {
-    console.log('picked files:', target.files)
+    void handleFiles(Array.from(target.files))
   }
+
+  target.value = ''
 }
 
-function onDrop(e: DragEvent) {
+function onDrop(event: DragEvent) {
   dragOver.value = false
-  if (e.dataTransfer?.files) {
-    console.log('dropped files:', e.dataTransfer.files)
+
+  if (event.dataTransfer?.files) {
+    void handleFiles(Array.from(event.dataTransfer.files))
   }
 }
 
-function onDragLeave(e: DragEvent) {
-  if (!(e.currentTarget as HTMLElement).contains(e.relatedTarget as Node)) {
+function onDragLeave(event: DragEvent) {
+  if (!(event.currentTarget as HTMLElement).contains(event.relatedTarget as Node)) {
     dragOver.value = false
+  }
+}
+
+async function startDetection() {
+  error.value = ''
+
+  if (!uploadId.value) {
+    error.value = 'No upload in progress.'
+    return
+  }
+
+  if (!selectedSeed.value) {
+    error.value = 'Select a seed type.'
+    return
+  }
+
+  const modelId = selectedSeed.value
+
+  ? config.value.models[selectedSeed.value]?.model_version_id
+
+  : null
+
+if (!modelId) {
+
+  error.value = `Select a model version for ${selectedSeed.value}.`
+
+  return
+
+}
+
+  starting.value = true
+
+  try {
+    const response = await api('/api/analysis/runs/', {
+      method: 'POST',
+      body: JSON.stringify({
+        module: 'seeds',
+        upload: uploadId.value,
+        name: runName.value,
+        notes: runNotes.value,
+
+        config: {
+          ...config.value,
+          selected_seed: selectedSeed.value,
+        },
+      }),
+    })
+
+    if (!response.ok) {
+      error.value = (await response.text()) || `HTTP ${response.status}`
+      return
+    }
+
+    const run = await response.json()
+
+    router.push(`/seeds/runs/${run.id}/detect`)
+  } catch (e) {
+    error.value = e instanceof Error ? e.message : String(e)
+  } finally {
+    starting.value = false
   }
 }
 </script>
