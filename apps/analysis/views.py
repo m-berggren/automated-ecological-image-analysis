@@ -1,14 +1,20 @@
+import logging
+
 from django.db.models import QuerySet
 from rest_framework import generics, status
 from rest_framework.response import Response
 
-from .models import InferenceRun, ModelVersion
+from .models import Detection, InferenceRun, ModelVersion
 from .serializers import (
+    DetectionSerializer,
     InferenceRunCreateSerializer,
     InferenceRunDetailSerializer,
     InferenceRunListSerializer,
     ModelVersionSerializer,
 )
+from .services import run_inference_pipeline
+
+logger = logging.getLogger(__name__)
 
 
 class ModelVersionListView(generics.ListAPIView):
@@ -64,6 +70,14 @@ class InferenceRunListCreateView(generics.ListCreateAPIView):
             initiated_by=request.user,
             image_count=upload.images.count(),
         )
+        # Tier 4a runs the pipeline synchronously, which blocks the request
+        # for the duration of the run (potentially minutes to hours). Tier 4b
+        # moves this onto a background worker so the create returns immediately.
+        try:
+            run_inference_pipeline(run)
+        except Exception:
+            logger.exception(f'Run {run.pk} failed during synchronous execution')
+        run.refresh_from_db()
         return Response(
             InferenceRunDetailSerializer(run).data,
             status=status.HTTP_201_CREATED,
@@ -80,3 +94,22 @@ class InferenceRunDetailView(generics.RetrieveAPIView):
     queryset = InferenceRun.objects.all()
     serializer_class = InferenceRunDetailSerializer
     lookup_field = 'pk'
+
+
+class DetectionListView(generics.ListAPIView):
+    """GET /api/analysis/runs/<run_id>/detections/
+
+    Lists detections for a run in id order. select_related on the image
+    avoids an N+1 when the serializer reads the file name.
+    """
+
+    serializer_class = DetectionSerializer
+    pagination_class = None
+
+    def get_queryset(self) -> QuerySet[Detection]:
+        return (
+            Detection.objects
+            .filter(inference_run_id=self.kwargs['run_id'])
+            .select_related('image')
+            .order_by('id')
+        )
