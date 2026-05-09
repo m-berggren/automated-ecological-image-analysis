@@ -4,14 +4,26 @@ from django.db import models
 from apps.datasets.models import Module
 
 
+class ModelKind(models.TextChoices):
+    """Role of a model version inside its module's pipeline.
+
+    For pollinators: 'detector' = YOLO, 'classifier' = InsectNet binary+group.
+    For seeds: detector only.
+    """
+
+    DETECTOR = 'detector', 'Detector'
+    CLASSIFIER = 'classifier', 'Classifier'
+
+
 class ModelVersion(models.Model):
     """A trained model artifact for a given module.
 
-    At most one ModelVersion per module may have is_active=True; this is
-    enforced in save().
+    At most one ModelVersion per (module, kind) may have is_active=True;
+    this is enforced in save().
     """
 
     module = models.CharField(max_length=20, choices=Module.choices)
+    kind = models.CharField(max_length=20, choices=ModelKind.choices, blank=True)
     version_name = models.CharField(max_length=100, unique=True)
     model_file_path = models.CharField(max_length=255)
 
@@ -40,12 +52,14 @@ class ModelVersion(models.Model):
     class Meta:
         indexes = [
             models.Index(fields=['module', 'is_active']),
+            models.Index(fields=['module', 'kind']),
         ]
 
-    def save(self, *args, **kwargs):
+    def save(self, *args, **kwargs) -> None:
         if self.is_active:
             ModelVersion.objects.filter(
                 module=self.module,
+                kind=self.kind,
                 is_active=True,
             ).exclude(pk=self.pk).update(is_active=False)
         super().save(*args, **kwargs)
