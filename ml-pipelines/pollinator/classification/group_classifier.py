@@ -1,7 +1,7 @@
 """
 classification/group_classifier.py
 =====================================
-Group classifier: bumblebee / fly / butterfly_moth / other.
+Group classifier: bumblebee / fly / butterfly / other.
 
 Loads a trained EfficientNet-B2 or InsectNet checkpoint and assigns
 a confirmed insect crop to one of four pollinator categories.
@@ -30,7 +30,7 @@ from PIL import Image
 
 logger = logging.getLogger(__name__)
 
-CLASSES = ["bumblebee", "fly", "butterfly_moth", "other"]
+CLASSES = ["bumblebee", "fly", "butterfly", "other"]
 
 
 def _letterbox(img: Image.Image, size: int) -> Image.Image:
@@ -67,7 +67,7 @@ class GroupClassifier:
     Four-class pollinator group classifier.
 
     Classifies confirmed insect crops into:
-    bumblebee / fly / butterfly_moth / other
+    bumblebee / fly / butterfly / other
     """
 
     def __init__(self, checkpoint_path: str, device: Optional[str] = None):

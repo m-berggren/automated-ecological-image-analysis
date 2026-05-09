@@ -103,12 +103,15 @@ class BinaryClassifier:
         self.model     = model.to(self.device)
         self.transform = _make_transform(self.img_size)
 
-    def predict(self, image_path: Union[str, Path]) -> tuple:
+    def predict(self, image_path: Union[str, Path],
+                threshold: float = 0.5) -> tuple:
         """
         Classify a single crop image.
 
         Args:
             image_path: Path to .jpg/.png crop file.
+            threshold:  Minimum insect probability to classify as insect.
+                        Lower = higher recall; higher = higher precision.
 
         Returns:
             (label, confidence)
@@ -120,7 +123,7 @@ class BinaryClassifier:
         with torch.no_grad():
             probs = torch.softmax(self.model(x), dim=1)[0]
         insect_prob = float(probs[1])
-        label       = "insect" if insect_prob >= 0.5 else "background"
+        label       = "insect" if insect_prob >= threshold else "background"
         return label, insect_prob
 
     def predict_batch(self, image_paths: list,
