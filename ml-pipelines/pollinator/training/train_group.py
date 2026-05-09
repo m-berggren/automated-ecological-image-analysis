@@ -23,10 +23,8 @@ Data split:
 
 Usage (CLI):
     python -m pollinator.training.train_group \
-        --data_ls   path/to/labeled_ls \
-        --data_mb   path/to/labeled_mb \
+        --data_dirs path/to/labeled_a path/to/labeled_b \
         --web_dir   path/to/web_images \
-        --mode      combined \
         --model     insectnet \
         --insectnet_weights path/to/InsectNet/model.pth \
         --output    path/to/models \
@@ -35,8 +33,8 @@ Usage (CLI):
 
 Usage (as module):
     from pollinator.training.train_group import train_group
-    train_group(data_ls="...", data_mb="...", web_dir="...", mode="combined",
-                model_type="insectnet", epochs_s2=0)
+    train_group(data_dirs=["path/to/labeled_a", "path/to/labeled_b"],
+                web_dir="...", model_type="insectnet", epochs_s2=0)
 """
 
 import argparse
@@ -251,10 +249,8 @@ def run_stage(model, name, train_loader, val_loader, epochs, lr,
 
 
 def train_group(
-    data_ls:             Optional[str] = None,
-    data_mb:             Optional[str] = None,
+    data_dirs:           list,
     web_dir:             Optional[str] = None,
-    mode:                str   = "combined",
     model_type:          str   = "insectnet",
     insectnet_weights:   Optional[str] = None,
     unfreeze_last_block: bool  = True,
@@ -271,6 +267,14 @@ def train_group(
     """
     Train group classifier (bumblebee / fly / butterfly / other).
 
+    Args:
+        data_dirs: One or more labeled-data root folders containing the
+                   Arctic field crops. Each folder has bumblebee/ fly/
+                   butterfly/ other/ subdirs (see ARCTIC_ALIAS for accepted
+                   folder names).
+        web_dir:   Optional folder of web-scraped images (e.g. iNaturalist)
+                   with the same per-class subdirs (see WEB_ALIAS).
+
     Val set:        Arctic + web mixed for balanced per-class evaluation.
     Test Arctic:    Arctic crops only. Reflects real field performance.
     Test Web:       web images only. Reflects generalisation.
@@ -279,6 +283,8 @@ def train_group(
     Recommended for InsectNet since Stage 2 overfits on small Arctic data.
     """
     logging.basicConfig(level=logging.INFO, format="%(levelname)s %(message)s")
+    if not data_dirs:
+        raise ValueError("data_dirs must contain at least one path")
     device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
     logger.info(f"Device: {device}")
 
@@ -288,17 +294,11 @@ def train_group(
     torch.manual_seed(seed)
     np.random.seed(seed)
 
-    arctic_dirs = []
-    if mode in ("ls", "combined") and data_ls:
-        arctic_dirs.append(Path(data_ls))
-    if mode in ("mb", "combined") and data_mb:
-        arctic_dirs.append(Path(data_mb))
-
     arctic_samples = []
     counts_arctic  = {i: 0 for i in range(len(CLASSES))}
 
-    for d in arctic_dirs:
-        s, _, ca, _ = collect_samples(d, None, CLASSES)
+    for d in data_dirs:
+        s, _, ca, _ = collect_samples(Path(d), None, CLASSES)
         arctic_samples += s
         for i in range(len(CLASSES)):
             counts_arctic[i] += ca[i]
@@ -409,7 +409,8 @@ def train_group(
 
     results = {
         "model":                 model_type,
-        "mode":                  mode,
+        "data_dirs":             [str(d) for d in data_dirs],
+        "web_dir":               str(web_dir) if web_dir else None,
         "img_size":              img_size,
         "classes":               CLASSES,
         "best_epoch":            ckpt["epoch"],
@@ -432,10 +433,9 @@ def train_group(
 
 if __name__ == "__main__":
     parser = argparse.ArgumentParser()
-    parser.add_argument("--data_ls",            help="Path to labeled_ls")
-    parser.add_argument("--data_mb",            help="Path to labeled_mb")
-    parser.add_argument("--web_dir",            help="Path to web_images (optional)")
-    parser.add_argument("--mode",               default="combined", choices=["ls", "mb", "combined"])
+    parser.add_argument("--data_dirs",          nargs="+", required=True,
+                        help="One or more labeled-data root folders (Arctic field crops)")
+    parser.add_argument("--web_dir",            help="Optional folder of web-scraped images")
     parser.add_argument("--model",              default="insectnet", choices=["efficientnet", "insectnet"])
     parser.add_argument("--insectnet_weights",  help="Path to InsectNet model.pth")
     parser.add_argument("--no_unfreeze",        action="store_true", help="Keep InsectNet backbone fully frozen")
@@ -449,10 +449,8 @@ if __name__ == "__main__":
     args = parser.parse_args()
 
     train_group(
-        data_ls             = args.data_ls,
-        data_mb             = args.data_mb,
+        data_dirs           = args.data_dirs,
         web_dir             = args.web_dir,
-        mode                = args.mode,
         model_type          = args.model,
         insectnet_weights   = args.insectnet_weights,
         unfreeze_last_block = not args.no_unfreeze,

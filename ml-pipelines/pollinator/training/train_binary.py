@@ -13,16 +13,14 @@ dominates the training data. See pollinator.training.sampling for details.
 
 Usage (CLI):
     python -m pollinator.training.train_binary \
-        --data_ls   path/to/labeled_ls \
-        --data_mb   path/to/labeled_mb \
-        --mode      combined \
+        --data_dirs path/to/labeled_a path/to/labeled_b \
         --model     efficientnet \
         --output    path/to/models \
         --epochs    20
 
 Usage (as module):
     from pollinator.training.train_binary import train_binary
-    train_binary(data_ls="...", data_mb="...", mode="combined")
+    train_binary(data_dirs=["path/to/labeled_a", "path/to/labeled_b"])
 """
 
 import argparse
@@ -183,9 +181,7 @@ def eval_epoch(model, loader, criterion, device) -> dict:
 
 
 def train_binary(
-    data_ls:           Optional[str] = None,
-    data_mb:           Optional[str] = None,
-    mode:              str   = "combined",
+    data_dirs:         list,
     model_type:        str   = "efficientnet",
     insectnet_weights: Optional[str] = None,
     output_dir:        str   = "models",
@@ -204,18 +200,20 @@ def train_binary(
     single plot dominating the training data.
 
     Args:
-        data_ls:   Path to labeled_ls folder.
-        data_mb:   Path to labeled_mb folder.
-        mode:      "ls", "mb", or "combined".
-        model_type: "efficientnet" or "insectnet".
+        data_dirs:         One or more labeled-data root folders. Each folder
+                           contains insect class subdirs (bumblebee, fly,
+                           butterfly, other) plus a background/ subdir.
+        model_type:        "efficientnet" or "insectnet".
         insectnet_weights: Path to InsectNet model.pth (required for insectnet).
-        output_dir: Where to save checkpoints and results.
+        output_dir:        Where to save checkpoints and results.
         epochs, batch, lr, val_frac, test_frac, bg_ratio, seed: training params.
 
     Returns:
         dict with val and test metrics of the best checkpoint.
     """
     logging.basicConfig(level=logging.INFO, format="%(levelname)s %(message)s")
+    if not data_dirs:
+        raise ValueError("data_dirs must contain at least one path")
     device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
     logger.info(f"Device: {device}")
 
@@ -225,30 +223,20 @@ def train_binary(
     torch.manual_seed(seed)
     np.random.seed(seed)
 
-    if mode == "combined":
-        if not data_ls or not data_mb:
-            raise ValueError("combined mode requires both --data_ls and --data_mb")
-        s1, t1, v1, te1, c1 = load_and_split(Path(data_ls), val_frac, test_frac, bg_ratio, seed)
-        s2, t2, v2, te2, c2 = load_and_split(Path(data_mb), val_frac, test_frac, bg_ratio, seed)
-        offset      = len(s1)
-        all_samples = s1 + s2
-        train_idx   = t1 + [i + offset for i in t2]
-        val_idx     = v1 + [i + offset for i in v2]
-        test_idx    = te1 + [i + offset for i in te2]
-        counts      = {0: c1[0] + c2[0], 1: c1[1] + c2[1]}
-        logger.info(f"\nCombined. Background: {counts[0]}  Insect: {counts[1]}")
-    elif mode == "ls":
-        if not data_ls:
-            raise ValueError("ls mode requires --data_ls")
-        all_samples, train_idx, val_idx, test_idx, counts = load_and_split(
-            Path(data_ls), val_frac, test_frac, bg_ratio, seed
-        )
-    else:
-        if not data_mb:
-            raise ValueError("mb mode requires --data_mb")
-        all_samples, train_idx, val_idx, test_idx, counts = load_and_split(
-            Path(data_mb), val_frac, test_frac, bg_ratio, seed
-        )
+    all_samples = []
+    train_idx, val_idx, test_idx = [], [], []
+    counts = {0: 0, 1: 0}
+    offset = 0
+    for d in data_dirs:
+        s, t, v, te, c = load_and_split(Path(d), val_frac, test_frac, bg_ratio, seed)
+        all_samples.extend(s)
+        train_idx.extend(i + offset for i in t)
+        val_idx.extend(i + offset for i in v)
+        test_idx.extend(i + offset for i in te)
+        counts[0] += c[0]
+        counts[1] += c[1]
+        offset += len(s)
+    logger.info(f"\nCombined {len(data_dirs)} dataset(s). Background: {counts[0]}  Insect: {counts[1]}")
 
     if model_type == "insectnet":
         if not insectnet_weights:
@@ -323,7 +311,7 @@ def train_binary(
 
     results = {
         "model":          model_type,
-        "mode":           mode,
+        "data_dirs":      [str(d) for d in data_dirs],
         "img_size":       img_size,
         "best_epoch":     ckpt["epoch"],
         "best_val_f1":    best_f1,
@@ -345,10 +333,8 @@ def train_binary(
 
 if __name__ == "__main__":
     parser = argparse.ArgumentParser()
-    parser.add_argument("--data_ls",           help="Path to labeled_ls")
-    parser.add_argument("--data_mb",           help="Path to labeled_mb")
-    parser.add_argument("--mode",              default="combined",
-                        choices=["ls", "mb", "combined"])
+    parser.add_argument("--data_dirs",         nargs="+", required=True,
+                        help="One or more labeled-data root folders")
     parser.add_argument("--model",             default="efficientnet",
                         choices=["efficientnet", "insectnet"])
     parser.add_argument("--insectnet_weights", help="Path to InsectNet model.pth")
@@ -361,9 +347,7 @@ if __name__ == "__main__":
     args = parser.parse_args()
 
     train_binary(
-        data_ls           = args.data_ls,
-        data_mb           = args.data_mb,
-        mode              = args.mode,
+        data_dirs         = args.data_dirs,
         model_type        = args.model,
         insectnet_weights = args.insectnet_weights,
         output_dir        = args.output,
