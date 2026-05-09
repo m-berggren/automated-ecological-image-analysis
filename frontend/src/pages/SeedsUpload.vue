@@ -325,7 +325,6 @@ interface SeedModelConfig {
 interface PipelineConfig {
   confidence_threshold: number
   slice_overlap_ratio: number
-  postprocess_match_threshold: number
   enable_viability: boolean
 
   models: Record<string, SeedModelConfig>
@@ -340,11 +339,8 @@ const starting = ref(false)
 const dragOver = ref(false)
 
 const error = ref('')
-
 const uploadId = ref<number | null>(null)
-
 const uploader = ref<Uploader | null>(null)
-
 const folderInput = ref<HTMLInputElement | null>(null)
 
 const runName = ref('')
@@ -361,22 +357,22 @@ const modelVersions = ref<ModelVersion[]>([])
 const seedTypes = ref<SeedType[]>([
   {
     id: 'PEH',
-    species: 'Pisum sativum',
+    species: 'Species name',
     isCustom: false,
   },
   {
     id: 'PHYCA',
-    species: 'Phacelia tanacetifolia',
+    species: 'Species name',
     isCustom: false,
   },
   {
     id: 'VAU',
-    species: 'Vicia sativa',
+    species: 'Species name',
     isCustom: false,
   },
   {
     id: 'CAT',
-    species: 'Carthamus tinctorius',
+    species: 'Species name',
     isCustom: false,
   },
 ])
@@ -384,7 +380,6 @@ const seedTypes = ref<SeedType[]>([
 const config = ref<PipelineConfig>({
   confidence_threshold: 0.25,
   slice_overlap_ratio: 0.25,
-  postprocess_match_threshold: 0.15,
   enable_viability: false,
 
   models: {
@@ -550,10 +545,8 @@ async function startDetection() {
   }
 
   const modelId = selectedSeed.value
-
-  ? config.value.models[selectedSeed.value]?.model_version_id
-
-  : null
+    ? config.value.models[selectedSeed.value]?.model_version_id
+    : null
 
 if (!modelId) {
 
