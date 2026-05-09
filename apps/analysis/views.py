@@ -1,5 +1,6 @@
 import logging
 
+from django.db import transaction
 from django.db.models import QuerySet
 from rest_framework import generics, status
 from rest_framework.response import Response
@@ -12,7 +13,7 @@ from .serializers import (
     InferenceRunListSerializer,
     ModelVersionSerializer,
 )
-from .services import run_inference_pipeline
+from .services import spawn_inference_pipeline
 
 logger = logging.getLogger(__name__)
 
@@ -70,14 +71,9 @@ class InferenceRunListCreateView(generics.ListCreateAPIView):
             initiated_by=request.user,
             image_count=upload.images.count(),
         )
-        # Tier 4a runs the pipeline synchronously, which blocks the request
-        # for the duration of the run (potentially minutes to hours). Tier 4b
-        # moves this onto a background worker so the create returns immediately.
-        try:
-            run_inference_pipeline(run)
-        except Exception:
-            logger.exception(f'Run {run.pk} failed during synchronous execution')
-        run.refresh_from_db()
+        # Spawn the run in a background thread after the transaction commits
+        # so the worker can see the row. Returns immediately with status=pending.
+        transaction.on_commit(lambda: spawn_inference_pipeline(run))
         return Response(
             InferenceRunDetailSerializer(run).data,
             status=status.HTTP_201_CREATED,
