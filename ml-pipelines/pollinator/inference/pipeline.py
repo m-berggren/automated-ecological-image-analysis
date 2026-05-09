@@ -40,7 +40,7 @@ import csv
 import json
 import logging
 from pathlib import Path
-from typing import Optional
+from typing import Callable, Optional
 
 import cv2
 import numpy as np
@@ -212,18 +212,19 @@ def run_insectnet_step(
 
 
 def run_pipeline(
-    image_dir:        str,
-    output_dir:       str,
-    yolo_model:       str,
-    binary_model:     str,
-    group_model:      str,
-    config:           Optional[dict] = None,
-    yolo_confidence:  float = 0.25,
-    binary_threshold: float = 0.5,
-    iou_threshold:    float = 0.3,
-    skip_first_n:     int   = 0,
-    device:           Optional[str] = None,
-    debug:            bool  = False,
+    image_dir:         str,
+    output_dir:        str,
+    yolo_model:        str,
+    binary_model:      str,
+    group_model:       str,
+    config:            Optional[dict] = None,
+    yolo_confidence:   float = 0.25,
+    binary_threshold:  float = 0.5,
+    iou_threshold:     float = 0.3,
+    skip_first_n:      int   = 0,
+    device:            Optional[str] = None,
+    debug:             bool  = False,
+    progress_callback: Optional[Callable[[int, int, str, str], None]] = None,
 ) -> dict:
     """
     Run full pollinator detection pipeline on a camera folder.
@@ -250,6 +251,11 @@ def run_pipeline(
                            preprocessing branch so they stay aligned.
         device:            "cuda", "cpu", or None (auto-detect).
         debug:             Save debug images from preprocessing.
+        progress_callback: Optional callback invoked at major milestones.
+                           Signature: (processed, total, message, level)
+                           where level is one of 'info', 'warn', 'error'.
+                           Exceptions raised by the callback are swallowed
+                           so they cannot break the run.
 
     Returns:
         dict with keys:
@@ -263,6 +269,14 @@ def run_pipeline(
     """
     if skip_first_n < 0:
         raise ValueError(f"skip_first_n must be >= 0, got {skip_first_n}")
+
+    def _emit(processed: int, total: int, message: str = "", level: str = "info") -> None:
+        if progress_callback is None:
+            return
+        try:
+            progress_callback(processed, total, message, level)
+        except Exception:
+            logger.exception("progress_callback raised; ignoring")
 
     image_dir  = Path(image_dir)
     output_dir = Path(output_dir)
@@ -285,6 +299,9 @@ def run_pipeline(
             "detections_by_source":       {"yolo": 0, "preprocessing": 0, "both": 0},
         }
 
+    n = len(image_paths)
+    _emit(0, n, f"Starting run on {n} images")
+
     cfg = config or {}
     first_img = cv2.imread(str(image_paths[0]))
     zone = setup_zone(first_img, cfg) if first_img is not None else None
@@ -302,6 +319,7 @@ def run_pipeline(
         device          = device,
         zone            = zone,
     )
+    _emit(int(n * 0.4), n, f"YOLO detected {len(yolo_dets)} candidates")
 
     logger.info(f"Step 2: Preprocessing {image_dir}")
     prep_result = run_preprocessing(
@@ -313,6 +331,7 @@ def run_pipeline(
     )
     n_candidates = prep_result["n_crops"]
     logger.info(f"  Extracted {n_candidates} candidate crops")
+    _emit(int(n * 0.7), n, f"Preprocessing extracted {n_candidates} candidate crops")
 
     if n_candidates > 0:
         logger.info(f"Step 3+4: InsectNet (binary threshold={binary_threshold})")
@@ -324,6 +343,7 @@ def run_pipeline(
             binary_threshold = binary_threshold,
             device           = device,
         )
+        _emit(int(n * 0.9), n, f"Classifier kept {len(insect_dets)} insect crops")
     else:
         insect_dets = []
 
@@ -331,6 +351,7 @@ def run_pipeline(
     detections, by_class, by_source = merge_per_image(
         yolo_dets, insect_dets, iou_threshold,
     )
+    _emit(n, n, f"Run complete: {len(detections)} detections")
     logger.info(
         f"  Final: {len(detections)} detections "
         f"({by_source['both']} both, {by_source['yolo']} yolo-only, "
