@@ -113,10 +113,20 @@ class TrainingJob(models.Model):
 
 
 class InferenceRun(models.Model):
+    """A single inference run over an Upload's images.
+
+    The run is created with status=pending. The frontend polls this row
+    while the worker (later tier) flips status to running -> completed/failed
+    and updates the progress fields.
+    """
+
     module = models.CharField(max_length=20, choices=Module.choices)
-    model_version = models.ForeignKey(
-        ModelVersion,
+    name = models.CharField(max_length=200, blank=True)
+    upload = models.ForeignKey(
+        'datasets.Upload',
         on_delete=models.PROTECT,
+        null=True,
+        blank=True,
         related_name='inference_runs',
     )
     status = models.CharField(
@@ -125,10 +135,31 @@ class InferenceRun(models.Model):
         default=JobStatus.PENDING,
     )
 
+    # Frozen run config posted by the frontend (yolo/classifier ids,
+    # thresholds, preprocessing knobs). Stored as-is for reproducibility.
+    config = models.JSONField(default=dict, blank=True)
+
+    # Image set snapshot. The worker may populate `images` for retraining
+    # provenance; otherwise we derive from `upload.images` at runtime.
     images = models.ManyToManyField(
         'datasets.ImageAsset',
         related_name='inference_runs',
+        blank=True,
     )
+
+    # Progress fields. All maintained by the worker; defaults cover the
+    # pre-run state.
+    image_count = models.IntegerField(default=0)
+    processed_image_count = models.IntegerField(default=0)
+    detection_count = models.IntegerField(default=0)
+    failed_image_count = models.IntegerField(default=0)
+    detections_by_class = models.JSONField(default=dict, blank=True)
+    detections_by_source = models.JSONField(default=dict, blank=True)
+    activity_log = models.JSONField(
+        default=list, blank=True,
+        help_text='List of {time, message, level} entries appended by the worker',
+    )
+    error_message = models.TextField(blank=True)
 
     initiated_by = models.ForeignKey(
         settings.AUTH_USER_MODEL,
@@ -138,7 +169,14 @@ class InferenceRun(models.Model):
         related_name='initiated_inference_runs',
     )
     created_at = models.DateTimeField(auto_now_add=True)
+    started_at = models.DateTimeField(null=True, blank=True)
     completed_at = models.DateTimeField(null=True, blank=True)
+
+    class Meta:
+        indexes = [
+            models.Index(fields=['module', '-created_at']),
+            models.Index(fields=['module', 'status']),
+        ]
 
     def __str__(self) -> str:
         return f'InferenceRun<{self.module} #{self.pk} {self.status}>'

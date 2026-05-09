@@ -24,13 +24,16 @@ class InferenceRunAdmin(admin.ModelAdmin):
     list_display = (
         'id',
         'module',
-        'model_version',
+        'name',
         'status',
+        'image_count',
+        'processed_image_count',
+        'detection_count',
         'created_at',
         'completed_at',
     )
     list_filter = ('module', 'status')
-    readonly_fields = ('created_at',)
+    readonly_fields = ('created_at', 'started_at', 'completed_at')
     filter_horizontal = ('images',)
 
 
