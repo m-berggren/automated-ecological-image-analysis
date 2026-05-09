@@ -37,6 +37,42 @@ from .models import (
 logger = logging.getLogger(__name__)
 
 
+_ACTIVITY_LOG_CAP = 200
+
+
+def _make_progress_callback(run_id: int):
+    """Build a callback the pipeline calls at progress milestones.
+
+    Updates processed_image_count on every call. When a message is
+    provided, appends a {time, message, level} entry to activity_log
+    (capped at the last 200 entries).
+    """
+
+    def cb(processed: int, total: int, message: str = '', level: str = 'info') -> None:
+        try:
+            updates: dict = {'processed_image_count': processed}
+            if total:
+                updates['image_count'] = total
+            if message:
+                run = InferenceRun.objects.get(pk=run_id)
+                log = list(run.activity_log or [])
+                log.append({
+                    'time': timezone.now().isoformat(),
+                    'message': message,
+                    'level': level,
+                })
+                run.activity_log = log[-_ACTIVITY_LOG_CAP:]
+                for k, v in updates.items():
+                    setattr(run, k, v)
+                run.save(update_fields=list(updates.keys()) + ['activity_log'])
+            else:
+                InferenceRun.objects.filter(pk=run_id).update(**updates)
+        except Exception:
+            logger.exception(f'Progress callback failed for run {run_id}')
+
+    return cb
+
+
 def run_inference_pipeline(run: InferenceRun) -> None:
     """Run the pollinator pipeline for one InferenceRun, persist results.
 
@@ -124,6 +160,7 @@ def run_inference_pipeline(run: InferenceRun) -> None:
                 yolo_confidence=yolo_conf,
                 binary_threshold=binary_thr,
                 skip_first_n=skip_first,
+                progress_callback=_make_progress_callback(run.pk),
             )
 
         json_path = Path(result['output_json'])

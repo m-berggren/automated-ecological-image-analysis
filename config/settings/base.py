@@ -6,10 +6,15 @@ defaults. Override in development.py / production.py or via real env vars.
 """
 
 import os
+import sys
 from datetime import timedelta
 from pathlib import Path
 
 BASE_DIR = Path(__file__).resolve().parent.parent.parent
+
+# The pollinator ML package lives next to the Django project; make it
+# importable so apps.analysis can call pollinator.inference at runtime.
+sys.path.insert(0, str(BASE_DIR / 'ml-pipelines'))
 
 # ---------------------------------------------------------------------------
 # Configurable values — override via env vars or per-environment settings
