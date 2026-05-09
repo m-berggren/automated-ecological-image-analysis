@@ -195,6 +195,18 @@ class DetectionScope(models.TextChoices):
     UNKNOWN = 'unknown', 'Unknown'
 
 
+class DetectionSource(models.TextChoices):
+    """Which detector(s) produced a pollinator detection.
+
+    YOLO and the InsectNet preprocessing+classifier branches run as peer
+    detectors. When both find the same physical insect, source=both.
+    """
+
+    YOLO = 'yolo', 'YOLO only'
+    PREPROCESSING = 'preprocessing', 'Preprocessing only'
+    BOTH = 'both', 'Both detectors'
+
+
 class Detection(models.Model):
     """A single bounding box predicted by an inference run.
 
@@ -202,9 +214,10 @@ class Detection(models.Model):
     - seeds: 'seed' / 'inactive'
     - pollinators: 'bumblebee' / 'fly' / 'butterfly' / 'other'
 
-    Pollinator-specific taxonomy fields (scientific_name through
-    detection_scope) are populated by the InsectNet classification
-    pipeline. They are nullable so seed detections are unaffected.
+    Pollinator runs additionally populate yolo_class, yolo_confidence,
+    insectnet_class, insectnet_confidence, and source so the review UI
+    can flag YOLO/InsectNet disagreements. Seeds runs leave those fields
+    null and use predicted_class+confidence only.
     """
 
     inference_run = models.ForeignKey(
@@ -225,7 +238,32 @@ class Detection(models.Model):
         help_text='Pixel area of bbox; persisted to drive the seeds volume filter',
     )
 
-    # InsectNet taxonomy — populated by the pollinator pipeline
+    # Pollinator dual-detector fields. Both null for seeds detections.
+    yolo_class = models.CharField(max_length=50, blank=True)
+    yolo_confidence = models.FloatField(null=True, blank=True)
+    insectnet_class = models.CharField(max_length=50, blank=True)
+    insectnet_confidence = models.FloatField(null=True, blank=True)
+    binary_confidence = models.FloatField(
+        null=True, blank=True,
+        help_text='InsectNet binary insect/background confidence',
+    )
+    class_probs = models.JSONField(
+        default=dict, blank=True,
+        help_text='Per-class probability dict from the group classifier',
+    )
+    source = models.CharField(
+        max_length=20,
+        choices=DetectionSource.choices,
+        blank=True,
+    )
+    merge_iou = models.FloatField(
+        null=True, blank=True,
+        help_text='IoU between YOLO and preprocessing bboxes when source=both',
+    )
+
+    # Legacy InsectNet taxonomy (older notebook flow). Kept nullable so the
+    # frontend can still render scientific names if a future run populates
+    # them, but the current pipeline does not.
     scientific_name = models.CharField(max_length=200, blank=True)
     common_name = models.CharField(max_length=200, blank=True)
     order = models.CharField(max_length=100, blank=True)
@@ -253,6 +291,10 @@ class Detection(models.Model):
         choices=DetectionStatus.choices,
         default=DetectionStatus.PENDING,
     )
+    reviewer_label = models.CharField(
+        max_length=50, blank=True,
+        help_text='Class assigned by a reviewer when correcting the prediction',
+    )
     flagged_for_training = models.BooleanField(default=False)
 
     reviewed_by = models.ForeignKey(
@@ -270,6 +312,7 @@ class Detection(models.Model):
             models.Index(fields=['image', 'predicted_class']),
             models.Index(fields=['flagged_for_training']),
             models.Index(fields=['area']),
+            models.Index(fields=['inference_run', 'source']),
         ]
 
     def __str__(self) -> str:

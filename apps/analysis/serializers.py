@@ -1,8 +1,10 @@
+from pathlib import Path
+
 from rest_framework import serializers
 
 from apps.datasets.models import Upload
 
-from .models import InferenceRun, ModelVersion
+from .models import Detection, DetectionStatus, InferenceRun, ModelVersion
 
 
 class ModelVersionSerializer(serializers.ModelSerializer):
@@ -101,3 +103,44 @@ class InferenceRunDetailSerializer(serializers.ModelSerializer):
             'started_at',
             'completed_at',
         )
+
+
+class DetectionSerializer(serializers.ModelSerializer):
+    """Read serializer matching the frontend's Detection interface.
+
+    Maps DB status (pending/accepted/rejected) to the reviewer_status
+    vocabulary the review UI uses (unreviewed/confirmed/corrected/rejected).
+    """
+
+    reviewer_status = serializers.SerializerMethodField()
+    source_image_filename = serializers.SerializerMethodField()
+
+    class Meta:
+        model = Detection
+        fields = (
+            'id',
+            'yolo_class',
+            'yolo_confidence',
+            'insectnet_class',
+            'insectnet_confidence',
+            'binary_confidence',
+            'class_probs',
+            'source',
+            'merge_iou',
+            'bbox',
+            'reviewer_status',
+            'reviewer_label',
+            'source_image_filename',
+        )
+
+    def get_reviewer_status(self, obj: Detection) -> str:
+        if obj.status == DetectionStatus.REJECTED:
+            return 'rejected'
+        if obj.status == DetectionStatus.ACCEPTED:
+            return 'corrected' if obj.reviewer_label else 'confirmed'
+        return 'unreviewed'
+
+    def get_source_image_filename(self, obj: Detection) -> str:
+        if obj.image and obj.image.file:
+            return Path(obj.image.file.name).name
+        return ''
