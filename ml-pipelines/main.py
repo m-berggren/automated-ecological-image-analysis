@@ -14,7 +14,7 @@ from seed_src.utils import (
 # SETTINGS
 # -------------------------
 PREPARE_LABELS = True  # Set to True to run the label update on newly added label files
-RETRAIN = True  # Set to True to train a new model, False to use existing weights
+RETRAIN = False  # Set to True to train a new model, False to use existing weights
 SPECIES_LIST = ['cat', 'peh', 'phyca', 'vau']
 # Map species to their specific yaml files
 CONFIG_MAP = {s: f'../data/seed/{s}_model/{s}.yaml' for s in SPECIES_LIST}
@@ -78,14 +78,17 @@ models = {s: load_model(path) for s, path in best_model_paths.items()}
 # -------------------------
 # LOAD DATA
 # -------------------------
-VAL_DIR = (
-    '../data/seed/val'  # TODO: Potentially change this depending on the path we decide
-)
+VAL_BASE = '../data/seed'
 
 image_paths = []
 
-for species in os.listdir(VAL_DIR):
-    species_dir = os.path.join(VAL_DIR, species, 'images')
+for species in SPECIES_LIST:
+    species_dir = os.path.join(
+    VAL_BASE,
+    f'{species}_model',
+    'val',
+    'images'
+  )
 
     for img in os.listdir(species_dir):
         image_paths.append((species, os.path.join(species_dir, img)))
@@ -102,7 +105,12 @@ results = defaultdict(
 # -------------------------
 
 for species in SPECIES_LIST:
-    species_img_dir = os.path.join(VAL_DIR, species, 'images')
+    species_img_dir = os.path.join(
+    VAL_BASE,
+    f'{species}_model',
+    'val',
+    'images'
+  )
     if not os.path.exists(species_img_dir):
         continue
 
@@ -128,35 +136,25 @@ for species in SPECIES_LIST:
         preds = []
 
         for pred in result.object_prediction_list:
-            poly = None
 
-            # Check for explicit polygon points
-            if hasattr(pred, 'polygon') and pred.polygon is not None:
-                poly = pred.polygon.points
+          if pred.bbox is None:
+              continue
 
-            # Check for segmentation mask
-            elif hasattr(pred, 'mask') and pred.mask is not None:
-                poly = pred.mask.segmentation[0]
+          bbox = pred.bbox
 
-            # Check for rotated bbox (OBB specific)
-            elif hasattr(pred, 'obb') and pred.obb is not None:
-                poly = pred.obb  # Some handlers use this
+          # Convert bbox corners to polygon
+          flat_poly = [
+              bbox.minx, bbox.miny,
+              bbox.maxx, bbox.miny,
+              bbox.maxx, bbox.maxy,
+              bbox.minx, bbox.maxy
+          ]
 
-            if poly is not None:
-                # Standardize to a flat list of floats
-                if isinstance(poly[0], (list, tuple)):
-                    flat_poly = [float(c) for point in poly for c in point]
-                else:
-                    flat_poly = [float(c) for c in poly]
+          preds.append({
+              "poly": flat_poly,
+              "class": pred.category.id if hasattr(pred, "category") else None,
+          })
 
-                preds.append(
-                    {
-                        'poly': flat_poly[:8],
-                        'class': pred.category.id
-                        if hasattr(pred, 'category')
-                        else None,
-                    }
-                )
 
         tp, fp, fn = calculate_tp_fp_fn(preds, gt_boxes, iou_threshold=0.4)
 
