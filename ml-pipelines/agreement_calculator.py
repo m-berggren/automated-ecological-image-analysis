@@ -2,7 +2,6 @@ import os
 
 from PIL import Image
 from seed_src.metrics import calculate_tp_fp_fn
-from sklearn.metrics import cohen_kappa_score
 
 BASE_PATH = '../data/seed'
 SPECIES_LIST = ['cat', 'peh', 'phyca', 'vau']
@@ -37,9 +36,9 @@ def load_specific_ground_truth(img_path, label_path):
     return gt_boxes
 
 
-# Calculate Bohen's Kappa
-all_y_true = []
-all_y_pred = []
+total_tp = 0
+total_fp = 0
+total_fn = 0
 
 # Our folder structure should follow the same format just like in train/ and val/:
 # {species}_model/cohens_kappa/images and {species}_model/cohens_kappa/labels
@@ -47,7 +46,6 @@ for species in SPECIES_LIST:
     kappa_img_dir = os.path.join(
         BASE_PATH, f'{species}_model', 'cohens_kappa', 'images'
     )
-
     kappa_lbl_dir = os.path.join(
         BASE_PATH, f'{species}_model', 'cohens_kappa', 'labels'
     )
@@ -60,10 +58,8 @@ for species in SPECIES_LIST:
 
     for img_name in images:
         img_path = os.path.join(kappa_img_dir, img_name)
-
         base_name = os.path.splitext(img_name)[0]
 
-        # Specific label paths to compare
         label_a_path = os.path.join(kappa_lbl_dir, f'{base_name}_A.txt')
         label_b_path = os.path.join(kappa_lbl_dir, f'{base_name}_B.txt')
 
@@ -72,20 +68,34 @@ for species in SPECIES_LIST:
 
         preds_b = [{'poly': b, 'class': 0} for b in boxes_b]
 
-        # Calculate tp, fp, fn used later in Cohen's Kappa calculation
+        # Match calculations using IoU
         tp, fp, fn = calculate_tp_fp_fn(preds_b, boxes_a, iou_threshold=0.3)
 
-        y_true = [1] * (tp + fn) + [0] * fp
-        y_pred = [1] * tp + [0] * fn + [1] * fp
+        # Add to global totals
+        total_tp += tp
+        total_fp += fp
+        total_fn += fn
 
-        all_y_true.extend(y_true)
-        all_y_pred.extend(y_pred)
+        print(f'  Processed {species} - {img_name}: TP={tp}, FP={fp}, FN={fn}')
 
-        print(f'  Processed {species} - {img_name}: Matches={tp}, Misses={fn + fp}')
+# Final calculations of matches, mismatches, precision, recall, f1-score
+print(f'Total Matches (Both agreed): {total_tp}')
+print(f'Annotator B extra boxes (FP): {total_fp}')
+print(f'Annotator A extra boxes (FN): {total_fn}')
 
-# Calculate overall Cohen's Kappa score
-if all_y_true:
-    kappa = cohen_kappa_score(all_y_true, all_y_pred)
-    print(f"\nFINAL COHEN'S KAPPA: {kappa:.4f}")
+# Prevent division by zero errors
+if total_tp > 0:
+    precision = total_tp / (total_tp + total_fp) if (total_tp + total_fp) > 0 else 0
+    recall = total_tp / (total_tp + total_fn) if (total_tp + total_fn) > 0 else 0
+    # F1-Score: this is actually the most important one of them all
+    f1_score = (
+        2 * (precision * recall) / (precision + recall)
+        if (precision + recall) > 0
+        else 0
+    )
+
+    print(f'Precision: {precision:.4f}')
+    print(f'Recall:    {recall:.4f}')
+    print(f'F1-Score:  {f1_score:.4f}')
 else:
-    print('No data found to calculate Kappa.')
+    print("No matching annotations found, can't make calculations.")
