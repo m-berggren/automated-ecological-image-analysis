@@ -1,12 +1,17 @@
-"""Synchronous execution of the pollinator inference pipeline.
+"""Execution of the pollinator inference pipeline.
 
-This is Tier 4a: the run is executed in-process from the create view, which
-means the HTTP request blocks until the pipeline finishes. Tier 4b moves
-this onto a background worker.
+run_inference_pipeline is the synchronous core: invoked directly it blocks
+until the pipeline finishes. spawn_inference_pipeline runs the same work in
+a daemon thread so the HTTP request can return immediately.
 
 The pollinator package is imported lazily inside run_inference_pipeline so
 Django can boot without the heavy ML dependencies (torch, ultralytics,
 etc). They are only required when an actual run executes.
+
+The threading-based runner is fine for development and small deployments.
+A process restart kills any in-flight run, leaving its row stuck in
+status='running'. Production should swap this for a persistent queue
+(Celery, RQ, or similar) without changing the run_inference_pipeline body.
 """
 
 from __future__ import annotations
@@ -14,9 +19,11 @@ from __future__ import annotations
 import json
 import logging
 import tempfile
+import threading
 from pathlib import Path
 
 from django.conf import settings
+from django.db import close_old_connections
 from django.utils import timezone
 
 from .models import (
@@ -182,3 +189,33 @@ def run_inference_pipeline(run: InferenceRun) -> None:
         run.completed_at = timezone.now()
         run.save(update_fields=['status', 'error_message', 'completed_at'])
         raise
+
+
+def _run_in_thread(run_id: int) -> None:
+    """Background-thread entry point. Each thread gets its own DB connection;
+    close_old_connections at the end prevents leaks for short-lived runs."""
+    try:
+        run = InferenceRun.objects.get(pk=run_id)
+        run_inference_pipeline(run)
+    except InferenceRun.DoesNotExist:
+        logger.error(f'Background worker: run {run_id} not found')
+    except Exception:
+        logger.exception(f'Background run {run_id} crashed')
+    finally:
+        close_old_connections()
+
+
+def spawn_inference_pipeline(run: InferenceRun) -> None:
+    """Start a daemon thread that runs the pipeline for the given run.
+
+    Returns immediately. The caller (typically the create view) should
+    serialise the run row before this returns so the response includes
+    status='pending' (the worker will flip to running shortly after).
+    """
+    thread = threading.Thread(
+        target=_run_in_thread,
+        args=(run.pk,),
+        daemon=True,
+        name=f'run-{run.pk}',
+    )
+    thread.start()
