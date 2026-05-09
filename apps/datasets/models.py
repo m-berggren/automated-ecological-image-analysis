@@ -31,6 +31,35 @@ class ExclusionReason(models.TextChoices):
     OTHER = 'other', 'Other'
 
 
+class Upload(models.Model):
+    """A batch of images uploaded together for a single inference run.
+
+    The frontend creates one Upload row, then posts each file separately
+    to /api/datasets/images/ with `upload=<id>` in the form data so each
+    ImageAsset is linked back to its parent batch.
+    """
+
+    name = models.CharField(max_length=200, blank=True)
+    module = models.CharField(max_length=20, choices=Module.choices)
+
+    uploaded_by = models.ForeignKey(
+        settings.AUTH_USER_MODEL,
+        on_delete=models.SET_NULL,
+        null=True,
+        blank=True,
+        related_name='uploads',
+    )
+    created_at = models.DateTimeField(auto_now_add=True)
+
+    class Meta:
+        indexes = [
+            models.Index(fields=['module', '-created_at']),
+        ]
+
+    def __str__(self) -> str:
+        return f'{self.module}: {self.name or f"Upload #{self.pk}"}'
+
+
 def image_upload_path(instance: 'ImageAsset', filename: str) -> str:
     return f'images/{instance.module}/{filename}'
 
@@ -39,6 +68,14 @@ class ImageAsset(models.Model):
     module = models.CharField(max_length=20, choices=Module.choices)
     file = models.FileField(upload_to=image_upload_path)
     purpose = models.CharField(max_length=20, choices=ImagePurpose.choices)
+
+    upload = models.ForeignKey(
+        Upload,
+        on_delete=models.CASCADE,
+        null=True,
+        blank=True,
+        related_name='images',
+    )
 
     uploaded_by = models.ForeignKey(
         settings.AUTH_USER_MODEL,
