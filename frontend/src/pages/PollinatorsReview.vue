@@ -5,7 +5,30 @@
   <div v-if="loading" class="flex-1 p-8 text-sm text-muted-foreground">Loading…</div>
   <div v-else-if="loadError" class="flex-1 p-8 text-sm text-red-600">{{ loadError }}</div>
 
-  <div v-else class="flex-1 flex flex-col-reverse lg:flex-row min-h-0">
+  <div v-else class="flex-1 flex flex-col min-h-0">
+    <div
+      v-if="failedSaves.size > 0"
+      class="border-l-4 border-red-500 bg-red-50 px-4 py-2 text-sm text-red-800 flex items-center gap-3 shrink-0"
+    >
+      <span class="flex-1">
+        ⚠ {{ failedSaves.size }} review{{ failedSaves.size === 1 ? '' : 's' }} failed to save
+      </span>
+      <button
+        class="px-2 py-1 rounded bg-red-600 text-white hover:bg-red-700 text-xs font-medium"
+        @click="retryFailedSaves"
+        :disabled="retrying"
+      >
+        {{ retrying ? 'Retrying…' : 'Retry all' }}
+      </button>
+      <button
+        class="px-2 py-1 rounded border border-red-300 text-red-700 hover:bg-red-100 text-xs"
+        @click="dismissFailedSaves"
+        :disabled="retrying"
+      >
+        Dismiss
+      </button>
+    </div>
+    <div class="flex-1 flex flex-col-reverse lg:flex-row min-h-0">
     <!-- Left: filters + grouped grid -->
     <section
       class="w-full lg:w-[480px] shrink-0 border-t lg:border-t-0 lg:border-r border-border flex flex-col bg-surface max-h-[55vh] lg:max-h-none"
@@ -18,12 +41,13 @@
             class="px-2 py-1 rounded border border-border bg-background"
           >
             <option value="unreviewed">Unreviewed</option>
-            <option value="all">All</option>
+            <option value="unsure">Unsure</option>
             <option value="reviewed">Reviewed</option>
+            <option value="all">All</option>
           </select>
           <label class="ml-auto flex items-center gap-1 text-muted-foreground">
-            <input v-model="disagreementsOnly" type="checkbox" />
-            Disagreements only
+            <input v-model="needsAttentionOnly" type="checkbox" />
+            Needs attention
           </label>
         </div>
         <div class="text-xs text-muted-foreground flex items-center justify-between">
@@ -109,9 +133,9 @@
                   :class="statusDotClass(d.reviewer_status)"
                 />
                 <span
-                  v-if="hasDisagreement(d)"
+                  v-if="needsAttention(d)"
                   class="absolute top-1 right-1 text-amber-600 text-xs leading-none"
-                  title="YOLO and InsectNet disagree"
+                  :title="hasDisagreement(d) ? 'YOLO and InsectNet disagree' : 'Low confidence'"
                 >⚠</span>
                 <span class="absolute bottom-2 left-1 text-[9px] text-muted-foreground/70 font-mono">
                   {{ d.source === 'preprocessing' ? 'P' : d.source === 'both' ? 'YP' : 'Y' }}
@@ -207,6 +231,12 @@
                 <div v-if="hasDisagreement(selected)" class="text-xs text-amber-700 pt-1">
                   ⚠ Models disagree
                 </div>
+                <div
+                  v-else-if="isLowConfidence(selected)"
+                  class="text-xs text-amber-700 pt-1"
+                >
+                  ⚠ Low confidence
+                </div>
               </div>
             </div>
 
@@ -241,7 +271,7 @@
         <!-- Bottom action bar -->
         <footer class="border-t border-border bg-surface px-5 py-3 flex items-center justify-between">
           <span class="text-[11px] text-muted-foreground font-mono hidden md:block">
-            1-4 confirm · x reject · ⏎ suggested · ↑↓ navigate
+            1-4 confirm · x reject · u unsure · ⏎ suggested · ←→↑↓ navigate
           </span>
           <div class="flex gap-2 ml-auto">
             <button
@@ -251,15 +281,23 @@
               Reject
             </button>
             <button
+              class="px-3 py-1.5 rounded-md text-sm font-medium border border-amber-300 text-amber-700 hover:bg-amber-50"
+              @click="markUnsure"
+            >
+              Unsure
+            </button>
+            <button
               class="px-3 py-1.5 rounded-md text-sm font-medium bg-primary text-primary-foreground hover:bg-primary/90"
               @click="confirmAs(suggestedClass(selected))"
             >
-              Confirm as {{ classLabel(suggestedClass(selected)) }}
+              {{ hasDisagreement(selected) ? 'Use suggested:' : 'Confirm as' }}
+              {{ classLabel(suggestedClass(selected)) }}
             </button>
           </div>
         </footer>
       </template>
     </section>
+    </div>
   </div>
 </template>
 
@@ -271,8 +309,11 @@ import PollinatorsStepper from '@/components/PollinatorsStepper.vue'
 import { api } from '@/api'
 
 type ClassName = 'fly' | 'bumblebee' | 'butterfly' | 'other'
-type ReviewerStatus = 'unreviewed' | 'confirmed' | 'corrected' | 'rejected'
+type ReviewerStatus = 'unreviewed' | 'confirmed' | 'corrected' | 'rejected' | 'unsure'
+type StatusFilter = 'unreviewed' | 'unsure' | 'reviewed' | 'all'
 type Source = 'yolo' | 'preprocessing' | 'both'
+
+const LOW_CONFIDENCE_THRESHOLD = 0.6
 
 interface Detection {
   id: number
@@ -311,10 +352,19 @@ const loadError = ref('')
 const run = ref<ReviewBundle['run'] | null>(null)
 const detections = ref<Detection[]>([])
 const selectedId = ref<number | null>(null)
-const statusFilter = ref<'unreviewed' | 'all' | 'reviewed'>('unreviewed')
-const disagreementsOnly = ref(false)
+const statusFilter = ref<StatusFilter>('unreviewed')
+const needsAttentionOnly = ref(false)
 const bulkIds = ref<Set<number>>(new Set())
 const bulkCorrectClass = ref<'' | ClassName>('')
+
+interface FailedEntry {
+  status: ReviewerStatus
+  label: ClassName | null
+  prevStatus: ReviewerStatus
+  prevLabel: ClassName | null
+}
+const failedSaves = ref<Map<number, FailedEntry>>(new Map())
+const retrying = ref(false)
 
 const previewMode = computed<string | null>(() => {
   const value = route.query.preview
@@ -374,11 +424,18 @@ const filteredDetections = computed(() => {
   let list = detections.value
   if (statusFilter.value === 'unreviewed') {
     list = list.filter((d) => d.reviewer_status === 'unreviewed')
+  } else if (statusFilter.value === 'unsure') {
+    list = list.filter((d) => d.reviewer_status === 'unsure')
   } else if (statusFilter.value === 'reviewed') {
-    list = list.filter((d) => d.reviewer_status !== 'unreviewed')
+    list = list.filter(
+      (d) =>
+        d.reviewer_status === 'confirmed' ||
+        d.reviewer_status === 'corrected' ||
+        d.reviewer_status === 'rejected',
+    )
   }
-  if (disagreementsOnly.value) {
-    list = list.filter((d) => hasDisagreement(d))
+  if (needsAttentionOnly.value) {
+    list = list.filter((d) => needsAttention(d))
   }
   return [...list].sort((a, b) => a.insectnet_confidence - b.insectnet_confidence)
 })
@@ -395,6 +452,12 @@ const groupedDetections = computed(() => {
     detections: groups.get(cls)!,
   }))
 })
+
+// Flattened in the same order the grid renders, so keyboard navigation
+// matches what the reviewer sees rather than the raw confidence sort.
+const flatVisible = computed(() =>
+  groupedDetections.value.flatMap((g) => g.detections),
+)
 
 const selected = computed(() =>
   detections.value.find((d) => d.id === selectedId.value) ?? null,
@@ -432,14 +495,25 @@ function classLabel(cls: string | null): string {
 function hasDisagreement(d: Detection): boolean {
   return d.yolo_class !== d.insectnet_class
 }
+function isLowConfidence(d: Detection): boolean {
+  return Math.max(d.yolo_confidence, d.insectnet_confidence) < LOW_CONFIDENCE_THRESHOLD
+}
+function needsAttention(d: Detection): boolean {
+  return hasDisagreement(d) || isLowConfidence(d)
+}
 function reviewedFade(d: Detection): boolean {
-  return d.reviewer_status !== 'unreviewed'
+  return (
+    d.reviewer_status === 'confirmed' ||
+    d.reviewer_status === 'corrected' ||
+    d.reviewer_status === 'rejected'
+  )
 }
 function statusDotClass(s: ReviewerStatus): string {
   switch (s) {
     case 'confirmed': return 'bg-green-500'
     case 'corrected': return 'bg-blue-500'
     case 'rejected': return 'bg-red-500'
+    case 'unsure': return 'bg-amber-500'
     default: return 'bg-muted-foreground/40'
   }
 }
@@ -448,6 +522,7 @@ function statusBadgeClass(s: ReviewerStatus): string {
     case 'confirmed': return 'bg-green-100 text-green-700'
     case 'corrected': return 'bg-blue-100 text-blue-700'
     case 'rejected': return 'bg-red-100 text-red-700'
+    case 'unsure': return 'bg-amber-100 text-amber-700'
     default: return 'bg-muted text-muted-foreground'
   }
 }
@@ -464,11 +539,71 @@ function effectiveLabel(d: Detection): ClassName | null {
   return null
 }
 
-function applyAction(status: ReviewerStatus, label: ClassName | null) {
+async function patchDetection(
+  id: number,
+  status: ReviewerStatus,
+  label: ClassName | null,
+): Promise<boolean> {
+  try {
+    const res = await api(`/api/analysis/detections/${id}/`, {
+      method: 'PATCH',
+      body: JSON.stringify({
+        reviewer_status: status,
+        reviewer_label: label ?? '',
+      }),
+    })
+    return res.ok
+  } catch {
+    return false
+  }
+}
+
+async function postBulkReview(
+  ids: number[],
+  status: ReviewerStatus,
+  label: ClassName | null,
+): Promise<boolean> {
+  try {
+    const res = await api('/api/analysis/detections/bulk/', {
+      method: 'POST',
+      body: JSON.stringify({
+        ids,
+        reviewer_status: status,
+        reviewer_label: label ?? '',
+      }),
+    })
+    return res.ok
+  } catch {
+    return false
+  }
+}
+
+function clearFailedSave(id: number) {
+  if (!failedSaves.value.has(id)) return
+  failedSaves.value.delete(id)
+  failedSaves.value = new Map(failedSaves.value)
+}
+
+async function applyAction(status: ReviewerStatus, label: ClassName | null) {
   if (!selected.value) return
-  selected.value.reviewer_status = status
-  selected.value.reviewer_label = label
+  const d = selected.value
+  // If a previous save for this detection already failed, keep its original
+  // prev so Dismiss reverts all the way back, not to the last optimistic state.
+  const existing = failedSaves.value.get(d.id)
+  const prevStatus = existing ? existing.prevStatus : d.reviewer_status
+  const prevLabel = existing ? existing.prevLabel : d.reviewer_label
+  d.reviewer_status = status
+  d.reviewer_label = label
   advanceToNext()
+
+  if (previewMode.value) return
+  const ok = await patchDetection(d.id, status, label)
+  if (!ok) {
+    failedSaves.value.set(d.id, { status, label, prevStatus, prevLabel })
+    failedSaves.value = new Map(failedSaves.value)
+  } else {
+    clearFailedSave(d.id)
+  }
 }
 
 function toggleBulk(id: number) {
@@ -487,24 +622,94 @@ function selectAllVisible() {
   bulkIds.value = new Set(filteredDetections.value.map((d) => d.id))
 }
 
-function applyToBulk(status: ReviewerStatus, label: ClassName | null) {
+async function applyToBulk(status: ReviewerStatus, label: ClassName | null) {
+  const ids = [...bulkIds.value]
+  // For each id, the prev to revert to is its original state before any
+  // failed save in this session, falling back to the current state.
+  const snapshot = new Map<
+    number,
+    { status: ReviewerStatus; label: ClassName | null }
+  >()
   for (const d of detections.value) {
     if (bulkIds.value.has(d.id)) {
+      const existing = failedSaves.value.get(d.id)
+      snapshot.set(d.id, {
+        status: existing ? existing.prevStatus : d.reviewer_status,
+        label: existing ? existing.prevLabel : d.reviewer_label,
+      })
       d.reviewer_status = status
       d.reviewer_label = label
     }
   }
   clearBulk()
+
+  if (previewMode.value) return
+  const ok = await postBulkReview(ids, status, label)
+  if (!ok) {
+    for (const id of ids) {
+      const prev = snapshot.get(id)!
+      failedSaves.value.set(id, {
+        status,
+        label,
+        prevStatus: prev.status,
+        prevLabel: prev.label,
+      })
+    }
+    failedSaves.value = new Map(failedSaves.value)
+  } else {
+    let changed = false
+    for (const id of ids) {
+      if (failedSaves.value.delete(id)) changed = true
+    }
+    if (changed) failedSaves.value = new Map(failedSaves.value)
+  }
 }
 
-function bulkConfirm() {
-  for (const d of detections.value) {
-    if (bulkIds.value.has(d.id)) {
-      d.reviewer_status = 'confirmed'
-      d.reviewer_label = d.yolo_class
+async function retryFailedSaves() {
+  if (retrying.value || failedSaves.value.size === 0) return
+  retrying.value = true
+  try {
+    // Group by intended (status, label) so we can retry as bulk requests.
+    const groups = new Map<
+      string,
+      { status: ReviewerStatus; label: ClassName | null; ids: number[] }
+    >()
+    for (const [id, entry] of failedSaves.value) {
+      const key = `${entry.status}::${entry.label ?? ''}`
+      if (!groups.has(key)) {
+        groups.set(key, { status: entry.status, label: entry.label, ids: [] })
+      }
+      groups.get(key)!.ids.push(id)
+    }
+    let changed = false
+    for (const { status, label, ids } of groups.values()) {
+      const ok = await postBulkReview(ids, status, label)
+      if (ok) {
+        for (const id of ids) failedSaves.value.delete(id)
+        changed = true
+      }
+    }
+    if (changed) failedSaves.value = new Map(failedSaves.value)
+  } finally {
+    retrying.value = false
+  }
+}
+
+function dismissFailedSaves() {
+  for (const [id, entry] of failedSaves.value) {
+    const d = detections.value.find((x) => x.id === id)
+    if (d) {
+      d.reviewer_status = entry.prevStatus
+      d.reviewer_label = entry.prevLabel
     }
   }
-  clearBulk()
+  failedSaves.value = new Map()
+}
+
+// 'confirmed' status forces reviewer_label='' server-side (only 'corrected'
+// keeps the label), so we don't seed yolo_class locally.
+function bulkConfirm() {
+  applyToBulk('confirmed', null)
 }
 
 function bulkReject() {
@@ -516,8 +721,15 @@ function onBulkCorrectChange() {
   applyToBulk('corrected', bulkCorrectClass.value)
 }
 
+// Confirmed only when both models agreed and the user picked that class.
+// When models disagree there's no single prediction to confirm, so any pick
+// is a correction (and the label is preserved server-side).
 function confirmAs(cls: ClassName) {
-  applyAction('confirmed', cls)
+  if (!selected.value) return
+  const d = selected.value
+  const consensus = d.yolo_class === d.insectnet_class ? d.yolo_class : null
+  if (consensus === cls) applyAction('confirmed', null)
+  else applyAction('corrected', cls)
 }
 function correctTo(cls: ClassName) {
   applyAction('corrected', cls)
@@ -525,9 +737,12 @@ function correctTo(cls: ClassName) {
 function reject() {
   applyAction('rejected', null)
 }
+function markUnsure() {
+  applyAction('unsure', null)
+}
 
 function advanceToNext() {
-  const list = filteredDetections.value
+  const list = flatVisible.value
   const idx = list.findIndex((d) => d.id === selectedId.value)
   if (idx >= 0 && idx + 1 < list.length) {
     selectedId.value = list[idx + 1].id
@@ -535,7 +750,7 @@ function advanceToNext() {
 }
 
 function navigate(delta: number) {
-  const list = filteredDetections.value
+  const list = flatVisible.value
   const idx = list.findIndex((d) => d.id === selectedId.value)
   if (idx < 0) return
   const next = list[Math.max(0, Math.min(list.length - 1, idx + delta))]
@@ -554,11 +769,17 @@ function onKeydown(e: KeyboardEvent) {
     case '4': confirmAs('other'); e.preventDefault(); break
     case 'x':
     case 'X': reject(); e.preventDefault(); break
+    case 'u':
+    case 'U': markUnsure(); e.preventDefault(); break
     case 'Enter': confirmAs(suggestedClass(selected.value)); e.preventDefault(); break
     case 'ArrowDown':
-    case 'j': navigate(1); e.preventDefault(); break
+    case 'ArrowRight':
+    case 'j':
+    case 'l': navigate(1); e.preventDefault(); break
     case 'ArrowUp':
-    case 'k': navigate(-1); e.preventDefault(); break
+    case 'ArrowLeft':
+    case 'k':
+    case 'h': navigate(-1); e.preventDefault(); break
   }
 }
 
