@@ -11,15 +11,33 @@ class ImageAssetSerializer(serializers.ModelSerializer):
     class Meta:
         model = ImageAsset
         fields = (
-            'id', 'module', 'purpose', 'upload', 'file', 'file_url',
-            'captured_at', 'flash_fired', 'exif',
-            'site', 'plot', 'weather', 'notes',
-            'excluded', 'exclusion_reason',
-            'total_open_flowers', 'total_pollinators', 'pollinator_types_present',
-            'metadata', 'uploaded_at',
+            'id',
+            'module',
+            'purpose',
+            'upload',
+            'file',
+            'file_url',
+            'captured_at',
+            'flash_fired',
+            'exif',
+            'site',
+            'plot',
+            'weather',
+            'notes',
+            'excluded',
+            'exclusion_reason',
+            'total_open_flowers',
+            'total_pollinators',
+            'pollinator_types_present',
+            'metadata',
+            'uploaded_at',
         )
         read_only_fields = (
-            'id', 'file_url', 'captured_at', 'flash_fired', 'exif',
+            'id',
+            'file_url',
+            'captured_at',
+            'flash_fired',
+            'exif',
             'uploaded_at',
         )
 
@@ -37,7 +55,8 @@ class ImageUploadSerializer(serializers.Serializer):
     file = serializers.ImageField()
     module = serializers.ChoiceField(choices=Module.choices)
     purpose = serializers.ChoiceField(
-        choices=ImagePurpose.choices, default=ImagePurpose.INFERENCE,
+        choices=ImagePurpose.choices,
+        default=ImagePurpose.INFERENCE,
     )
     upload = serializers.PrimaryKeyRelatedField(
         queryset=Upload.objects.all(),
@@ -57,8 +76,8 @@ class UploadSerializer(serializers.ModelSerializer):
 
     class Meta:
         model = Upload
-        fields = ('id', 'name', 'module', 'image_count', 'created_at')
-        read_only_fields = ('id', 'image_count', 'created_at')
+        fields = ('id', 'name', 'module', 'status', 'image_count', 'created_at')
+        read_only_fields = ('id', 'status', 'image_count', 'created_at')
 
     def get_image_count(self, obj: Upload) -> int:
         annotated = getattr(obj, 'image_count_annotated', None)

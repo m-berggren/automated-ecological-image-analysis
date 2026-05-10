@@ -5,6 +5,8 @@ from django.db.models import QuerySet
 from rest_framework import generics, status
 from rest_framework.response import Response
 
+from apps.datasets.models import UploadStatus
+
 from .models import Detection, InferenceRun, ModelVersion
 from .serializers import (
     DetectionSerializer,
@@ -71,6 +73,9 @@ class InferenceRunListCreateView(generics.ListCreateAPIView):
             initiated_by=request.user,
             image_count=upload.images.count(),
         )
+        if upload.status == UploadStatus.DRAFT:
+            upload.status = UploadStatus.READY
+            upload.save(update_fields=['status'])
         # Spawn the run in a background thread after the transaction commits
         # so the worker can see the row. Returns immediately with status=pending.
         transaction.on_commit(lambda: spawn_inference_pipeline(run))
