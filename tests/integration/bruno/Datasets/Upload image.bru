@@ -1,0 +1,32 @@
+meta {
+  name: Upload image
+  type: http
+  seq: 3
+}
+
+post {
+  url: {{baseUrl}}/api/datasets/images/
+  body: multipartForm
+  auth: bearer
+}
+
+auth:bearer {
+  token: {{accessToken}}
+}
+
+body:multipart-form {
+  file: @file(/absolute/path/to/test_image.jpg)
+  module: pollinators
+  purpose: inference
+  upload: {{uploadId}}
+}
+
+tests {
+  test("status is 201", function() {
+    expect(res.status).to.equal(201);
+  });
+  test("returns image id and file_url", function() {
+    expect(res.body.id).to.be.a("number");
+    expect(res.body.file_url).to.be.a("string");
+  });
+}
