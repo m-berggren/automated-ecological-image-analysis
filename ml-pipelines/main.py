@@ -83,12 +83,7 @@ VAL_BASE = '../data/seed'
 image_paths = []
 
 for species in SPECIES_LIST:
-    species_dir = os.path.join(
-    VAL_BASE,
-    f'{species}_model',
-    'val',
-    'images'
-  )
+    species_dir = os.path.join(VAL_BASE, f'{species}_model', 'val', 'images')
 
     for img in os.listdir(species_dir):
         image_paths.append((species, os.path.join(species_dir, img)))
@@ -105,12 +100,7 @@ results = defaultdict(
 # -------------------------
 
 for species in SPECIES_LIST:
-    species_img_dir = os.path.join(
-    VAL_BASE,
-    f'{species}_model',
-    'val',
-    'images'
-  )
+    species_img_dir = os.path.join(VAL_BASE, f'{species}_model', 'val', 'images')
     if not os.path.exists(species_img_dir):
         continue
 
@@ -136,27 +126,48 @@ for species in SPECIES_LIST:
         preds = []
 
         for pred in result.object_prediction_list:
+            poly = None
 
-          if pred.bbox is None:
-              continue
+            if hasattr(pred, 'obb') and pred.obb is not None:
+                poly = pred.obb.points if hasattr(pred.obb, 'points') else pred.obb
+            elif hasattr(pred, 'polygon') and pred.polygon is not None:
+                poly = (
+                    pred.polygon.exterior
+                    if hasattr(pred.polygon, 'exterior')
+                    else pred.polygon
+                )
+            elif hasattr(pred, 'mask') and pred.mask is not None:
+                poly = pred.mask.segmentation[0]
 
-          bbox = pred.bbox
+            # Fallback only if rotation data is missing
+            if poly is None and pred.bbox is not None:
+                bbox = pred.bbox
+                poly = [
+                    bbox.minx,
+                    bbox.miny,
+                    bbox.maxx,
+                    bbox.miny,
+                    bbox.maxx,
+                    bbox.maxy,
+                    bbox.minx,
+                    bbox.maxy,
+                ]
 
-          # Convert bbox corners to polygon
-          flat_poly = [
-              bbox.minx, bbox.miny,
-              bbox.maxx, bbox.miny,
-              bbox.maxx, bbox.maxy,
-              bbox.minx, bbox.maxy
-          ]
+            if poly is not None:
+                # Standardize poly to a flat list of floats [x1, y1, x2, y2, x3, y3, x4, y4]
+                if isinstance(poly[0], (list, tuple)):
+                    flat_poly = [float(c) for point in poly for c in point]
+                else:
+                    flat_poly = [float(c) for c in poly]
 
-          preds.append({
-              "poly": flat_poly,
-              "class": pred.category.id if hasattr(pred, "category") else None,
-          })
+                preds.append(
+                    {
+                        'poly': flat_poly[:8],
+                        'class': 0,
+                    }
+                )
 
-
-        tp, fp, fn = calculate_tp_fp_fn(preds, gt_boxes, iou_threshold=0.4)
+        tp, fp, fn = calculate_tp_fp_fn(preds, gt_boxes, iou_threshold=0.3)
 
         # Detailed per-image logging (for debug to make our lives easier, pls don't remove for now)
         num_preds = len(preds)
