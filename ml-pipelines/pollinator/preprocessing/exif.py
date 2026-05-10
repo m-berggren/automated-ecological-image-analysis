@@ -59,7 +59,8 @@ def get_exif_metadata(path: str, cfg: dict) -> dict:
 
     weather = 'unknown'
     if shutter and hasattr(shutter, 'denominator') and shutter.denominator:
-        weather = 'sunny' if shutter.denominator >= 200 else 'cloudy'
+        sunny_threshold = int(cfg.get('sunny_shutter_threshold', 200))
+        weather = 'sunny' if shutter.denominator >= sunny_threshold else 'cloudy'
 
     skip = False
     skip_reason = ''
