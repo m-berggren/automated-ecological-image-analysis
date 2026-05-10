@@ -15,7 +15,7 @@ Usage:
     # label: pollinator category name
     # confidence: probability of predicted class (0-1)
     # all_probs: dict of {class_name: probability}
-    
+
 """
 
 import logging
@@ -30,34 +30,36 @@ from PIL import Image
 
 logger = logging.getLogger(__name__)
 
-CLASSES = ["bumblebee", "fly", "butterfly", "other"]
+CLASSES = ['bumblebee', 'fly', 'butterfly', 'other']
 
 
 def _letterbox(img: Image.Image, size: int) -> Image.Image:
-    w, h  = img.size
+    w, h = img.size
     max_s = max(w, h)
-    sq    = Image.new("RGB", (max_s, max_s), (0, 0, 0))
+    sq = Image.new('RGB', (max_s, max_s), (0, 0, 0))
     sq.paste(img, ((max_s - w) // 2, (max_s - h) // 2))
     return sq.resize((size, size), Image.BILINEAR)
 
 
 def _make_transform(img_size: int) -> T.Compose:
-    return T.Compose([
-        T.Lambda(lambda img: _letterbox(img, img_size)),
-        T.ToTensor(),
-        T.Normalize([0.485, 0.456, 0.406], [0.229, 0.224, 0.225]),
-    ])
+    return T.Compose(
+        [
+            T.Lambda(lambda img: _letterbox(img, img_size)),
+            T.ToTensor(),
+            T.Normalize([0.485, 0.456, 0.406], [0.229, 0.224, 0.225]),
+        ]
+    )
 
 
 def _build_efficientnet_b2(num_classes: int) -> nn.Module:
     model = torchvision.models.efficientnet_b2(weights=None)
-    in_f  = model.classifier[-1].in_features
+    in_f = model.classifier[-1].in_features
     model.classifier[-1] = nn.Linear(in_f, num_classes)
     return model
 
 
 def _build_insectnet(num_classes: int) -> nn.Module:
-    model    = torchvision.models.regnet_y_32gf()
+    model = torchvision.models.regnet_y_32gf()
     model.fc = nn.Linear(3712, num_classes)
     return model
 
@@ -77,32 +79,32 @@ class GroupClassifier:
             device:          "cuda", "cpu", or None (auto-detect).
         """
         self.device = torch.device(
-            device or ("cuda" if torch.cuda.is_available() else "cpu")
+            device or ('cuda' if torch.cuda.is_available() else 'cpu')
         )
         self._load(checkpoint_path)
         logger.info(
-            f"GroupClassifier loaded: arch={self.arch} "
-            f"classes={self.classes} img={self.img_size}px device={self.device}"
+            f'GroupClassifier loaded: arch={self.arch} '
+            f'classes={self.classes} img={self.img_size}px device={self.device}'
         )
 
     def _load(self, path: str):
         ckpt = torch.load(path, map_location=self.device, weights_only=False)
-        self.img_size = ckpt.get("img_size", 224)
-        self.classes  = ckpt.get("classes", CLASSES)
-        n             = len(self.classes)
+        self.img_size = ckpt.get('img_size', 224)
+        self.classes = ckpt.get('classes', CLASSES)
+        n = len(self.classes)
 
         # Auto-detect architecture from state_dict keys
-        state_keys = list(ckpt["state_dict"].keys())
-        if any("trunk_output" in k or "stem." in k for k in state_keys):
-            self.arch = "insectnet"
+        state_keys = list(ckpt['state_dict'].keys())
+        if any('trunk_output' in k or 'stem.' in k for k in state_keys):
+            self.arch = 'insectnet'
             model = _build_insectnet(n)
         else:
-            self.arch = "efficientnet"
+            self.arch = 'efficientnet'
             model = _build_efficientnet_b2(n)
 
-        model.load_state_dict(ckpt["state_dict"])
+        model.load_state_dict(ckpt['state_dict'])
         model.eval()
-        self.model     = model.to(self.device)
+        self.model = model.to(self.device)
         self.transform = _make_transform(self.img_size)
 
     def predict(self, image_path: Union[str, Path]) -> tuple:
@@ -118,13 +120,13 @@ class GroupClassifier:
             confidence: probability of predicted class (0-1)
             all_probs:  dict of {class_name: probability}
         """
-        img = Image.open(image_path).convert("RGB")
-        x   = self.transform(img).unsqueeze(0).to(self.device)
+        img = Image.open(image_path).convert('RGB')
+        x = self.transform(img).unsqueeze(0).to(self.device)
         with torch.no_grad():
             probs = torch.softmax(self.model(x), dim=1)[0]
-        idx       = probs.argmax().item()
-        label     = self.classes[idx]
-        conf      = float(probs[idx])
+        idx = probs.argmax().item()
+        label = self.classes[idx]
+        conf = float(probs[idx])
         all_probs = {c: float(probs[i]) for i, c in enumerate(self.classes)}
         return label, conf, all_probs
 
@@ -143,18 +145,22 @@ class GroupClassifier:
         for p in image_paths:
             try:
                 label, conf, all_probs = self.predict(p)
-                results.append({
-                    "path":       str(p),
-                    "label":      label,
-                    "confidence": conf,
-                    "all_probs":  all_probs,
-                })
+                results.append(
+                    {
+                        'path': str(p),
+                        'label': label,
+                        'confidence': conf,
+                        'all_probs': all_probs,
+                    }
+                )
             except Exception as e:
-                logger.warning(f"Failed to classify {p}: {e}")
-                results.append({
-                    "path":       str(p),
-                    "label":      "error",
-                    "confidence": 0.0,
-                    "all_probs":  {},
-                })
+                logger.warning(f'Failed to classify {p}: {e}')
+                results.append(
+                    {
+                        'path': str(p),
+                        'label': 'error',
+                        'confidence': 0.0,
+                        'all_probs': {},
+                    }
+                )
         return results

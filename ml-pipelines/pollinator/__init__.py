@@ -1,1 +1,0 @@
-"""Pollinator detection pipeline."""

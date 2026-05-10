@@ -21,28 +21,30 @@ def find_marker(image: np.ndarray, cfg: dict) -> Optional[tuple]:
     Locate a coloured marker clip in the image (HSV-thresholded, picks the
     cluster nearest the image center). Returns (cx, cy) or None.
     """
-    hsv  = cv2.cvtColor(image, cv2.COLOR_BGR2HSV)
+    hsv = cv2.cvtColor(image, cv2.COLOR_BGR2HSV)
     mask = cv2.inRange(
         hsv,
-        np.array([cfg["marker_hue"][0], cfg["marker_sat_min"], cfg["marker_val_min"]]),
-        np.array([cfg["marker_hue"][1], 255, 255]),
+        np.array([cfg['marker_hue'][0], cfg['marker_sat_min'], cfg['marker_val_min']]),
+        np.array([cfg['marker_hue'][1], 255, 255]),
     )
     contours, _ = cv2.findContours(mask, cv2.RETR_EXTERNAL, cv2.CHAIN_APPROX_SIMPLE)
-    clusters    = [c for c in contours if cv2.contourArea(c) > cfg["marker_min_area"]]
+    clusters = [c for c in contours if cv2.contourArea(c) > cfg['marker_min_area']]
     if not clusters:
         return None
-    h, w           = image.shape[:2]
+    h, w = image.shape[:2]
     cx_img, cy_img = w // 2, h // 2
 
     def dist_to_center(c):
         M = cv2.moments(c)
-        if M["m00"] == 0:
-            return float("inf")
-        return (int(M["m10"]/M["m00"]) - cx_img)**2 + (int(M["m01"]/M["m00"]) - cy_img)**2
+        if M['m00'] == 0:
+            return float('inf')
+        return (int(M['m10'] / M['m00']) - cx_img) ** 2 + (
+            int(M['m01'] / M['m00']) - cy_img
+        ) ** 2
 
     best = min(clusters, key=dist_to_center)
-    M    = cv2.moments(best)
-    return int(M["m10"] / M["m00"]), int(M["m01"] / M["m00"])
+    M = cv2.moments(best)
+    return int(M['m10'] / M['m00']), int(M['m01'] / M['m00'])
 
 
 def build_marker_zone(image: np.ndarray, marker: tuple, radius: int) -> np.ndarray:
@@ -58,11 +60,11 @@ def build_zone_from_bbox(image_shape: tuple, bbox: tuple) -> np.ndarray:
     h, w = image_shape[:2]
     zone = np.zeros((h, w), dtype=np.uint8)
     x, y, bw, bh = (int(v) for v in bbox)
-    x  = max(0, min(x, w))
-    y  = max(0, min(y, h))
+    x = max(0, min(x, w))
+    y = max(0, min(y, h))
     bw = max(0, min(bw, w - x))
     bh = max(0, min(bh, h - y))
-    zone[y:y+bh, x:x+bw] = 255
+    zone[y : y + bh, x : x + bw] = 255
     return zone
 
 
@@ -79,7 +81,7 @@ def setup_zone(first_image: np.ndarray, cfg: dict) -> np.ndarray:
         cfg['roi_bbox'] = [x, y, w, h]  -> rectangular zone from that bbox
         otherwise                       -> full image
     """
-    bbox = cfg.get("roi_bbox")
+    bbox = cfg.get('roi_bbox')
     if bbox is not None:
         return build_zone_from_bbox(first_image.shape, bbox)
     return full_zone(first_image)
