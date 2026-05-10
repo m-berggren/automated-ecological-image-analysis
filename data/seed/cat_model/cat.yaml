@@ -1,6 +1,8 @@
 path: ../data/seed/cat_model
-train: train/images
-val: val/images
+#train: train/images
+#val: val/images
+train: train_sliced
+val: val_sliced
 
 names:
   0: cat
