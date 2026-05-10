@@ -1,0 +1,24 @@
+{
+  "default": {
+    "run": {
+      "id": 1,
+      "name": "PEH batch May 2026",
+      "status": "completed",
+      "detection_count": 12
+    },
+    "detections": [
+      { "id": 1, "confidence": 0.94, "area": 1240, "length_mm": 4.2, "width_mm": 2.1, "viability_status": "Active", "reviewer_status": "unreviewed", "source_image_filename": "PEH_001.jpg" },
+      { "id": 2, "confidence": 0.91, "area": 1180, "length_mm": 4.0, "width_mm": 2.0, "viability_status": "Active", "reviewer_status": "unreviewed", "source_image_filename": "PEH_001.jpg" },
+      { "id": 3, "confidence": 0.88, "area": 1320, "length_mm": 4.5, "width_mm": 2.3, "viability_status": "Active", "reviewer_status": "unreviewed", "source_image_filename": "PEH_001.jpg" },
+      { "id": 4, "confidence": 0.76, "area": 380,  "length_mm": 1.8, "width_mm": 1.1, "viability_status": "Aborted", "reviewer_status": "unreviewed", "source_image_filename": "PEH_002.jpg" },
+      { "id": 5, "confidence": 0.71, "area": 290,  "length_mm": 1.5, "width_mm": 1.0, "viability_status": "Aborted", "reviewer_status": "unreviewed", "source_image_filename": "PEH_002.jpg" },
+      { "id": 6, "confidence": 0.95, "area": 1290, "length_mm": 4.3, "width_mm": 2.2, "viability_status": "Active", "reviewer_status": "confirmed", "source_image_filename": "PEH_002.jpg" },
+      { "id": 7, "confidence": 0.83, "area": 1100, "length_mm": 3.9, "width_mm": 2.0, "viability_status": "Active", "reviewer_status": "unreviewed", "source_image_filename": "PEH_003.jpg" },
+      { "id": 8, "confidence": 0.62, "area": 210,  "reviewer_status": "rejected", "source_image_filename": "PEH_003.jpg" },
+      { "id": 9, "confidence": 0.89, "area": 1350, "length_mm": 4.6, "width_mm": 2.4, "viability_status": "Active", "reviewer_status": "unreviewed", "source_image_filename": "PEH_003.jpg" },
+      { "id": 10, "confidence": 0.77, "area": 980, "length_mm": 3.7, "width_mm": 1.9, "viability_status": "Active", "reviewer_status": "unreviewed", "source_image_filename": "PEH_004.jpg" },
+      { "id": 11, "confidence": 0.68, "area": 340, "length_mm": 1.6, "width_mm": 1.0, "viability_status": "Aborted", "reviewer_status": "unreviewed", "source_image_filename": "PEH_004.jpg" },
+      { "id": 12, "confidence": 0.92, "area": 1210, "length_mm": 4.1, "width_mm": 2.1, "viability_status": "Active", "reviewer_status": "unreviewed", "source_image_filename": "PEH_004.jpg" }
+    ]
+  }
+}
