@@ -22,16 +22,16 @@
       <h2 class="text-sm font-semibold">Detection settings</h2>
 
       <!-- Models row -->
-      <div class="grid grid-cols-1 md:grid-cols-2 gap-4">
+      <div class="grid grid-cols-1 md:grid-cols-3 gap-4">
         <label class="space-y-1">
-          <span class="text-xs text-muted-foreground">YOLO model</span>
+          <span class="text-xs text-muted-foreground">YOLO</span>
           <select
             v-model="config.yolo.model_version_id"
             class="w-full px-2 py-1.5 rounded border border-border bg-background text-sm"
             :disabled="!detectorModels.length"
           >
             <option :value="null" disabled>
-              {{ detectorModels.length ? 'Select model' : 'No detector models yet' }}
+              {{ detectorModels.length ? 'Select model' : 'No models yet' }}
             </option>
             <option v-for="m in detectorModels" :key="m.id" :value="m.id">
               {{ m.version_name }}{{ m.is_active ? ' (active)' : '' }}
@@ -39,16 +39,31 @@
           </select>
         </label>
         <label class="space-y-1">
-          <span class="text-xs text-muted-foreground">InsectNet model</span>
+          <span class="text-xs text-muted-foreground">EfficientNet</span>
           <select
-            v-model="config.classifier.model_version_id"
+            v-model="config.binary_classifier.model_version_id"
             class="w-full px-2 py-1.5 rounded border border-border bg-background text-sm"
-            :disabled="!classifierModels.length"
+            :disabled="!binaryModels.length"
           >
             <option :value="null" disabled>
-              {{ classifierModels.length ? 'Select model' : 'No classifier models yet' }}
+              {{ binaryModels.length ? 'Select model' : 'No models yet' }}
             </option>
-            <option v-for="m in classifierModels" :key="m.id" :value="m.id">
+            <option v-for="m in binaryModels" :key="m.id" :value="m.id">
+              {{ m.version_name }}{{ m.is_active ? ' (active)' : '' }}
+            </option>
+          </select>
+        </label>
+        <label class="space-y-1">
+          <span class="text-xs text-muted-foreground">InsectNet</span>
+          <select
+            v-model="config.group_classifier.model_version_id"
+            class="w-full px-2 py-1.5 rounded border border-border bg-background text-sm"
+            :disabled="!groupModels.length"
+          >
+            <option :value="null" disabled>
+              {{ groupModels.length ? 'Select model' : 'No models yet' }}
+            </option>
+            <option v-for="m in groupModels" :key="m.id" :value="m.id">
               {{ m.version_name }}{{ m.is_active ? ' (active)' : '' }}
             </option>
           </select>
@@ -66,17 +81,17 @@
           />
         </label>
         <label class="space-y-1">
-          <span class="text-xs text-muted-foreground">InsectNet binary</span>
+          <span class="text-xs text-muted-foreground">Binary confidence</span>
           <input
-            v-model.number="config.classifier.binary_confidence"
+            v-model.number="config.binary_classifier.confidence"
             type="number" min="0" max="1" step="0.05"
             class="w-full px-2 py-1.5 rounded border border-border bg-background text-sm font-mono"
           />
         </label>
         <label class="space-y-1">
-          <span class="text-xs text-muted-foreground">InsectNet species</span>
+          <span class="text-xs text-muted-foreground">Group confidence</span>
           <input
-            v-model.number="config.classifier.group_confidence"
+            v-model.number="config.group_classifier.confidence"
             type="number" min="0" max="1" step="0.05"
             class="w-full px-2 py-1.5 rounded border border-border bg-background text-sm font-mono"
           />
@@ -114,31 +129,62 @@
           <label class="space-y-1">
             <span class="text-xs text-muted-foreground">Crop padding</span>
             <input
-              v-model.number="config.advanced.crop_padding"
+              v-model.number="config.preprocessing.crop_pad_frac"
               type="number" min="0" max="2" step="0.1"
               class="w-full px-2 py-1.5 rounded border border-border bg-background text-sm font-mono"
             />
           </label>
           <label class="space-y-1">
-            <span class="text-xs text-muted-foreground">Background sample size</span>
+            <span class="text-xs text-muted-foreground">Min contour area (px²)</span>
             <input
-              v-model.number="config.advanced.background_sample_size"
-              type="number" min="10" max="500"
+              v-model.number="config.preprocessing.min_contour_area"
+              type="number" min="50" max="5000" step="50"
               class="w-full px-2 py-1.5 rounded border border-border bg-background text-sm font-mono"
             />
           </label>
           <label class="space-y-1">
-            <span class="text-xs text-muted-foreground">Rolling window (frames)</span>
+            <span class="text-xs text-muted-foreground">Max contour area (px²)</span>
             <input
-              v-model.number="config.advanced.rolling_window"
-              type="number" min="1" max="100"
+              v-model.number="config.preprocessing.max_contour_area"
+              type="number" min="1000" max="200000" step="1000"
               class="w-full px-2 py-1.5 rounded border border-border bg-background text-sm font-mono"
             />
           </label>
         </div>
+        <div class="grid grid-cols-1 md:grid-cols-3 gap-4">
+          <label class="space-y-1">
+            <span class="text-xs text-muted-foreground">Background sample size</span>
+            <input
+              v-model.number="config.preprocessing.background_sample_size"
+              type="number" min="0" max="500"
+              class="w-full px-2 py-1.5 rounded border border-border bg-background text-sm font-mono"
+            />
+          </label>
+          <label class="space-y-1">
+            <span class="text-xs text-muted-foreground">Sunny shutter threshold</span>
+            <input
+              v-model.number="config.preprocessing.sunny_shutter_threshold"
+              type="number" min="50" max="500" step="10"
+              class="w-full px-2 py-1.5 rounded border border-border bg-background text-sm font-mono"
+            />
+          </label>
+        </div>
+        <div class="flex flex-wrap items-center gap-x-6 gap-y-2 pt-1 border-t border-border">
+          <label class="flex items-center gap-2 text-sm">
+            <input v-model="config.preprocessing.skip_flash" type="checkbox" />
+            Skip flash frames
+          </label>
+          <label class="flex items-center gap-2 text-sm">
+            <input v-model="config.preprocessing.skip_foggy" type="checkbox" />
+            Skip foggy frames
+          </label>
+          <label class="flex items-center gap-2 text-sm">
+            <input v-model="config.preprocessing.enable_large_motion" type="checkbox" />
+            Detect large motion
+          </label>
+        </div>
         <p class="text-[11px] text-muted-foreground">
-          Pre-annotating filter knobs. Defaults match the production pipeline; only change if a
-          specific batch needs tuning.
+          Defaults match the production pipeline. Only change if a specific batch needs tuning.
         </p>
       </div>
     </section>
@@ -263,38 +309,43 @@ type Uploader = ReturnType<typeof createUploader>
 const uploader = ref<Uploader | null>(null)
 
 const detectorModels = ref<ModelVersion[]>([])
-const classifierModels = ref<ModelVersion[]>([])
+const binaryModels = ref<ModelVersion[]>([])
+const groupModels = ref<ModelVersion[]>([])
 
 interface PipelineConfig {
   yolo: { model_version_id: number | null; confidence: number }
-  classifier: {
-    model_version_id: number | null
-    binary_confidence: number
-    group_confidence: number
-  }
-  preprocessing: { use_roi: boolean }
-  start_at_image: number
-  advanced: {
-    crop_padding: number
+  binary_classifier: { model_version_id: number | null; confidence: number }
+  group_classifier: { model_version_id: number | null; confidence: number }
+  preprocessing: {
+    use_roi: boolean
+    crop_pad_frac: number
     background_sample_size: number
-    rolling_window: number
+    min_contour_area: number
+    max_contour_area: number
+    sunny_shutter_threshold: number
+    skip_flash: boolean
+    skip_foggy: boolean
+    enable_large_motion: boolean
   }
+  start_at_image: number
 }
 
 const config = ref<PipelineConfig>({
   yolo: { model_version_id: null, confidence: 0.4 },
-  classifier: {
-    model_version_id: null,
-    binary_confidence: 0.5,
-    group_confidence: 0.6,
-  },
-  preprocessing: { use_roi: false },
-  start_at_image: 1,
-  advanced: {
-    crop_padding: 0.3,
+  binary_classifier: { model_version_id: null, confidence: 0.5 },
+  group_classifier: { model_version_id: null, confidence: 0.6 },
+  preprocessing: {
+    use_roi: false,
+    crop_pad_frac: 0.3,
     background_sample_size: 100,
-    rolling_window: 30,
+    min_contour_area: 400,
+    max_contour_area: 35000,
+    sunny_shutter_threshold: 150,
+    skip_flash: true,
+    skip_foggy: true,
+    enable_large_motion: true,
   },
+  start_at_image: 1,
 })
 
 const doneCount = computed(
@@ -317,12 +368,16 @@ onMounted(async () => {
     if (res.ok) {
       const all: ModelVersion[] = await res.json()
       detectorModels.value = all.filter((m) => m.kind === 'detector')
-      classifierModels.value = all.filter((m) => m.kind === 'classifier')
-      const yoloDefault = detectorModels.value.find((m) => m.is_active) ?? detectorModels.value[0]
-      const insectDefault =
-        classifierModels.value.find((m) => m.is_active) ?? classifierModels.value[0]
+      binaryModels.value = all.filter((m) => m.kind === 'binary_classifier')
+      groupModels.value = all.filter((m) => m.kind === 'group_classifier')
+      const pickDefault = (list: ModelVersion[]) =>
+        list.find((m) => m.is_active) ?? list[0]
+      const yoloDefault = pickDefault(detectorModels.value)
+      const binaryDefault = pickDefault(binaryModels.value)
+      const groupDefault = pickDefault(groupModels.value)
       if (yoloDefault) config.value.yolo.model_version_id = yoloDefault.id
-      if (insectDefault) config.value.classifier.model_version_id = insectDefault.id
+      if (binaryDefault) config.value.binary_classifier.model_version_id = binaryDefault.id
+      if (groupDefault) config.value.group_classifier.model_version_id = groupDefault.id
     }
   } catch (e) {
     console.warn('Failed to load model versions', e)
@@ -387,7 +442,11 @@ async function startDetection() {
     error.value = 'Pick a YOLO model.'
     return
   }
-  if (!config.value.classifier.model_version_id) {
+  if (!config.value.binary_classifier.model_version_id) {
+    error.value = 'Pick an EfficientNet model.'
+    return
+  }
+  if (!config.value.group_classifier.model_version_id) {
     error.value = 'Pick an InsectNet model.'
     return
   }
