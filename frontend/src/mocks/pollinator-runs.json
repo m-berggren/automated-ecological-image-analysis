@@ -18,11 +18,13 @@
     "config": {
       "yolo": { "enabled": true, "model_version_id": 3, "confidence": 0.4 },
       "preprocessing": { "enabled": true },
-      "classifier": {
-        "enabled": true,
+      "binary_classifier": {
         "model_version_id": 7,
-        "binary_confidence": 0.5,
-        "group_confidence": 0.6
+        "confidence": 0.5
+      },
+      "group_classifier": {
+        "model_version_id": 8,
+        "confidence": 0.6
       }
     }
   },
@@ -53,11 +55,13 @@
     "config": {
       "yolo": { "enabled": true, "model_version_id": 3, "confidence": 0.4 },
       "preprocessing": { "enabled": true },
-      "classifier": {
-        "enabled": true,
+      "binary_classifier": {
         "model_version_id": 7,
-        "binary_confidence": 0.5,
-        "group_confidence": 0.6
+        "confidence": 0.5
+      },
+      "group_classifier": {
+        "model_version_id": 8,
+        "confidence": 0.6
       }
     }
   },
@@ -84,11 +88,13 @@
     "config": {
       "yolo": { "enabled": true, "model_version_id": 3, "confidence": 0.4 },
       "preprocessing": { "enabled": true },
-      "classifier": {
-        "enabled": true,
+      "binary_classifier": {
         "model_version_id": 7,
-        "binary_confidence": 0.5,
-        "group_confidence": 0.6
+        "confidence": 0.5
+      },
+      "group_classifier": {
+        "model_version_id": 8,
+        "confidence": 0.6
       }
     }
   },
@@ -114,11 +120,13 @@
     "config": {
       "yolo": { "enabled": true, "model_version_id": 3, "confidence": 0.4 },
       "preprocessing": { "enabled": true },
-      "classifier": {
-        "enabled": true,
+      "binary_classifier": {
         "model_version_id": 7,
-        "binary_confidence": 0.5,
-        "group_confidence": 0.6
+        "confidence": 0.5
+      },
+      "group_classifier": {
+        "model_version_id": 8,
+        "confidence": 0.6
       }
     },
     "error_message": "Worker process exited unexpectedly while loading InsectNet weights."

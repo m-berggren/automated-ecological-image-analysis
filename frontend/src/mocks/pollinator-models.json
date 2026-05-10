@@ -2,9 +2,9 @@
   "default": {
     "tracks": [
       {
-        "id": "yolo",
-        "label": "YOLO Detector",
-        "description": "Bbox detection on full images. Trained on annotated bounding boxes.",
+        "id": "detector",
+        "label": "YOLO",
+        "description": "Pollinator detector",
         "kind": "detector",
         "metric_label": "mAP@0.5",
         "active_version_id": 13,
@@ -68,10 +68,10 @@
         "active_job": null
       },
       {
-        "id": "insectnet_binary",
-        "label": "InsectNet — Insect vs Background",
-        "description": "Binary classifier on 224×224 crops. Filters background out before species classification.",
-        "kind": "classifier",
+        "id": "binary_classifier",
+        "label": "EfficientNet",
+        "description": "Insect vs background",
+        "kind": "binary_classifier",
         "metric_label": "Accuracy",
         "active_version_id": 22,
         "versions": [
@@ -122,10 +122,10 @@
         "active_job": null
       },
       {
-        "id": "insectnet_group",
-        "label": "InsectNet — Species Classifier",
-        "description": "4-class classifier on 224×224 crops. Identifies fly / bumblebee / butterfly / other.",
-        "kind": "classifier",
+        "id": "group_classifier",
+        "label": "InsectNet",
+        "description": "Bumblebee, fly, butterfly, other",
+        "kind": "group_classifier",
         "metric_label": "Accuracy",
         "active_version_id": 32,
         "versions": [
