@@ -136,11 +136,12 @@ class InferenceRunDetailSerializer(serializers.ModelSerializer):
         )
 
 
-class DetectionSerializer(serializers.ModelSerializer):
-    """Read serializer matching the frontend's Detection interface.
+class BaseDetectionReadSerializer(serializers.ModelSerializer):
+    """Module-agnostic read shape for analysis.Detection.
 
-    Maps DB status (pending/accepted/rejected/unsure) to the reviewer_status
-    vocabulary the review UI uses (unreviewed/confirmed/corrected/rejected/unsure).
+    Per-module read serializers (e.g. PollinatorDetectionSerializer in
+    apps.pollinator) subclass this to add their module-specific extras
+    pulled from a 1:1 side table.
     """
 
     reviewer_status = serializers.SerializerMethodField()
@@ -150,15 +151,9 @@ class DetectionSerializer(serializers.ModelSerializer):
         model = Detection
         fields = (
             'id',
-            'yolo_class',
-            'yolo_confidence',
-            'insectnet_class',
-            'insectnet_confidence',
-            'binary_confidence',
-            'class_probs',
-            'source',
-            'merge_iou',
             'bbox',
+            'confidence',
+            'predicted_class',
             'reviewer_status',
             'reviewer_label',
             'source_image_filename',

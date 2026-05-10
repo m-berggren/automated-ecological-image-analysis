@@ -8,6 +8,7 @@ urlpatterns = [
     path('api/auth/', include('apps.accounts.urls')),
     path('api/datasets/', include('apps.datasets.urls')),
     path('api/analysis/', include('apps.analysis.urls')),
+    path('api/pollinator/', include('apps.pollinator.urls')),
 ]
 
 if settings.DEBUG:

@@ -5,14 +5,34 @@ from rest_framework.permissions import IsAuthenticated
 from rest_framework.response import Response
 from rest_framework.views import APIView
 
-from .models import ImageAsset, Upload
+from .models import ImageAsset, Module, Upload
 from .serializers import (
     ImageAssetSerializer,
     ImageUploadSerializer,
     UploadCreateSerializer,
     UploadSerializer,
 )
-from .services import extract_image_metadata
+
+
+_DEFAULT_META: dict = {
+    'width': None, 'height': None,
+    'captured_at': None, 'flash_fired': None, 'exif': {},
+    'weather': 'unknown', 'laplacian_var': None,
+    'shutter_speed': '', 'excluded': False, 'exclusion_reason': '',
+}
+
+
+def _extract_metadata(module: str, file) -> dict:
+    """Module-aware metadata extraction. Pollinator uploads run the
+    camera-trap EXIF/weather/fog pipeline; other modules get defaults
+    until they grow their own extractor."""
+    if module == Module.POLLINATORS:
+        from apps.pollinator.exif import extract_image_metadata
+        try:
+            return extract_image_metadata(file)
+        except Exception:
+            return dict(_DEFAULT_META)
+    return dict(_DEFAULT_META)
 
 
 class ImageUploadView(APIView):
@@ -24,9 +44,8 @@ class ImageUploadView(APIView):
         purpose : 'training' or 'inference' (default: inference)
         upload  : optional Upload id; the resulting ImageAsset is linked back
 
-    Automatically extracts EXIF metadata, derives weather from shutter
-    speed, computes image sharpness (Laplacian variance), and flags
-    flash/foggy images as excluded.
+    Per-module post-upload processing (EXIF, weather, exclusion flags) is
+    dispatched in _extract_metadata.
     """
 
     permission_classes = [IsAuthenticated]
@@ -37,19 +56,12 @@ class ImageUploadView(APIView):
         upload.is_valid(raise_exception=True)
 
         file = upload.validated_data['file']
+        module = upload.validated_data['module']
 
-        try:
-            meta = extract_image_metadata(file)
-        except Exception:
-            meta = {
-                'width': None, 'height': None,
-                'captured_at': None, 'flash_fired': None, 'exif': {},
-                'weather': 'unknown', 'laplacian_var': None,
-                'shutter_speed': '', 'excluded': False, 'exclusion_reason': '',
-            }
+        meta = _extract_metadata(module, file)
 
         image = ImageAsset.objects.create(
-            module=upload.validated_data['module'],
+            module=module,
             purpose=upload.validated_data['purpose'],
             file=file,
             upload=upload.validated_data.get('upload'),

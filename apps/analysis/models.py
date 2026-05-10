@@ -119,6 +119,7 @@ class InferenceRun(models.Model):
 
     module = models.CharField(max_length=20, choices=Module.choices)
     name = models.CharField(max_length=200, blank=True)
+    notes = models.TextField(blank=True)
     upload = models.ForeignKey(
         'datasets.Upload',
         on_delete=models.PROTECT,
@@ -199,35 +200,17 @@ class DetectionStatus(models.TextChoices):
     UNSURE = 'unsure', 'Unsure'
 
 
-class DetectionScope(models.TextChoices):
-    ROI = 'roi', 'Inside ROI (near marked flower)'
-    OUTSIDE_ROI = 'outside_roi', 'Outside ROI'
-    UNKNOWN = 'unknown', 'Unknown'
-
-
-class DetectionSource(models.TextChoices):
-    """Which detector(s) produced a pollinator detection.
-
-    YOLO and the InsectNet preprocessing+classifier branches run as peer
-    detectors. When both find the same physical insect, source=both.
-    """
-
-    YOLO = 'yolo', 'YOLO only'
-    PREPROCESSING = 'preprocessing', 'Preprocessing only'
-    BOTH = 'both', 'Both detectors'
-
-
 class Detection(models.Model):
     """A single bounding box predicted by an inference run.
 
-    Allowed predicted_class values per module:
-    - seeds: 'seed' / 'inactive'
-    - pollinators: 'bumblebee' / 'fly' / 'butterfly' / 'other'
+    Module-agnostic. predicted_class, confidence, and bbox are the
+    canonical output. Module-specific extras (e.g. dual-detector
+    yolo_*/insectnet_* for pollinators, morphology for seeds) live on
+    1:1 side tables in the per-module app.
 
-    Pollinator runs additionally populate yolo_class, yolo_confidence,
-    insectnet_class, insectnet_confidence, and source so the review UI
-    can flag YOLO/InsectNet disagreements. Seeds runs leave those fields
-    null and use predicted_class+confidence only.
+    Allowed predicted_class values per module:
+    - seeds: species code (e.g. 'PEH', 'PHYCA') or 'inactive'
+    - pollinators: 'bumblebee' / 'fly' / 'butterfly' / 'other'
     """
 
     inference_run = models.ForeignKey(
@@ -246,60 +229,6 @@ class Detection(models.Model):
     predicted_class = models.CharField(max_length=50)
     area = models.FloatField(
         help_text='Pixel area of bbox; persisted to drive the seeds volume filter',
-    )
-
-    # Pollinator dual-detector fields. Both null for seeds detections.
-    yolo_class = models.CharField(max_length=50, blank=True)
-    yolo_confidence = models.FloatField(null=True, blank=True)
-    insectnet_class = models.CharField(max_length=50, blank=True)
-    insectnet_confidence = models.FloatField(null=True, blank=True)
-    binary_confidence = models.FloatField(
-        null=True,
-        blank=True,
-        help_text='InsectNet binary insect/background confidence',
-    )
-    class_probs = models.JSONField(
-        default=dict,
-        blank=True,
-        help_text='Per-class probability dict from the group classifier',
-    )
-    source = models.CharField(
-        max_length=20,
-        choices=DetectionSource.choices,
-        blank=True,
-    )
-    merge_iou = models.FloatField(
-        null=True,
-        blank=True,
-        help_text='IoU between YOLO and preprocessing bboxes when source=both',
-    )
-
-    # Legacy InsectNet taxonomy (older notebook flow). Kept nullable so the
-    # frontend can still render scientific names if a future run populates
-    # them, but the current pipeline does not.
-    scientific_name = models.CharField(max_length=200, blank=True)
-    common_name = models.CharField(max_length=200, blank=True)
-    order = models.CharField(max_length=100, blank=True)
-    family = models.CharField(max_length=100, blank=True)
-    energy_score = models.FloatField(
-        null=True,
-        blank=True,
-        help_text='InsectNet OOD energy score; lower = more confident',
-    )
-    confirmed = models.BooleanField(
-        null=True,
-        blank=True,
-        help_text='InsectNet in-distribution flag (True = confident ID)',
-    )
-    near_marker = models.BooleanField(
-        null=True,
-        blank=True,
-        help_text='Detection overlaps with the marked-flower ROI zone',
-    )
-    detection_scope = models.CharField(
-        max_length=20,
-        choices=DetectionScope.choices,
-        default=DetectionScope.UNKNOWN,
     )
 
     status = models.CharField(
@@ -329,7 +258,6 @@ class Detection(models.Model):
             models.Index(fields=['image', 'predicted_class']),
             models.Index(fields=['flagged_for_training']),
             models.Index(fields=['area']),
-            models.Index(fields=['inference_run', 'source']),
         ]
 
     def __str__(self) -> str:

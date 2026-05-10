@@ -26,9 +26,6 @@ class ImageAssetSerializer(serializers.ModelSerializer):
             'notes',
             'excluded',
             'exclusion_reason',
-            'total_open_flowers',
-            'total_pollinators',
-            'pollinator_types_present',
             'metadata',
             'uploaded_at',
         )
