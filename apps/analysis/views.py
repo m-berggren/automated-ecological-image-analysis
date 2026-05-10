@@ -2,13 +2,19 @@ import logging
 
 from django.db import transaction
 from django.db.models import QuerySet
-from rest_framework import generics, status
+from django.utils import timezone
+from rest_framework import generics, serializers, status
+from rest_framework.request import Request
 from rest_framework.response import Response
+from rest_framework.views import APIView
 
 from apps.datasets.models import UploadStatus
 
 from .models import Detection, InferenceRun, ModelVersion
 from .serializers import (
+    REVIEWER_STATUS_MAP,
+    DetectionBulkReviewSerializer,
+    DetectionReviewSerializer,
     DetectionSerializer,
     InferenceRunCreateSerializer,
     InferenceRunDetailSerializer,
@@ -59,7 +65,7 @@ class InferenceRunListCreateView(generics.ListCreateAPIView):
 
     pagination_class = None
 
-    def get_serializer_class(self):
+    def get_serializer_class(self) -> type[serializers.Serializer]:
         if self.request.method == 'POST':
             return InferenceRunCreateSerializer
         return InferenceRunListSerializer
@@ -88,7 +94,7 @@ class InferenceRunListCreateView(generics.ListCreateAPIView):
 
         return qs
 
-    def create(self, request, *args, **kwargs) -> Response:
+    def create(self, request: Request, *args, **kwargs) -> Response:
         write = self.get_serializer(data=request.data)
         write.is_valid(raise_exception=True)
         upload = write.validated_data['upload']
@@ -140,3 +146,85 @@ class DetectionListView(generics.ListAPIView):
             .select_related('image')
             .order_by('id')
         )
+
+
+class DetectionDetailView(generics.RetrieveUpdateAPIView):
+    """GET   /api/analysis/detections/<id>/   read one detection.
+    PATCH /api/analysis/detections/<id>/   apply a review action.
+
+    GET returns the full Detection shape; PATCH accepts
+    {reviewer_status, reviewer_label?, flagged_for_training?} and returns
+    the updated detection in read shape.
+    """
+
+    queryset = Detection.objects.select_related('image').all()
+    lookup_field = 'pk'
+
+    def get_serializer_class(self) -> type[serializers.Serializer]:
+        if self.request.method in ('PATCH', 'PUT'):
+            return DetectionReviewSerializer
+        return DetectionSerializer
+
+    def update(self, request: Request, *args, **kwargs) -> Response:
+        instance = self.get_object()
+        write = DetectionReviewSerializer(
+            instance=instance,
+            data=request.data,
+            partial=True,
+            context={'request': request},
+        )
+        write.is_valid(raise_exception=True)
+        write.save()
+        return Response(
+            DetectionSerializer(instance, context={'request': request}).data,
+        )
+
+
+class DetectionBulkView(APIView):
+    """POST /api/analysis/detections/bulk/
+
+    Apply the same reviewer action to many detections in one request.
+    Single DB UPDATE; response carries the count actually updated.
+    """
+
+    def post(self, request: Request) -> Response:
+        write = DetectionBulkReviewSerializer(data=request.data)
+        write.is_valid(raise_exception=True)
+        ids = write.validated_data['ids']
+        rs = write.validated_data['reviewer_status']
+        update_data: dict = {
+            'status': REVIEWER_STATUS_MAP[rs],
+            'reviewed_by': request.user,
+            'reviewed_at': timezone.now(),
+            'reviewer_label': (
+                write.validated_data.get('reviewer_label') or ''
+                if rs == 'corrected'
+                else ''
+            ),
+        }
+        if 'flagged_for_training' in write.validated_data:
+            update_data['flagged_for_training'] = write.validated_data[
+                'flagged_for_training'
+            ]
+        count = Detection.objects.filter(pk__in=ids).update(**update_data)
+        return Response({'updated': count})
+
+
+class ModelVersionSetActiveView(APIView):
+    """POST /api/analysis/models/<id>/set-active/
+
+    Flips is_active=True on the given ModelVersion. The model's save()
+    auto-demotes other active rows for the same (module, kind).
+    """
+
+    def post(self, request: Request, pk: int) -> Response:
+        try:
+            mv = ModelVersion.objects.get(pk=pk)
+        except ModelVersion.DoesNotExist:
+            return Response(
+                {'error': 'Model version not found'},
+                status=status.HTTP_404_NOT_FOUND,
+            )
+        mv.is_active = True
+        mv.save()
+        return Response(ModelVersionSerializer(mv).data)

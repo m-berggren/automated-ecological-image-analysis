@@ -1,10 +1,21 @@
 from pathlib import Path
 
+from django.utils import timezone
 from rest_framework import serializers
 
 from apps.datasets.models import Upload
 
-from .models import Detection, DetectionStatus, InferenceRun, ModelVersion
+from .models import Detection, DetectionStatus, InferenceRun, ModelVersion  # noqa: F401
+
+
+REVIEWER_STATUS_MAP = {
+    'unreviewed': DetectionStatus.PENDING,
+    'confirmed': DetectionStatus.ACCEPTED,
+    'corrected': DetectionStatus.ACCEPTED,
+    'rejected': DetectionStatus.REJECTED,
+    'unsure': DetectionStatus.UNSURE,
+}
+REVIEWER_STATUS_CHOICES = list(REVIEWER_STATUS_MAP.keys())
 
 
 class ModelVersionSerializer(serializers.ModelSerializer):
@@ -128,8 +139,8 @@ class InferenceRunDetailSerializer(serializers.ModelSerializer):
 class DetectionSerializer(serializers.ModelSerializer):
     """Read serializer matching the frontend's Detection interface.
 
-    Maps DB status (pending/accepted/rejected) to the reviewer_status
-    vocabulary the review UI uses (unreviewed/confirmed/corrected/rejected).
+    Maps DB status (pending/accepted/rejected/unsure) to the reviewer_status
+    vocabulary the review UI uses (unreviewed/confirmed/corrected/rejected/unsure).
     """
 
     reviewer_status = serializers.SerializerMethodField()
@@ -158,9 +169,62 @@ class DetectionSerializer(serializers.ModelSerializer):
             return 'rejected'
         if obj.status == DetectionStatus.ACCEPTED:
             return 'corrected' if obj.reviewer_label else 'confirmed'
+        if obj.status == DetectionStatus.UNSURE:
+            return 'unsure'
         return 'unreviewed'
 
     def get_source_image_filename(self, obj: Detection) -> str:
         if obj.image and obj.image.file:
             return Path(obj.image.file.name).name
         return ''
+
+
+class DetectionReviewSerializer(serializers.Serializer):
+    """Write serializer for PATCH /api/analysis/detections/<id>/.
+
+    Translates the frontend's reviewer_status vocabulary back to the DB's
+    Detection.status enum + reviewer_label. Stamps reviewed_by/reviewed_at.
+    """
+
+    reviewer_status = serializers.ChoiceField(choices=REVIEWER_STATUS_CHOICES)
+    reviewer_label = serializers.CharField(
+        required=False,
+        allow_blank=True,
+        allow_null=True,
+    )
+    flagged_for_training = serializers.BooleanField(required=False)
+
+    def update(self, instance: Detection, validated_data: dict) -> Detection:
+        rs = validated_data['reviewer_status']
+        instance.status = REVIEWER_STATUS_MAP[rs]
+        if rs == 'corrected':
+            instance.reviewer_label = validated_data.get('reviewer_label') or ''
+        else:
+            instance.reviewer_label = ''
+        update_fields = ['status', 'reviewer_label', 'reviewed_by', 'reviewed_at']
+        if 'flagged_for_training' in validated_data:
+            instance.flagged_for_training = validated_data['flagged_for_training']
+            update_fields.append('flagged_for_training')
+        instance.reviewed_by = self.context['request'].user
+        instance.reviewed_at = timezone.now()
+        instance.save(update_fields=update_fields)
+        return instance
+
+
+class DetectionBulkReviewSerializer(serializers.Serializer):
+    """Write serializer for POST /api/analysis/detections/bulk/.
+
+    Apply the same reviewer action to a list of detections in one request.
+    """
+
+    ids = serializers.ListField(
+        child=serializers.IntegerField(),
+        allow_empty=False,
+    )
+    reviewer_status = serializers.ChoiceField(choices=REVIEWER_STATUS_CHOICES)
+    reviewer_label = serializers.CharField(
+        required=False,
+        allow_blank=True,
+        allow_null=True,
+    )
+    flagged_for_training = serializers.BooleanField(required=False)
