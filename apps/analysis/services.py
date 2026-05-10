@@ -56,11 +56,13 @@ def _make_progress_callback(run_id: int):
             if message:
                 run = InferenceRun.objects.get(pk=run_id)
                 log = list(run.activity_log or [])
-                log.append({
-                    'time': timezone.now().isoformat(),
-                    'message': message,
-                    'level': level,
-                })
+                log.append(
+                    {
+                        'time': timezone.now().isoformat(),
+                        'message': message,
+                        'level': level,
+                    }
+                )
                 run.activity_log = log[-_ACTIVITY_LOG_CAP:]
                 for k, v in updates.items():
                     setattr(run, k, v)
@@ -98,38 +100,29 @@ def run_inference_pipeline(run: InferenceRun) -> None:
 
         config = run.config or {}
         yolo_id = (config.get('yolo') or {}).get('model_version_id')
-        classifier_id = (config.get('classifier') or {}).get('model_version_id')
-        if not yolo_id or not classifier_id:
+        binary_id = (config.get('binary_classifier') or {}).get('model_version_id')
+        group_id = (config.get('group_classifier') or {}).get('model_version_id')
+        if not yolo_id or not binary_id or not group_id:
             raise ValueError(
-                'Run config must include yolo.model_version_id and '
-                'classifier.model_version_id'
+                'Run config must include yolo.model_version_id, '
+                'binary_classifier.model_version_id, and '
+                'group_classifier.model_version_id'
             )
 
         yolo_mv = ModelVersion.objects.get(pk=yolo_id)
-        classifier_mv = ModelVersion.objects.get(pk=classifier_id)
+        binary_mv = ModelVersion.objects.get(pk=binary_id)
+        group_mv = ModelVersion.objects.get(pk=group_id)
 
-        # Convention for now: a "classifier" ModelVersion's model_file_path
-        # points to a directory containing binary_best.pth + group_best.pth.
-        # If we later split binary and group into separate ModelVersion rows,
-        # the frontend needs two model_version_id fields and this resolves
-        # to two paths directly.
-        classifier_dir = Path(classifier_mv.model_file_path)
-        binary_path = classifier_dir / 'binary_best.pth'
-        group_path = classifier_dir / 'group_best.pth'
+        binary_path = binary_mv.model_file_path
+        group_path = group_mv.model_file_path
 
-        # Translate the frontend's nested config into the pipeline's flat shape.
         prep_config: dict = {}
         if 'preprocessing' in config and isinstance(config['preprocessing'], dict):
             prep_config.update(config['preprocessing'])
-        adv = config.get('advanced') or {}
-        if 'crop_padding' in adv:
-            prep_config['crop_pad_frac'] = adv['crop_padding']
-        if 'background_sample_size' in adv:
-            prep_config['background_sample_size'] = adv['background_sample_size']
 
         yolo_conf = float((config.get('yolo') or {}).get('confidence', 0.25))
         binary_thr = float(
-            (config.get('classifier') or {}).get('binary_confidence', 0.5)
+            (config.get('binary_classifier') or {}).get('confidence', 0.5)
         )
         # Frontend start_at_image is 1-based; library skip_first_n is 0-based.
         skip_first = max(0, int(config.get('start_at_image', 1)) - 1)
@@ -170,9 +163,7 @@ def run_inference_pipeline(run: InferenceRun) -> None:
         run_summary = output.get('run', {})
         detections_json = output.get('detections', [])
 
-        images_by_name = {
-            Path(img.file.name).name: img for img in images if img.file
-        }
+        images_by_name = {Path(img.file.name).name: img for img in images if img.file}
 
         det_objs = []
         for d in detections_json:
@@ -188,23 +179,25 @@ def run_inference_pipeline(run: InferenceRun) -> None:
                 if yolo_class
                 else d.get('insectnet_confidence')
             )
-            det_objs.append(Detection(
-                inference_run=run,
-                image=image,
-                bbox=bbox,
-                confidence=float(primary_conf or 0.0),
-                predicted_class=primary_class,
-                area=float(bbox.get('w', 0)) * float(bbox.get('h', 0)),
-                yolo_class=yolo_class,
-                yolo_confidence=d.get('yolo_confidence'),
-                insectnet_class=insectnet_class,
-                insectnet_confidence=d.get('insectnet_confidence'),
-                binary_confidence=d.get('binary_confidence'),
-                class_probs=d.get('class_probs') or {},
-                source=d.get('source') or '',
-                merge_iou=d.get('merge_iou'),
-                status=DetectionStatus.PENDING,
-            ))
+            det_objs.append(
+                Detection(
+                    inference_run=run,
+                    image=image,
+                    bbox=bbox,
+                    confidence=float(primary_conf or 0.0),
+                    predicted_class=primary_class,
+                    area=float(bbox.get('w', 0)) * float(bbox.get('h', 0)),
+                    yolo_class=yolo_class,
+                    yolo_confidence=d.get('yolo_confidence'),
+                    insectnet_class=insectnet_class,
+                    insectnet_confidence=d.get('insectnet_confidence'),
+                    binary_confidence=d.get('binary_confidence'),
+                    class_probs=d.get('class_probs') or {},
+                    source=d.get('source') or '',
+                    merge_iou=d.get('merge_iou'),
+                    status=DetectionStatus.PENDING,
+                )
+            )
         Detection.objects.bulk_create(det_objs)
 
         run.status = JobStatus.COMPLETED
@@ -213,10 +206,16 @@ def run_inference_pipeline(run: InferenceRun) -> None:
         run.detection_count = len(det_objs)
         run.detections_by_class = run_summary.get('detections_by_class', {})
         run.detections_by_source = run_summary.get('detections_by_source', {})
-        run.save(update_fields=[
-            'status', 'completed_at', 'processed_image_count',
-            'detection_count', 'detections_by_class', 'detections_by_source',
-        ])
+        run.save(
+            update_fields=[
+                'status',
+                'completed_at',
+                'processed_image_count',
+                'detection_count',
+                'detections_by_class',
+                'detections_by_source',
+            ]
+        )
         logger.info(f'Inference run {run.pk} completed: {len(det_objs)} detections')
 
     except Exception as e:
