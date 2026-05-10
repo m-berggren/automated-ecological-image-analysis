@@ -7,12 +7,14 @@ from apps.datasets.models import Module
 class ModelKind(models.TextChoices):
     """Role of a model version inside its module's pipeline.
 
-    For pollinators: 'detector' = YOLO, 'classifier' = InsectNet binary+group.
-    For seeds: detector only.
+    For pollinators: 'detector' = YOLO, 'binary_classifier' = EfficientNet
+    insect/background gate, 'group_classifier' = InsectNet bumblebee/fly/
+    butterfly/other classifier. For seeds: detector only.
     """
 
     DETECTOR = 'detector', 'Detector'
-    CLASSIFIER = 'classifier', 'Classifier'
+    BINARY_CLASSIFIER = 'binary_classifier', 'Binary classifier'
+    GROUP_CLASSIFIER = 'group_classifier', 'Group classifier'
 
 
 class ModelVersion(models.Model):
@@ -113,12 +115,7 @@ class TrainingJob(models.Model):
 
 
 class InferenceRun(models.Model):
-    """A single inference run over an Upload's images.
-
-    The run is created with status=pending. The frontend polls this row
-    while the worker (later tier) flips status to running -> completed/failed
-    and updates the progress fields.
-    """
+    """A single inference run over an Upload's images."""
 
     module = models.CharField(max_length=20, choices=Module.choices)
     name = models.CharField(max_length=200, blank=True)
@@ -129,11 +126,22 @@ class InferenceRun(models.Model):
         blank=True,
         related_name='inference_runs',
     )
+    model_version = models.ForeignKey(
+        ModelVersion,
+        on_delete=models.PROTECT,
+        null=True,
+        blank=True,
+        related_name='inference_runs',
+        help_text='Single-model FK for modules like seeds. Pollinator runs '
+        'use config.{yolo,binary_classifier,group_classifier}.model_version_id '
+        'inside the JSON config instead and leave this null.',
+    )
     status = models.CharField(
         max_length=20,
         choices=JobStatus.choices,
         default=JobStatus.PENDING,
     )
+    archived = models.BooleanField(default=False)
 
     # Frozen run config posted by the frontend (yolo/classifier ids,
     # thresholds, preprocessing knobs). Stored as-is for reproducibility.
@@ -156,7 +164,8 @@ class InferenceRun(models.Model):
     detections_by_class = models.JSONField(default=dict, blank=True)
     detections_by_source = models.JSONField(default=dict, blank=True)
     activity_log = models.JSONField(
-        default=list, blank=True,
+        default=list,
+        blank=True,
         help_text='List of {time, message, level} entries appended by the worker',
     )
     error_message = models.TextField(blank=True)
@@ -176,6 +185,7 @@ class InferenceRun(models.Model):
         indexes = [
             models.Index(fields=['module', '-created_at']),
             models.Index(fields=['module', 'status']),
+            models.Index(fields=['module', 'archived']),
         ]
 
     def __str__(self) -> str:
@@ -244,11 +254,13 @@ class Detection(models.Model):
     insectnet_class = models.CharField(max_length=50, blank=True)
     insectnet_confidence = models.FloatField(null=True, blank=True)
     binary_confidence = models.FloatField(
-        null=True, blank=True,
+        null=True,
+        blank=True,
         help_text='InsectNet binary insect/background confidence',
     )
     class_probs = models.JSONField(
-        default=dict, blank=True,
+        default=dict,
+        blank=True,
         help_text='Per-class probability dict from the group classifier',
     )
     source = models.CharField(
@@ -257,7 +269,8 @@ class Detection(models.Model):
         blank=True,
     )
     merge_iou = models.FloatField(
-        null=True, blank=True,
+        null=True,
+        blank=True,
         help_text='IoU between YOLO and preprocessing bboxes when source=both',
     )
 
@@ -269,15 +282,18 @@ class Detection(models.Model):
     order = models.CharField(max_length=100, blank=True)
     family = models.CharField(max_length=100, blank=True)
     energy_score = models.FloatField(
-        null=True, blank=True,
+        null=True,
+        blank=True,
         help_text='InsectNet OOD energy score; lower = more confident',
     )
     confirmed = models.BooleanField(
-        null=True, blank=True,
+        null=True,
+        blank=True,
         help_text='InsectNet in-distribution flag (True = confident ID)',
     )
     near_marker = models.BooleanField(
-        null=True, blank=True,
+        null=True,
+        blank=True,
         help_text='Detection overlaps with the marked-flower ROI zone',
     )
     detection_scope = models.CharField(
@@ -292,7 +308,8 @@ class Detection(models.Model):
         default=DetectionStatus.PENDING,
     )
     reviewer_label = models.CharField(
-        max_length=50, blank=True,
+        max_length=50,
+        blank=True,
         help_text='Class assigned by a reviewer when correcting the prediction',
     )
     flagged_for_training = models.BooleanField(default=False)
