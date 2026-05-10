@@ -146,51 +146,41 @@
       </div>
 
       <!-- Advanced settings -->
-<div class="flex flex-wrap items-center gap-x-6 gap-y-3 pt-2 border-t border-border">
+      <div class="flex flex-wrap items-center gap-x-6 gap-y-3 pt-2 border-t border-border">
+        <!-- Confidence -->
+        <label class="flex items-center gap-2 text-sm">
+          <span class="text-xs text-muted-foreground"> Confidence threshold </span>
 
-  <!-- Confidence -->
-  <label class="flex items-center gap-2 text-sm">
-    <span class="text-xs text-muted-foreground">
-       Confidence threshold
-    </span>
+          <input
+            v-model.number="config.confidence_threshold"
+            type="number"
+            min="0"
+            max="1"
+            step="0.05"
+            class="w-20 px-2 py-1 rounded border border-border bg-background text-sm font-mono"
+          />
+        </label>
 
-    <input
-      v-model.number="config.confidence_threshold"
-      type="number"
-      min="0"
-      max="1"
-      step="0.05"
-      class="w-20 px-2 py-1 rounded border border-border bg-background text-sm font-mono"
-    />
-  </label>
+        <!-- Slice overlap -->
+        <label class="flex items-center gap-2 text-sm">
+          <span class="text-xs text-muted-foreground"> Slice overlap </span>
 
-  <!-- Slice overlap -->
-  <label class="flex items-center gap-2 text-sm">
-    <span class="text-xs text-muted-foreground">
-      Slice overlap
-    </span>
+          <input
+            v-model.number="config.slice_overlap_ratio"
+            type="number"
+            min="0"
+            max="1"
+            step="0.05"
+            class="w-20 px-2 py-1 rounded border border-border bg-background text-sm font-mono"
+          />
+        </label>
 
-    <input
-      v-model.number="config.slice_overlap_ratio"
-      type="number"
-      min="0"
-      max="1"
-      step="0.05"
-      class="w-20 px-2 py-1 rounded border border-border bg-background text-sm font-mono"
-    />
-  </label>
-
-  <!-- Viability -->
-  <label class="flex items-center gap-2 text-sm">
-    <input
-      v-model="config.enable_viability"
-      type="checkbox"
-    />
-    <span>
-      Generate viability report
-    </span>
-  </label>
-</div>
+        <!-- Viability -->
+        <label class="flex items-center gap-2 text-sm">
+          <input v-model="config.enable_viability" type="checkbox" />
+          <span> Generate viability report </span>
+        </label>
+      </div>
     </section>
 
     <!-- Upload -->
@@ -548,13 +538,11 @@ async function startDetection() {
     ? config.value.models[selectedSeed.value]?.model_version_id
     : null
 
-if (!modelId) {
+  if (!modelId) {
+    error.value = `Select a model version for ${selectedSeed.value}.`
 
-  error.value = `Select a model version for ${selectedSeed.value}.`
-
-  return
-
-}
+    return
+  }
 
   starting.value = true
 
