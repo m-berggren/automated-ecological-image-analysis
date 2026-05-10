@@ -397,7 +397,7 @@ async function loadFromApi() {
   try {
     const [runRes, detRes] = await Promise.all([
       api(`/api/analysis/runs/${id}/`),
-      api(`/api/analysis/runs/${id}/detections/`),
+      api(`/api/pollinator/runs/${id}/detections/`),
     ])
     if (!runRes.ok) {
       loadError.value = `Run: HTTP ${runRes.status}`
@@ -545,7 +545,7 @@ async function patchDetection(
   label: ClassName | null,
 ): Promise<boolean> {
   try {
-    const res = await api(`/api/analysis/detections/${id}/`, {
+    const res = await api(`/api/pollinator/detections/${id}/`, {
       method: 'PATCH',
       body: JSON.stringify({
         reviewer_status: status,
