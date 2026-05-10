@@ -124,6 +124,7 @@ class InferenceRun(models.Model):
 
     module = models.CharField(max_length=20, choices=Module.choices)
     name = models.CharField(max_length=200, blank=True)
+    notes = models.TextField(blank=True)
 
     upload = models.ForeignKey(
         'datasets.Upload',

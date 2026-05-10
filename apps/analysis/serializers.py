@@ -57,6 +57,7 @@ class InferenceRunCreateSerializer(serializers.Serializer):
     module = serializers.ChoiceField(choices=Module.choices)
     upload = serializers.PrimaryKeyRelatedField(queryset=Upload.objects.all())
     name = serializers.CharField(max_length=200, required=False, allow_blank=True)
+    notes = serializers.CharField(required=False, allow_blank=True)
     config = serializers.JSONField(required=False)
     model_version = serializers.PrimaryKeyRelatedField(
         queryset=ModelVersion.objects.all(),

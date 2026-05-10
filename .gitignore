@@ -13,6 +13,9 @@ staticfiles/
 # Vue build output
 static/vue/
 
+# Image uploads
+media/
+
 # Environment variables
 .env
 

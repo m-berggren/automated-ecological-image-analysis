@@ -61,6 +61,7 @@ class InferenceRunListCreateView(APIView):
             run = InferenceRun.objects.create(
                 module=ser.validated_data['module'],
                 name=ser.validated_data.get('name', ''),
+                notes=ser.validated_data.get('notes', ''),
                 upload=upload,
                 config=ser.validated_data.get('config', {}),
                 model_version=ser.validated_data.get('model_version'),
