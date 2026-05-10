@@ -8,13 +8,7 @@ from .models import Detection, DetectionStatus, InferenceRun, ModelVersion
 
 
 class ModelVersionSerializer(serializers.ModelSerializer):
-    """Read serializer for trained model versions.
-
-    Exposes the fields the frontend's run-config and models pages consume.
-    Training-job-derived fields (samples, training_duration, charts) are
-    deliberately omitted at this tier; they will join in once the
-    TrainingJob link is wired.
-    """
+    """Read serializer for trained model versions."""
 
     class Meta:
         model = ModelVersion
@@ -34,18 +28,40 @@ class ModelVersionSerializer(serializers.ModelSerializer):
 class InferenceRunCreateSerializer(serializers.ModelSerializer):
     """Write serializer for POST /api/analysis/runs/.
 
-    Accepts the same payload shape the frontend posts: module, upload (FK),
-    name, and the nested config blob. The config is stored as-is for
-    reproducibility; per-field validation lives in the worker.
+    Pollinator runs send model selection inside config (yolo + classifier
+    ids); single-model modules like seeds may send the optional model_version
+    FK instead. The serializer accepts either shape.
+
+    Validates that upload.module matches the requested module so a
+    pollinator run can't accidentally consume a seeds upload.
     """
 
     upload = serializers.PrimaryKeyRelatedField(
         queryset=Upload.objects.all(),
     )
+    model_version = serializers.PrimaryKeyRelatedField(
+        queryset=ModelVersion.objects.all(),
+        required=False,
+        allow_null=True,
+    )
 
     class Meta:
         model = InferenceRun
-        fields = ('module', 'upload', 'name', 'config')
+        fields = ('module', 'upload', 'name', 'config', 'model_version')
+
+    def validate(self, attrs: dict) -> dict:
+        upload = attrs.get('upload')
+        module = attrs.get('module')
+        if upload and module and upload.module != module:
+            raise serializers.ValidationError(
+                {
+                    'upload': (
+                        f'Upload module ({upload.module}) does not match run '
+                        f'module ({module}).'
+                    ),
+                }
+            )
+        return attrs
 
 
 class InferenceRunListSerializer(serializers.ModelSerializer):
@@ -62,7 +78,9 @@ class InferenceRunListSerializer(serializers.ModelSerializer):
             'module',
             'name',
             'upload',
+            'model_version',
             'status',
+            'archived',
             'image_count',
             'processed_image_count',
             'detection_count',
@@ -89,7 +107,9 @@ class InferenceRunDetailSerializer(serializers.ModelSerializer):
             'module',
             'name',
             'upload',
+            'model_version',
             'status',
+            'archived',
             'config',
             'image_count',
             'processed_image_count',

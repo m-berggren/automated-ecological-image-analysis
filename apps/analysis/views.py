@@ -20,6 +20,16 @@ from .services import spawn_inference_pipeline
 logger = logging.getLogger(__name__)
 
 
+def _parse_bool(value: str) -> bool | None:
+    if value is None:
+        return None
+    if value.lower() in ('true', '1', 'yes'):
+        return True
+    if value.lower() in ('false', '0', 'no'):
+        return False
+    return None
+
+
 class ModelVersionListView(generics.ListAPIView):
     """GET /api/analysis/models/?module=<module>
 
@@ -42,9 +52,9 @@ class InferenceRunListCreateView(generics.ListCreateAPIView):
     """GET  /api/analysis/runs/?module=<module>  list runs (newest first).
     POST /api/analysis/runs/                   create a new run (status=pending).
 
-    Create snapshots image_count from the upload's image count at submission
-    time. The actual pipeline does not run yet at this tier; status stays
-    pending until the worker (later tier) picks it up.
+    image_count is snapshotted from the upload at submission time so the
+    progress denominator stays stable if images are added to the upload
+    after the run is queued.
     """
 
     pagination_class = None
@@ -56,9 +66,26 @@ class InferenceRunListCreateView(generics.ListCreateAPIView):
 
     def get_queryset(self) -> QuerySet[InferenceRun]:
         qs = InferenceRun.objects.all().order_by('-created_at')
-        module = self.request.query_params.get('module')
+        params = self.request.query_params
+
+        module = params.get('module')
         if module:
             qs = qs.filter(module=module)
+
+        run_status = params.get('status')
+        if run_status:
+            qs = qs.filter(status=run_status)
+
+        upload = params.get('upload')
+        if upload:
+            qs = qs.filter(upload_id=upload)
+
+        archived = _parse_bool(params.get('archived'))
+        if archived is None:
+            qs = qs.filter(archived=False)
+        else:
+            qs = qs.filter(archived=archived)
+
         return qs
 
     def create(self, request, *args, **kwargs) -> Response:
@@ -69,6 +96,7 @@ class InferenceRunListCreateView(generics.ListCreateAPIView):
             module=write.validated_data['module'],
             name=write.validated_data.get('name', ''),
             upload=upload,
+            model_version=write.validated_data.get('model_version'),
             config=write.validated_data.get('config', {}),
             initiated_by=request.user,
             image_count=upload.images.count(),
@@ -76,8 +104,7 @@ class InferenceRunListCreateView(generics.ListCreateAPIView):
         if upload.status == UploadStatus.DRAFT:
             upload.status = UploadStatus.READY
             upload.save(update_fields=['status'])
-        # Spawn the run in a background thread after the transaction commits
-        # so the worker can see the row. Returns immediately with status=pending.
+        # Defer until commit so the worker thread sees the row.
         transaction.on_commit(lambda: spawn_inference_pipeline(run))
         return Response(
             InferenceRunDetailSerializer(run).data,
@@ -109,8 +136,7 @@ class DetectionListView(generics.ListAPIView):
 
     def get_queryset(self) -> QuerySet[Detection]:
         return (
-            Detection.objects
-            .filter(inference_run_id=self.kwargs['run_id'])
+            Detection.objects.filter(inference_run_id=self.kwargs['run_id'])
             .select_related('image')
             .order_by('id')
         )
