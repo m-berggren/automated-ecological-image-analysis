@@ -447,6 +447,7 @@ import { useRoute } from 'vue-router'
 import PageHeader from '@/components/PageHeader.vue'
 import TrainingCharts from '@/components/TrainingCharts.vue'
 import { api } from '@/api'
+import { tracksFromVersions, type BackendModelVersion } from '@/lib/model-tracks'
 
 interface ChartData {
   training_curve?: Array<{ epoch: number; loss: number; val_metric: number }>
@@ -606,8 +607,30 @@ async function loadFromApi() {
       loadError.value = `HTTP ${res.status}`
       return
     }
-    tracks.value = []
+    const versions: BackendModelVersion[] = await res.json()
+    // Training-specific fields (data_pool, active_job, samples, charts) come
+    // from a TrainingJob endpoint that isn't wired yet. Stub them so the
+    // version list renders; the Start training button stays disabled below.
+    tracks.value = tracksFromVersions(versions).map((t) => ({
+      id: t.id,
+      label: t.label,
+      description: t.description,
+      kind: t.kind,
+      metric_label: t.metric_label,
+      active_version_id: t.active_version_id,
+      versions: t.versions.map((v) => ({
+        ...v,
+        samples: 0,
+        training_duration_seconds: 0,
+        charts: null,
+      })),
+      data_pool: { total_samples: 0, new_since_active: 0, by_class: {} },
+      active_job: null,
+    }))
     history.value = []
+    if (tracks.value.length && !selectedTrackId.value) {
+      selectedTrackId.value = tracks.value[0].id
+    }
   } catch (e) {
     loadError.value = e instanceof Error ? e.message : String(e)
   } finally {

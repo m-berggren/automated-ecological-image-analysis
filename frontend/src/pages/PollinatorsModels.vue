@@ -54,7 +54,6 @@
                 <th class="text-left font-medium px-5 py-2 w-10">Default</th>
                 <th class="text-left font-medium px-3 py-2">Name</th>
                 <th class="text-left font-medium px-3 py-2">{{ track.metric_label }}</th>
-                <th class="text-left font-medium px-3 py-2">Samples</th>
                 <th class="text-left font-medium px-3 py-2">Trained</th>
                 <th class="px-3 py-2 w-10"></th>
               </tr>
@@ -87,7 +86,6 @@
                   <td class="px-3 py-3 font-mono text-xs">
                     {{ formatMetric(mainMetric(v, track.metric_label)) }}
                   </td>
-                  <td class="px-3 py-3 text-xs">{{ v.samples.toLocaleString() }}</td>
                   <td class="px-3 py-3 text-xs text-muted-foreground">
                     {{ formatRelative(v.trained_at) }}
                   </td>
@@ -100,7 +98,7 @@
                   class="border-t border-border bg-muted/10"
                 >
                   <td></td>
-                  <td colspan="5" class="px-3 py-4">
+                  <td colspan="4" class="px-3 py-4">
                     <div class="grid grid-cols-2 gap-x-8 gap-y-3 max-w-3xl">
                       <div>
                         <div class="text-[11px] font-semibold uppercase tracking-wider text-muted-foreground mb-1">
@@ -133,21 +131,6 @@
                     </div>
                     <div class="text-xs text-muted-foreground mt-3 pt-3 border-t border-border">
                       Trained {{ formatRelative(v.trained_at) }}
-                      <template v-if="v.training_duration_seconds">
-                        · took {{ humanDuration(v.training_duration_seconds) }}
-                      </template>
-                      · {{ v.samples.toLocaleString() }} samples
-                    </div>
-                    <div class="mt-3 pt-3 border-t border-border">
-                      <button
-                        class="text-[11px] font-semibold uppercase tracking-wider text-muted-foreground hover:text-foreground"
-                        @click="toggleCharts(v.id)"
-                      >
-                        {{ chartsExpanded.has(v.id) ? '▾' : '▸' }} Charts
-                      </button>
-                      <div v-if="chartsExpanded.has(v.id)" class="mt-3">
-                        <TrainingCharts :charts="v.charts ?? null" />
-                      </div>
                     </div>
                   </td>
                 </tr>
@@ -164,38 +147,20 @@
 import { computed, onMounted, ref } from 'vue'
 import { useRoute } from 'vue-router'
 import PageHeader from '@/components/PageHeader.vue'
-import TrainingCharts from '@/components/TrainingCharts.vue'
 import { api } from '@/api'
+import {
+  tracksFromVersions,
+  type BackendModelVersion,
+  type Track,
+  type TrackVersion as Version,
+} from '@/lib/model-tracks'
 
-interface ChartData {
-  training_curve?: Array<{ epoch: number; loss: number; val_metric: number }>
-  confusion_matrix?: { labels: string[]; values: number[][] }
-  per_class?: Array<{ label: string; value: number }>
-}
-
-interface Version {
+interface VersionMock {
   id: number
   version_name: string
   is_active: boolean
   metrics: Record<string, number>
-  samples: number
-  trained_at: string
-  training_duration_seconds: number
   parameters: Record<string, unknown>
-  charts?: ChartData | null
-}
-
-interface Track {
-  id: string
-  label: string
-  description: string
-  kind: string
-  metric_label: string
-  active_version_id: number | null
-  versions: Version[]
-}
-
-interface VersionMock extends Omit<Version, 'trained_at'> {
   trained_at_offset_seconds: number
 }
 interface TrackMock {
@@ -214,7 +179,6 @@ const loadError = ref('')
 const tracks = ref<Track[]>([])
 const kindFilter = ref<string>('all')
 const expandedIds = ref<Set<number>>(new Set())
-const chartsExpanded = ref<Set<number>>(new Set())
 
 const previewMode = computed<string | null>(() => {
   const value = route.query.preview
@@ -247,7 +211,11 @@ async function loadPreview(_mode: string): Promise<Track[] | null> {
     metric_label: t.metric_label,
     active_version_id: t.active_version_id,
     versions: t.versions.map((v) => ({
-      ...v,
+      id: v.id,
+      version_name: v.version_name,
+      is_active: v.is_active,
+      metrics: v.metrics,
+      parameters: v.parameters,
       trained_at: new Date(now + v.trained_at_offset_seconds * 1000).toISOString(),
     })),
   }))
@@ -260,7 +228,8 @@ async function loadFromApi() {
       loadError.value = `HTTP ${res.status}`
       return
     }
-    tracks.value = []
+    const versions: BackendModelVersion[] = await res.json()
+    tracks.value = tracksFromVersions(versions)
   } catch (e) {
     loadError.value = e instanceof Error ? e.message : String(e)
   } finally {
@@ -310,10 +279,30 @@ function formatRelative(iso: string): string {
   return `${Math.round(diff / 86400)}d ago`
 }
 
-function setDefault(track: Track, v: Version) {
+async function setDefault(track: Track, v: Version) {
+  // Optimistic flip; server demotes the previous active row in the same
+  // (module, kind) on save, so we mirror that locally before the request.
+  const prevActiveId = track.active_version_id
   for (const x of track.versions) x.is_active = false
   v.is_active = true
   track.active_version_id = v.id
+
+  if (previewMode.value) return
+  try {
+    const res = await api(`/api/analysis/models/${v.id}/set-active/`, {
+      method: 'POST',
+    })
+    if (!res.ok) throw new Error(`HTTP ${res.status}`)
+  } catch (e) {
+    // Revert optimistic update on failure.
+    v.is_active = false
+    track.active_version_id = prevActiveId
+    if (prevActiveId != null) {
+      const prev = track.versions.find((x) => x.id === prevActiveId)
+      if (prev) prev.is_active = true
+    }
+    loadError.value = e instanceof Error ? e.message : String(e)
+  }
 }
 
 function toggleExpanded(id: number) {
@@ -321,21 +310,6 @@ function toggleExpanded(id: number) {
   if (next.has(id)) next.delete(id)
   else next.add(id)
   expandedIds.value = next
-}
-
-function toggleCharts(id: number) {
-  const next = new Set(chartsExpanded.value)
-  if (next.has(id)) next.delete(id)
-  else next.add(id)
-  chartsExpanded.value = next
-}
-
-function humanDuration(seconds: number): string {
-  if (seconds < 60) return `${Math.round(seconds)}s`
-  if (seconds < 3600) return `${Math.round(seconds / 60)} min`
-  const hours = Math.floor(seconds / 3600)
-  const mins = Math.round((seconds % 3600) / 60)
-  return mins > 0 ? `${hours}h ${mins}m` : `${hours}h`
 }
 
 function formatParam(value: unknown): string {
