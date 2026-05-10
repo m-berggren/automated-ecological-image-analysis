@@ -24,19 +24,25 @@ body:json {
         "model_version_id": {{yoloModelId}},
         "confidence": 0.4
       },
-      "classifier": {
-        "model_version_id": {{classifierModelId}},
-        "binary_confidence": 0.5,
-        "group_confidence": 0.6
+      "binary_classifier": {
+        "model_version_id": {{binaryClassifierModelId}},
+        "confidence": 0.5
+      },
+      "group_classifier": {
+        "model_version_id": {{groupClassifierModelId}},
+        "confidence": 0.6
       },
       "preprocessing": {
-        "use_roi": false
+        "use_roi": false,
+        "crop_pad_frac": 0.3,
+        "background_sample_size": 100,
+        "min_contour_area": 400,
+        "max_contour_area": 35000,
+        "skip_flash": true,
+        "skip_foggy": true,
+        "enable_large_motion": true
       },
-      "start_at_image": 1,
-      "advanced": {
-        "crop_padding": 0.3,
-        "background_sample_size": 100
-      }
+      "start_at_image": 1
     }
   }
 }
