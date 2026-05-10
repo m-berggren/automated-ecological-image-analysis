@@ -9,19 +9,17 @@ from rest_framework.response import Response
 from rest_framework.views import APIView
 
 from apps.datasets.models import UploadStatus
+from apps.pollinator.services import spawn_inference_pipeline
 
 from .models import Detection, InferenceRun, ModelVersion
 from .serializers import (
     REVIEWER_STATUS_MAP,
     DetectionBulkReviewSerializer,
-    DetectionReviewSerializer,
-    DetectionSerializer,
     InferenceRunCreateSerializer,
     InferenceRunDetailSerializer,
     InferenceRunListSerializer,
     ModelVersionSerializer,
 )
-from .services import spawn_inference_pipeline
 
 logger = logging.getLogger(__name__)
 
@@ -128,56 +126,6 @@ class InferenceRunDetailView(generics.RetrieveAPIView):
     queryset = InferenceRun.objects.all()
     serializer_class = InferenceRunDetailSerializer
     lookup_field = 'pk'
-
-
-class DetectionListView(generics.ListAPIView):
-    """GET /api/analysis/runs/<run_id>/detections/
-
-    Lists detections for a run in id order. select_related on the image
-    avoids an N+1 when the serializer reads the file name.
-    """
-
-    serializer_class = DetectionSerializer
-    pagination_class = None
-
-    def get_queryset(self) -> QuerySet[Detection]:
-        return (
-            Detection.objects.filter(inference_run_id=self.kwargs['run_id'])
-            .select_related('image')
-            .order_by('id')
-        )
-
-
-class DetectionDetailView(generics.RetrieveUpdateAPIView):
-    """GET   /api/analysis/detections/<id>/   read one detection.
-    PATCH /api/analysis/detections/<id>/   apply a review action.
-
-    GET returns the full Detection shape; PATCH accepts
-    {reviewer_status, reviewer_label?, flagged_for_training?} and returns
-    the updated detection in read shape.
-    """
-
-    queryset = Detection.objects.select_related('image').all()
-    lookup_field = 'pk'
-
-    def get_serializer_class(self) -> type[serializers.Serializer]:
-        if self.request.method in ('PATCH', 'PUT'):
-            return DetectionReviewSerializer
-        return DetectionSerializer
-
-    def update(self, request: Request, *args, **kwargs) -> Response:
-        instance = self.get_object()
-        write = DetectionReviewSerializer(
-            instance=instance,
-            data=request.data,
-            partial=True,
-            context={'request': request},
-        )
-        write.is_valid(raise_exception=True)
-        write.save()
-        return Response(
-            DetectionSerializer(instance, context={'request': request}).data,
-        )
 
 
 class DetectionBulkView(APIView):

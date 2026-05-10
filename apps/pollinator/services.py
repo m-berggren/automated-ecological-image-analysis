@@ -23,16 +23,18 @@ import threading
 from pathlib import Path
 
 from django.conf import settings
-from django.db import close_old_connections
+from django.db import close_old_connections, transaction
 from django.utils import timezone
 
-from .models import (
+from apps.analysis.models import (
     Detection,
     DetectionStatus,
     InferenceRun,
     JobStatus,
     ModelVersion,
 )
+
+from .models import PollinatorDetection
 
 logger = logging.getLogger(__name__)
 
@@ -165,7 +167,8 @@ def run_inference_pipeline(run: InferenceRun) -> None:
 
         images_by_name = {Path(img.file.name).name: img for img in images if img.file}
 
-        det_objs = []
+        det_objs: list[Detection] = []
+        pol_data: list[dict] = []
         for d in detections_json:
             image = images_by_name.get(d.get('image_name'))
             if image is None:
@@ -187,18 +190,30 @@ def run_inference_pipeline(run: InferenceRun) -> None:
                     confidence=float(primary_conf or 0.0),
                     predicted_class=primary_class,
                     area=float(bbox.get('w', 0)) * float(bbox.get('h', 0)),
-                    yolo_class=yolo_class,
-                    yolo_confidence=d.get('yolo_confidence'),
-                    insectnet_class=insectnet_class,
-                    insectnet_confidence=d.get('insectnet_confidence'),
-                    binary_confidence=d.get('binary_confidence'),
-                    class_probs=d.get('class_probs') or {},
-                    source=d.get('source') or '',
-                    merge_iou=d.get('merge_iou'),
                     status=DetectionStatus.PENDING,
                 )
             )
-        Detection.objects.bulk_create(det_objs)
+            pol_data.append(
+                {
+                    'yolo_class': yolo_class,
+                    'yolo_confidence': d.get('yolo_confidence'),
+                    'insectnet_class': insectnet_class,
+                    'insectnet_confidence': d.get('insectnet_confidence'),
+                    'binary_confidence': d.get('binary_confidence'),
+                    'class_probs': d.get('class_probs') or {},
+                    'source': d.get('source') or '',
+                    'merge_iou': d.get('merge_iou'),
+                }
+            )
+
+        with transaction.atomic():
+            created = Detection.objects.bulk_create(det_objs)
+            PollinatorDetection.objects.bulk_create(
+                [
+                    PollinatorDetection(detection=det, **data)
+                    for det, data in zip(created, pol_data)
+                ]
+            )
 
         run.status = JobStatus.COMPLETED
         run.completed_at = timezone.now()

@@ -51,6 +51,7 @@ INSTALLED_APPS = [
     'apps.accounts',
     'apps.analysis',
     'apps.datasets',
+    'apps.pollinator',
     'rest_framework',
     'corsheaders',
 ]
