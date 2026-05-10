@@ -1,7 +1,7 @@
 import os
 from collections import defaultdict
 
-from seed_src.metrics import calculate_tp_fp_fn
+from seed_src.metrics import calculate_tp_fp_fn, calculate_precision_recall_f1_score
 from seed_src.train import train_species_model
 from seed_src.utils import (
     load_ground_truth,
@@ -15,14 +15,14 @@ from seed_src.utils import (
 # -------------------------
 PREPARE_LABELS = True  # Set to True to run the label update on newly added label files
 RETRAIN = False  # Set to True to train a new model, False to use existing weights
-SPECIES_LIST = ['cat', 'peh', 'phyca', 'vau']
+SPECIES_LIST = ['cat','peh','phyca','vau']
 # Map species to their specific yaml files
 CONFIG_MAP = {s: f'../data/seed/{s}_model/{s}.yaml' for s in SPECIES_LIST}
 
 # -------------------------
 # LABEL PREPARATION
 # -------------------------
-SPECIES_IDS = {'cat': 0, 'peh': 1, 'phyca': 2, 'vau': 3}
+SPECIES_IDS = {'cat': 0, 'peh': 0, 'phyca': 0, 'vau': 0}
 SPLITS = ['train', 'val']
 BASE_PATH = '../data/seed'
 
@@ -50,7 +50,7 @@ if PREPARE_LABELS:
 best_model_paths = {}
 
 for species in SPECIES_LIST:
-    expected_path = os.path.join('runs', 'obb', species, 'weights', 'best.pt')
+    expected_path = os.path.join('..', 'runs', 'obb', species, 'weights', 'best.pt')
 
     if RETRAIN:
         print(f'Training started on {species}...')
@@ -59,8 +59,8 @@ for species in SPECIES_LIST:
     else:
         best_model_paths[species] = expected_path
 
-        if not best_model_paths[species]:
-            print('No model found → training new one')
+        if not os.path.exists(best_model_paths[species]):
+            print('No model found at {best_model_paths[species]} → training new one')
             best_model_paths[species] = train_species_model(
                 species, CONFIG_MAP[species]
             )
@@ -193,9 +193,27 @@ print('\n==== PER SPECIES RESULTS ====\n')
 
 for species, r in results.items():
     mae = r['total_error'] / r['images'] if r['images'] > 0 else 0
+    precision, recall, f1 = calculate_precision_recall_f1_score(r["tp"], r["fp"], r["fn"])
 
     print(f'{species}:')
     print(f'  Images: {r["images"]}')
     print(f'  MAE: {mae:.2f}')
     print(f'  TP: {r["tp"]} | FP: {r["fp"]} | FN: {r["fn"]}')
+    print(f'  Precision: {precision:.2f}')
+    print(f'  Recall: {recall:.2f}')
+    print(f'  F1-score: {f1:.2f}')
     print('-' * 30)
+
+# Overall results
+overall_tp = sum(r['tp'] for r in results.values())
+overall_fp = sum(r['fp'] for r in results.values())
+overall_fn = sum(r['fn'] for r in results.values())
+
+op, or_, of1 = calculate_precision_recall_f1_score(
+    overall_tp, overall_fp, overall_fn
+)
+print('\n==== Overall results ====\n')
+print(f'  TP: {overall_tp} | FP: {overall_fp} | FN: {overall_fn}')
+print(f'  Precision: {op:.2f}')
+print(f'  Recall: {or_:.2f}')
+print(f'  F1: {of1:.2f}')
