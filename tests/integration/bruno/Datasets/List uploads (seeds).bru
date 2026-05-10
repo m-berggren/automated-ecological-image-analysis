@@ -1,0 +1,27 @@
+meta {
+  name: List uploads (seeds)
+  type: http
+  seq: 4
+}
+
+get {
+  url: {{baseUrl}}/api/datasets/uploads/?module=seeds
+  body: none
+  auth: bearer
+}
+
+auth:bearer {
+  token: {{accessToken}}
+}
+
+tests {
+  test("status is 200", function() {
+    expect(res.status).to.equal(200);
+  });
+  test("only seeds uploads returned", function() {
+    expect(res.body).to.be.an("array");
+    res.body.forEach(function(u) {
+      expect(u.module).to.equal("seeds");
+    });
+  });
+}
