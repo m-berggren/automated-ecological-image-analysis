@@ -31,16 +31,29 @@ class ExclusionReason(models.TextChoices):
     OTHER = 'other', 'Other'
 
 
+class UploadStatus(models.TextChoices):
+    """An upload starts as DRAFT while files are being added; the first
+    inference run that consumes it flips it to READY."""
+
+    DRAFT = 'draft', 'Draft'
+    READY = 'ready', 'Ready'
+
+
 class Upload(models.Model):
     """A batch of images uploaded together for a single inference run.
 
-    The frontend creates one Upload row, then posts each file separately
-    to /api/datasets/images/ with `upload=<id>` in the form data so each
-    ImageAsset is linked back to its parent batch.
+    The frontend creates one Upload row (status=DRAFT), then posts each
+    file separately to /api/datasets/images/ with `upload=<id>` in the
+    form data. Status flips to READY when an InferenceRun consumes it.
     """
 
     name = models.CharField(max_length=200, blank=True)
     module = models.CharField(max_length=20, choices=Module.choices)
+    status = models.CharField(
+        max_length=10,
+        choices=UploadStatus.choices,
+        default=UploadStatus.DRAFT,
+    )
 
     uploaded_by = models.ForeignKey(
         settings.AUTH_USER_MODEL,
@@ -54,6 +67,7 @@ class Upload(models.Model):
     class Meta:
         indexes = [
             models.Index(fields=['module', '-created_at']),
+            models.Index(fields=['module', 'status']),
         ]
 
     def __str__(self) -> str:
