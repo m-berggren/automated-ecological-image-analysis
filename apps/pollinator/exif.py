@@ -85,6 +85,7 @@ def _derive_weather(exif_raw: dict, exif: dict) -> str:
 def _compute_laplacian_variance(img: Image.Image) -> float:
     gray = np.array(img.convert('L'), dtype=np.float64)
     from scipy.ndimage import laplace
+
     lap = laplace(gray)
     return float(lap.var())
 
@@ -92,6 +93,7 @@ def _compute_laplacian_variance(img: Image.Image) -> float:
 def _compute_laplacian_variance_cv2(img: Image.Image) -> float:
     try:
         import cv2
+
         gray = np.array(img.convert('L'))
         return float(cv2.Laplacian(gray, cv2.CV_64F).var())
     except ImportError:

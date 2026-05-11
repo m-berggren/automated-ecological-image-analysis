@@ -11,7 +11,7 @@ from rest_framework.views import APIView
 from apps.datasets.models import UploadStatus
 from apps.pollinator.services import spawn_inference_pipeline
 
-from .models import Detection, InferenceRun, ModelVersion
+from .models import Detection, InferenceRun, ModelVersion, TrainingJob
 from .serializers import (
     REVIEWER_STATUS_MAP,
     DetectionBulkReviewSerializer,
@@ -19,6 +19,8 @@ from .serializers import (
     InferenceRunDetailSerializer,
     InferenceRunListSerializer,
     ModelVersionSerializer,
+    TrainingJobDetailSerializer,
+    TrainingJobListSerializer,
 )
 
 logger = logging.getLogger(__name__)
@@ -150,12 +152,99 @@ class DetectionBulkView(APIView):
                 else ''
             ),
         }
-        if 'flagged_for_training' in write.validated_data:
-            update_data['flagged_for_training'] = write.validated_data[
-                'flagged_for_training'
-            ]
         count = Detection.objects.filter(pk__in=ids).update(**update_data)
         return Response({'updated': count})
+
+
+class TrainingJobListView(generics.ListAPIView):
+    """GET /api/analysis/training/?module=<module>&status=<status>
+
+    Module-agnostic. Pollinator creates jobs via POST /api/pollinator/training/;
+    seeds will get its own create endpoint. Listing is shared."""
+
+    serializer_class = TrainingJobListSerializer
+    pagination_class = None
+
+    def get_queryset(self) -> QuerySet[TrainingJob]:
+        qs = TrainingJob.objects.all().order_by('-started_at')
+        params = self.request.query_params
+        module = params.get('module')
+        if module:
+            qs = qs.filter(module=module)
+        job_status = params.get('status')
+        if job_status:
+            qs = qs.filter(status=job_status)
+        return qs
+
+
+class TrainingJobDetailView(generics.RetrieveAPIView):
+    """GET /api/analysis/training/<id>/
+
+    Polled by the training page while a job runs. Shape is module-agnostic;
+    per-module knobs live in `config`."""
+
+    queryset = TrainingJob.objects.all()
+    serializer_class = TrainingJobDetailSerializer
+    lookup_field = 'pk'
+
+
+def _cancel_job_row(job, detail_serializer) -> Response:
+    """Shared cancel handler for InferenceRun and TrainingJob. Flips status
+    to CANCELLED only when the job is still in-flight; refuses otherwise."""
+    from apps.analysis.models import JobStatus
+
+    if job.status not in (JobStatus.PENDING, JobStatus.RUNNING):
+        return Response(
+            {
+                'error': (
+                    f'Cannot cancel a job in status={job.status}. '
+                    f'Cancellation only applies to pending or running jobs.'
+                ),
+            },
+            status=status.HTTP_409_CONFLICT,
+        )
+    job.status = JobStatus.CANCELLED
+    job.error_message = 'Cancelled by user'
+    if hasattr(job, 'completed_at'):
+        job.completed_at = timezone.now()
+    job.save(update_fields=['status', 'error_message', 'completed_at'])
+    return Response(detail_serializer(job).data)
+
+
+class InferenceRunCancelView(APIView):
+    """POST /api/analysis/runs/<id>/cancel/
+
+    Flips status → cancelled. The running worker's next progress tick
+    re-reads the row, sees the cancelled status, and raises RunCancelled
+    (which propagates cleanly through the ML pipeline). The worker then
+    skips persisting Detection rows for this run."""
+
+    def post(self, request: Request, pk: int) -> Response:
+        try:
+            run = InferenceRun.objects.get(pk=pk)
+        except InferenceRun.DoesNotExist:
+            return Response(
+                {'error': 'Run not found'},
+                status=status.HTTP_404_NOT_FOUND,
+            )
+        return _cancel_job_row(run, InferenceRunDetailSerializer)
+
+
+class TrainingJobCancelView(APIView):
+    """POST /api/analysis/training/<id>/cancel/
+
+    Same mechanism as InferenceRunCancelView. On the next progress tick
+    the worker raises RunCancelled and skips persisting a new ModelVersion."""
+
+    def post(self, request: Request, pk: int) -> Response:
+        try:
+            job = TrainingJob.objects.get(pk=pk)
+        except TrainingJob.DoesNotExist:
+            return Response(
+                {'error': 'Training job not found'},
+                status=status.HTTP_404_NOT_FOUND,
+            )
+        return _cancel_job_row(job, TrainingJobDetailSerializer)
 
 
 class ModelVersionSetActiveView(APIView):

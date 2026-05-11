@@ -15,10 +15,16 @@ from .serializers import (
 
 
 _DEFAULT_META: dict = {
-    'width': None, 'height': None,
-    'captured_at': None, 'flash_fired': None, 'exif': {},
-    'weather': 'unknown', 'laplacian_var': None,
-    'shutter_speed': '', 'excluded': False, 'exclusion_reason': '',
+    'width': None,
+    'height': None,
+    'captured_at': None,
+    'flash_fired': None,
+    'exif': {},
+    'weather': 'unknown',
+    'laplacian_var': None,
+    'shutter_speed': '',
+    'excluded': False,
+    'exclusion_reason': '',
 }
 
 
@@ -28,6 +34,7 @@ def _extract_metadata(module: str, file) -> dict:
     until they grow their own extractor."""
     if module == Module.POLLINATORS:
         from apps.pollinator.exif import extract_image_metadata
+
         try:
             return extract_image_metadata(file)
         except Exception:

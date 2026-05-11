@@ -27,17 +27,53 @@ class ModelVersion(models.Model):
     module = models.CharField(max_length=20, choices=Module.choices)
     kind = models.CharField(max_length=20, choices=ModelKind.choices, blank=True)
     version_name = models.CharField(max_length=100, unique=True)
-    model_file_path = models.CharField(max_length=255)
+    model_file_path = models.CharField(
+        max_length=512,
+        help_text="Local path, 'file://...', 's3://bucket/key', or 'gs://bucket/key'.",
+    )
+
+    description = models.TextField(
+        blank=True,
+        help_text='Operator notes: dataset, training environment, anything '
+        'worth remembering about this version.',
+    )
 
     metrics = models.JSONField(
         default=dict,
         blank=True,
-        help_text='e.g. {precision, recall, f1, mae, rmse, confusion_matrix}',
+        help_text='Final metrics from the training run (val/test scores, '
+        'per-class breakdowns, confusion-matrix counts).',
     )
     parameters = models.JSONField(
         default=dict,
         blank=True,
-        help_text='Hyperparameters and training config (model-specific shape)',
+        help_text='Hyperparameters and training config (model-specific shape).',
+    )
+
+    source_model_version = models.ForeignKey(
+        'self',
+        on_delete=models.SET_NULL,
+        null=True,
+        blank=True,
+        related_name='derived_versions',
+        help_text='If this model was trained as an incremental fine-tune, the '
+        'ModelVersion whose weights were the starting point.',
+    )
+    sample_count = models.PositiveIntegerField(
+        null=True,
+        blank=True,
+        help_text='Number of training samples (crops or labeled images) used.',
+    )
+    training_duration_seconds = models.PositiveIntegerField(
+        null=True,
+        blank=True,
+        help_text='Wall-clock training duration in seconds.',
+    )
+    trained_at = models.DateTimeField(
+        null=True,
+        blank=True,
+        help_text='When the underlying weights were trained. Distinct from '
+        'created_at, which is when this row was registered.',
     )
 
     is_active = models.BooleanField(default=False)
@@ -70,23 +106,85 @@ class ModelVersion(models.Model):
         return f'{self.module}:{self.version_name}'
 
 
+class ModelArtifactKind(models.TextChoices):
+    """Type of supplementary file attached to a ModelVersion."""
+
+    TRAINING_CURVE = 'training_curve', 'Training curve'
+    CONFUSION_MATRIX = 'confusion_matrix', 'Confusion matrix'
+    PR_CURVE = 'pr_curve', 'Precision-Recall curve'
+    F1_CURVE = 'f1_curve', 'F1-Confidence curve'
+    PRECISION_CURVE = 'precision_curve', 'Precision-Confidence curve'
+    RECALL_CURVE = 'recall_curve', 'Recall-Confidence curve'
+    SAMPLE_PREDICTIONS = 'sample_predictions', 'Sample predictions'
+    LABELS = 'labels', 'Label distribution'
+    RESULTS_CSV = 'results_csv', 'Per-epoch metrics CSV'
+    OTHER = 'other', 'Other'
+
+
+def model_artifact_path(instance: 'ModelArtifact', filename: str) -> str:
+    return f'model_artifacts/{instance.model_version.module}/{instance.model_version.version_name}/{filename}'
+
+
+class ModelArtifact(models.Model):
+    """Supplementary file attached to a ModelVersion: training-loss curve,
+    confusion-matrix plot, sample prediction images, per-epoch CSV, etc.
+
+    One ModelVersion can have many artifacts. Files are served from
+    MEDIA_ROOT (or whichever backend DEFAULT_FILE_STORAGE points at).
+    """
+
+    model_version = models.ForeignKey(
+        ModelVersion,
+        on_delete=models.CASCADE,
+        related_name='artifacts',
+    )
+    kind = models.CharField(
+        max_length=30,
+        choices=ModelArtifactKind.choices,
+        default=ModelArtifactKind.OTHER,
+    )
+    file = models.FileField(upload_to=model_artifact_path)
+    caption = models.CharField(max_length=200, blank=True)
+    created_at = models.DateTimeField(auto_now_add=True)
+
+    class Meta:
+        ordering = ['model_version', 'kind', 'created_at']
+        indexes = [
+            models.Index(fields=['model_version', 'kind']),
+        ]
+
+    def __str__(self) -> str:
+        return f'{self.model_version.version_name} | {self.kind}'
+
+
 class JobStatus(models.TextChoices):
     PENDING = 'pending', 'Pending'
     RUNNING = 'running', 'Running'
     COMPLETED = 'completed', 'Completed'
     FAILED = 'failed', 'Failed'
+    CANCELLED = 'cancelled', 'Cancelled'
 
 
 class TrainingJob(models.Model):
+    """A single training job for one module/track.
+
+    Module-agnostic shape: per-module hyperparameters live in `config`
+    JSON (e.g. pollinator's track/from_model_version_id/epochs); progress
+    columns mirror InferenceRun so the polling UI pattern transfers.
+    """
+
     module = models.CharField(max_length=20, choices=Module.choices)
+    name = models.CharField(max_length=200, blank=True)
     status = models.CharField(
         max_length=20,
         choices=JobStatus.choices,
         default=JobStatus.PENDING,
     )
 
-    started_at = models.DateTimeField(auto_now_add=True)
-    completed_at = models.DateTimeField(null=True, blank=True)
+    # Frozen config posted by the frontend (track, from_model_version_id,
+    # epochs, splits, class_filter, ...). Stored as-is for reproducibility
+    # and so the worker reads the same dict the user submitted.
+    config = models.JSONField(default=dict, blank=True)
 
     resulting_model = models.OneToOneField(
         ModelVersion,
@@ -95,11 +193,31 @@ class TrainingJob(models.Model):
         blank=True,
         related_name='training_job',
     )
-    training_images = models.ManyToManyField(
-        'datasets.ImageAsset',
+    # Set on successful completion to the exact Detection rows that fed
+    # this run. Future runs of the same track exclude rows that are already
+    # in any completed job's M2M — that's the consumption guard against
+    # retraining on the same data twice.
+    training_detections = models.ManyToManyField(
+        'analysis.Detection',
         related_name='training_jobs',
         blank=True,
     )
+
+    # Progress fields. All maintained by the worker.
+    image_count = models.IntegerField(default=0)
+    current_epoch = models.IntegerField(default=0)
+    total_epochs = models.IntegerField(default=0)
+    metrics = models.JSONField(
+        default=dict,
+        blank=True,
+        help_text='Live metrics for the running job (loss, val_f1/macro_f1, ...)',
+    )
+    activity_log = models.JSONField(
+        default=list,
+        blank=True,
+        help_text='List of {time, message, level} entries appended by the worker',
+    )
+    error_message = models.TextField(blank=True)
 
     initiated_by = models.ForeignKey(
         settings.AUTH_USER_MODEL,
@@ -108,7 +226,14 @@ class TrainingJob(models.Model):
         blank=True,
         related_name='initiated_training_jobs',
     )
-    progress_log = models.TextField(blank=True)
+    started_at = models.DateTimeField(auto_now_add=True)
+    completed_at = models.DateTimeField(null=True, blank=True)
+
+    class Meta:
+        indexes = [
+            models.Index(fields=['module', '-started_at']),
+            models.Index(fields=['module', 'status']),
+        ]
 
     def __str__(self) -> str:
         return f'TrainingJob<{self.module} #{self.pk} {self.status}>'
@@ -241,7 +366,6 @@ class Detection(models.Model):
         blank=True,
         help_text='Class assigned by a reviewer when correcting the prediction',
     )
-    flagged_for_training = models.BooleanField(default=False)
 
     reviewed_by = models.ForeignKey(
         settings.AUTH_USER_MODEL,
@@ -256,7 +380,6 @@ class Detection(models.Model):
         indexes = [
             models.Index(fields=['inference_run', 'status']),
             models.Index(fields=['image', 'predicted_class']),
-            models.Index(fields=['flagged_for_training']),
             models.Index(fields=['area']),
         ]
 

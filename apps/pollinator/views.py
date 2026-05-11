@@ -1,20 +1,36 @@
+from collections import Counter
+
+from django.db import transaction
 from django.db.models import QuerySet
-from rest_framework import generics, serializers
+from rest_framework import generics, serializers, status
 from rest_framework.request import Request
 from rest_framework.response import Response
+from rest_framework.views import APIView
 
-from apps.analysis.models import Detection
-from apps.analysis.serializers import DetectionReviewSerializer
+from apps.analysis.models import Detection, JobStatus, TrainingJob
+from apps.analysis.serializers import (
+    DetectionReviewSerializer,
+    TrainingJobDetailSerializer,
+)
 from apps.datasets.models import Module
 
-from .serializers import PollinatorDetectionSerializer
-
-
-_POLLINATOR_DETECTION_QS = (
-    Detection.objects
-    .filter(inference_run__module=Module.POLLINATORS)
-    .select_related('image', 'pollinator_detection')
+from .serializers import (
+    PollinatorDetectionSerializer,
+    PollinatorTrainingCreateSerializer,
 )
+from .training import (
+    POLLINATOR_CLASSES,
+    _collect_binary_pool,
+    _collect_detector_pool,
+    _collect_group_pool,
+    _consumed_detection_ids,
+    spawn_training_job,
+)
+
+
+_POLLINATOR_DETECTION_QS = Detection.objects.filter(
+    inference_run__module=Module.POLLINATORS
+).select_related('image', 'pollinator_detection')
 
 
 class PollinatorDetectionListView(generics.ListAPIView):
@@ -62,4 +78,130 @@ class PollinatorDetectionDetailView(generics.RetrieveUpdateAPIView):
         write.save()
         return Response(
             PollinatorDetectionSerializer(instance, context={'request': request}).data,
+        )
+
+
+class PollinatorTrainingCreateView(generics.CreateAPIView):
+    """POST /api/pollinator/training/
+
+    Body: {name?, config: {track, from_model_version_id, epochs?, train_split?,
+    val_split?, test_split?, stratified?, class_filter?, img_size?}}
+
+    Eligibility is computed server-side from Detection.status (per-track rules
+    in apps/pollinator/training.py) minus already-consumed detections from
+    completed jobs for the same track. The UI can preview the pool size via
+    GET /api/pollinator/training/pool/?track=<track>.
+
+    Creates a TrainingJob (module='pollinators', status='pending'), spawns a
+    daemon thread to run the training, returns the job in detail shape so the
+    UI can immediately start polling.
+    """
+
+    serializer_class = PollinatorTrainingCreateSerializer
+
+    def create(self, request: Request, *args, **kwargs) -> Response:
+        # Refuse if another pollinator training job is already in flight.
+        # Concurrent training would contend for the same GPU/CPU and
+        # produce noisy weights; one at a time.
+        busy = TrainingJob.objects.filter(
+            module=Module.POLLINATORS,
+            status__in=(JobStatus.PENDING, JobStatus.RUNNING),
+        ).first()
+        if busy is not None:
+            return Response(
+                {
+                    'error': (
+                        f'Another pollinator training job is already running '
+                        f'(#{busy.pk}, status={busy.status}). Wait for it to '
+                        f'finish or cancel it before starting a new one.'
+                    ),
+                    'busy_job_id': busy.pk,
+                },
+                status=status.HTTP_409_CONFLICT,
+            )
+
+        write = self.get_serializer(data=request.data)
+        write.is_valid(raise_exception=True)
+
+        job = TrainingJob.objects.create(
+            module=Module.POLLINATORS,
+            name=write.validated_data.get('name', ''),
+            config=write.validated_data['config'],
+            initiated_by=request.user,
+        )
+        # Defer the worker spawn until commit so it sees the row.
+        transaction.on_commit(lambda: spawn_training_job(job))
+
+        return Response(
+            TrainingJobDetailSerializer(job).data,
+            status=status.HTTP_201_CREATED,
+        )
+
+
+class PollinatorTrainingPoolView(APIView):
+    """GET /api/pollinator/training/pool/?track=<track>
+
+    Returns the per-track count of detections (or images, for the detector)
+    that are eligible to train on right now: status != pending and not yet
+    consumed by a successful previous training run for the same track.
+
+    Response shape:
+        {
+          "track": "detector",
+          "available": 42,        # unit: images for detector, detections for classifiers
+          "consumed": 12,         # detections already used in past completed jobs
+          "by_class": {           # absent for binary (only insect/background)
+            "bumblebee": 5, "fly": 18, "butterfly": 4, "other": 15
+          }
+        }
+    """
+
+    def get(self, request: Request) -> Response:
+        track = request.query_params.get('track')
+        if track not in ('detector', 'binary', 'group'):
+            return Response(
+                {'error': "track must be one of 'detector', 'binary', 'group'"},
+                status=status.HTTP_400_BAD_REQUEST,
+            )
+
+        consumed = len(_consumed_detection_ids(track))
+
+        if track == 'detector':
+            eligible = _collect_detector_pool(POLLINATOR_CLASSES)
+            by_class = Counter(
+                (d.reviewer_label or d.predicted_class) for d in eligible
+            )
+            return Response(
+                {
+                    'track': track,
+                    'available': len({d.image_id for d in eligible}),
+                    'consumed': consumed,
+                    'by_class': dict(by_class),
+                }
+            )
+
+        if track == 'binary':
+            accepted, rejected = _collect_binary_pool()
+            return Response(
+                {
+                    'track': track,
+                    'available': len(accepted) + len(rejected),
+                    'consumed': consumed,
+                    'by_class': {
+                        'insect': len(accepted),
+                        'background': len(rejected),
+                    },
+                }
+            )
+
+        # group
+        eligible = _collect_group_pool(POLLINATOR_CLASSES)
+        by_class = Counter((d.reviewer_label or d.predicted_class) for d in eligible)
+        return Response(
+            {
+                'track': track,
+                'available': len(eligible),
+                'consumed': consumed,
+                'by_class': dict(by_class),
+            }
         )
