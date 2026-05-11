@@ -1,0 +1,27 @@
+meta {
+  name: Get training detail
+  type: http
+  seq: 9
+}
+
+get {
+  url: {{baseUrl}}/api/analysis/training/{{trainingJobId}}/
+  body: none
+  auth: bearer
+}
+
+auth:bearer {
+  token: {{accessToken}}
+}
+
+tests {
+  test("status is 200", function() {
+    expect(res.status).to.equal(200);
+  });
+  test("returns training job shape", function() {
+    expect(res.body.id).to.be.a("number");
+    expect(res.body.config).to.be.an("object");
+    expect(res.body).to.have.property("current_epoch");
+    expect(res.body).to.have.property("total_epochs");
+  });
+}

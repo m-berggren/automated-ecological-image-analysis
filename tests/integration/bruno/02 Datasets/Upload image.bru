@@ -15,7 +15,7 @@ auth:bearer {
 }
 
 body:multipart-form {
-  file: @file(/absolute/path/to/test_image.jpg)
+  file: @file(fixtures/test_image.jpg)
   module: pollinators
   purpose: inference
   upload: {{uploadId}}
