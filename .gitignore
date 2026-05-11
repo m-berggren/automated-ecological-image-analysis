@@ -25,7 +25,12 @@ sahi_results/
 
 # Django
 db.sqlite3
+*.sqlite3
 staticfiles/
+
+# Bruno throwaway-run artifacts (rebuilt by scripts/bruno.sh each run)
+media_bruno/
+tests/integration/bruno/fixtures/
 
 # Vue build output
 static/vue/

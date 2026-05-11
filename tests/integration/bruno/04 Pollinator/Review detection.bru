@@ -1,0 +1,30 @@
+meta {
+  name: Review detection
+  type: http
+  seq: 3
+}
+
+patch {
+  url: {{baseUrl}}/api/pollinator/detections/{{detectionId}}/
+  body: json
+  auth: bearer
+}
+
+auth:bearer {
+  token: {{accessToken}}
+}
+
+body:json {
+  {
+    "reviewer_status": "confirmed"
+  }
+}
+
+tests {
+  test("status is 200", function() {
+    expect(res.status).to.equal(200);
+  });
+  test("reviewer_status is confirmed", function() {
+    expect(res.body.reviewer_status).to.equal("confirmed");
+  });
+}

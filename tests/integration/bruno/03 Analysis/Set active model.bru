@@ -1,0 +1,24 @@
+meta {
+  name: Set active model
+  type: http
+  seq: 8
+}
+
+post {
+  url: {{baseUrl}}/api/analysis/models/{{yoloModelId}}/set-active/
+  body: none
+  auth: bearer
+}
+
+auth:bearer {
+  token: {{accessToken}}
+}
+
+tests {
+  test("status is 200", function() {
+    expect(res.status).to.equal(200);
+  });
+  test("model is now active", function() {
+    expect(res.body.is_active).to.equal(true);
+  });
+}

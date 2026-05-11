@@ -1,0 +1,26 @@
+meta {
+  name: Cancel run
+  type: http
+  seq: 10
+}
+
+post {
+  url: {{baseUrl}}/api/analysis/runs/{{runId}}/cancel/
+  body: none
+  auth: bearer
+}
+
+auth:bearer {
+  token: {{accessToken}}
+}
+
+tests {
+  test("status is 200 (cancelled) or 409 (already terminal)", function() {
+    expect([200, 409]).to.include(res.status);
+  });
+  test("on 200, status flipped to cancelled", function() {
+    if (res.status === 200) {
+      expect(res.body.status).to.equal("cancelled");
+    }
+  });
+}
