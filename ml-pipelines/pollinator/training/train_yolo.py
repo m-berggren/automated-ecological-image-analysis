@@ -273,6 +273,7 @@ def train_yolo(
     else:
         logger.info('Skipping stage 1 (epochs_stage1=0). Stage 2 resumes from input.')
         stage1_best = Path(model_size)
+        s1_map50 = None
 
     # ── Stage 2: full fine-tune ───────────────────────────────────────────
     logger.info(f'\n{"=" * 60}')
