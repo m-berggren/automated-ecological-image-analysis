@@ -137,7 +137,6 @@ const modules: ModuleItem[] = [
       { to: '/seeds/runs', label: 'Runs' },
       { to: '/seeds/training', label: 'Training' },
       { to: '/seeds/models', label: 'Models' },
-      { to: '/seeds/export', label: 'Export' },
     ],
   },
   {

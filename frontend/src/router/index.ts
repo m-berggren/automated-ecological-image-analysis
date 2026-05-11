@@ -39,7 +39,7 @@ const router = createRouter({
         { path: 'seeds/runs/:id/review', component: SeedsReview },
         { path: 'seeds/training', component: SeedsTraining },
         { path: 'seeds/models', component: SeedsModels },
-        { path: 'seeds/export', component: SeedsExport },
+        { path: 'seeds/runs/:id/export', component: SeedsExport },
         { path: 'pollinators', redirect: '/pollinators/upload' },
         { path: 'pollinators/upload', component: PollinatorsUpload },
         { path: 'pollinators/runs', component: PollinatorsRuns },

@@ -12,7 +12,10 @@
             "is_active": true,
             "metrics": { "mae": 3.2, "precision": 0.91, "recall": 0.85, "f1": 0.88 },
             "samples": 420,
-            "trained_at_offset_seconds": -86400
+            "trained_at_offset_seconds": -86400,
+            "training_duration_seconds": 3240,
+            "parameters": { "epochs": 90, "imgsz": 768, "batch": 2, "confidence": 0.25 },
+            "charts": null
           }
         ],
         "data_pool": { "total_samples": 420, "new_since_active": 38 },
@@ -53,7 +56,10 @@
             "is_active": true,
             "metrics": { "mae": 4.7, "precision": 0.83, "recall": 0.79, "f1": 0.81 },
             "samples": 210,
-            "trained_at_offset_seconds": -172800
+            "trained_at_offset_seconds": -172800,
+            "training_duration_seconds": 1980,
+            "parameters": { "epochs": 90, "imgsz": 768, "batch": 2, "confidence": 0.25 },
+            "charts": null
           }
         ],
         "data_pool": { "total_samples": 210, "new_since_active": 12 },
