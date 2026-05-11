@@ -26,6 +26,7 @@ from django.conf import settings
 from django.db import close_old_connections, transaction
 from django.utils import timezone
 
+from apps.analysis.cancellation import RunCancelled
 from apps.analysis.models import (
     Detection,
     DetectionStatus,
@@ -33,6 +34,7 @@ from apps.analysis.models import (
     JobStatus,
     ModelVersion,
 )
+from apps.analysis.storage import resolve_model_path
 
 from .models import PollinatorDetection
 
@@ -51,6 +53,18 @@ def _make_progress_callback(run_id: int):
     """
 
     def cb(processed: int, total: int, message: str = '', level: str = 'info') -> None:
+        # Cancellation check: re-read the row's status. If externally flipped
+        # to CANCELLED, raise — propagates through the ML pipeline (which uses
+        # `except Exception:`) and lands at the worker's try/except for
+        # cooperative cancellation.
+        current = (
+            InferenceRun.objects.filter(pk=run_id)
+            .values_list('status', flat=True)
+            .first()
+        )
+        if current == JobStatus.CANCELLED:
+            raise RunCancelled(f'Inference run {run_id} cancelled by user')
+
         try:
             updates: dict = {'processed_image_count': processed}
             if total:
@@ -71,6 +85,8 @@ def _make_progress_callback(run_id: int):
                 run.save(update_fields=list(updates.keys()) + ['activity_log'])
             else:
                 InferenceRun.objects.filter(pk=run_id).update(**updates)
+        except RunCancelled:
+            raise
         except Exception:
             logger.exception(f'Progress callback failed for run {run_id}')
 
@@ -115,8 +131,9 @@ def run_inference_pipeline(run: InferenceRun) -> None:
         binary_mv = ModelVersion.objects.get(pk=binary_id)
         group_mv = ModelVersion.objects.get(pk=group_id)
 
-        binary_path = binary_mv.model_file_path
-        group_path = group_mv.model_file_path
+        yolo_path = resolve_model_path(yolo_mv.model_file_path)
+        binary_path = resolve_model_path(binary_mv.model_file_path)
+        group_path = resolve_model_path(group_mv.model_file_path)
 
         prep_config: dict = {}
         if 'preprocessing' in config and isinstance(config['preprocessing'], dict):
@@ -148,7 +165,7 @@ def run_inference_pipeline(run: InferenceRun) -> None:
             result = _run_pipeline(
                 image_dir=str(tmp),
                 output_dir=str(output_dir),
-                yolo_model=yolo_mv.model_file_path,
+                yolo_model=str(yolo_path),
                 binary_model=str(binary_path),
                 group_model=str(group_path),
                 config=prep_config,
@@ -233,6 +250,15 @@ def run_inference_pipeline(run: InferenceRun) -> None:
         )
         logger.info(f'Inference run {run.pk} completed: {len(det_objs)} detections')
 
+    except RunCancelled:
+        # Status is already CANCELLED (set by the cancel endpoint). No
+        # Detection rows have been persisted (bulk_create is inside the
+        # transaction.atomic block below the try). Just stamp the
+        # finalisation fields and exit without re-raising — this is a
+        # clean user-initiated stop, not a failure.
+        logger.info(f'Inference run {run.pk} cancelled by user')
+        run.completed_at = timezone.now()
+        run.save(update_fields=['completed_at'])
     except Exception as e:
         logger.exception(f'Inference run {run.pk} failed')
         run.status = JobStatus.FAILED

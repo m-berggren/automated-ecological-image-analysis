@@ -5,7 +5,13 @@ from rest_framework import serializers
 
 from apps.datasets.models import Upload
 
-from .models import Detection, DetectionStatus, InferenceRun, ModelVersion  # noqa: F401
+from .models import (  # noqa: F401
+    Detection,
+    DetectionStatus,
+    InferenceRun,
+    ModelVersion,
+    TrainingJob,
+)
 
 
 REVIEWER_STATUS_MAP = {
@@ -187,7 +193,6 @@ class DetectionReviewSerializer(serializers.Serializer):
         allow_blank=True,
         allow_null=True,
     )
-    flagged_for_training = serializers.BooleanField(required=False)
 
     def update(self, instance: Detection, validated_data: dict) -> Detection:
         rs = validated_data['reviewer_status']
@@ -196,13 +201,11 @@ class DetectionReviewSerializer(serializers.Serializer):
             instance.reviewer_label = validated_data.get('reviewer_label') or ''
         else:
             instance.reviewer_label = ''
-        update_fields = ['status', 'reviewer_label', 'reviewed_by', 'reviewed_at']
-        if 'flagged_for_training' in validated_data:
-            instance.flagged_for_training = validated_data['flagged_for_training']
-            update_fields.append('flagged_for_training')
         instance.reviewed_by = self.context['request'].user
         instance.reviewed_at = timezone.now()
-        instance.save(update_fields=update_fields)
+        instance.save(
+            update_fields=['status', 'reviewer_label', 'reviewed_by', 'reviewed_at'],
+        )
         return instance
 
 
@@ -222,4 +225,53 @@ class DetectionBulkReviewSerializer(serializers.Serializer):
         allow_blank=True,
         allow_null=True,
     )
-    flagged_for_training = serializers.BooleanField(required=False)
+
+
+class TrainingJobListSerializer(serializers.ModelSerializer):
+    """Read serializer for GET /api/analysis/training/?module=...
+
+    Lightweight — no activity_log. Includes config so the UI can map each
+    job back to its track (e.g. pollinator's detector/binary/group)."""
+
+    class Meta:
+        model = TrainingJob
+        fields = (
+            'id',
+            'module',
+            'name',
+            'status',
+            'config',
+            'resulting_model',
+            'image_count',
+            'current_epoch',
+            'total_epochs',
+            'started_at',
+            'completed_at',
+            'error_message',
+        )
+
+
+class TrainingJobDetailSerializer(serializers.ModelSerializer):
+    """Read serializer for GET /api/analysis/training/<id>/.
+
+    Module-agnostic shape; per-module config knobs live inside `config` JSON.
+    """
+
+    class Meta:
+        model = TrainingJob
+        fields = (
+            'id',
+            'module',
+            'name',
+            'status',
+            'config',
+            'resulting_model',
+            'image_count',
+            'current_epoch',
+            'total_epochs',
+            'metrics',
+            'activity_log',
+            'error_message',
+            'started_at',
+            'completed_at',
+        )
