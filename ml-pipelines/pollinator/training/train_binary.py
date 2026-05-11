@@ -37,7 +37,7 @@ import torchvision.transforms as T
 from torch.utils.data import DataLoader, WeightedRandomSampler
 
 from .datasets import CropDataset, letterbox
-from .models import build_efficientnet_b2, build_insectnet
+from .models import build_efficientnet_b2, build_insectnet, load_checkpoint
 from .sampling import sample_background_balanced
 
 logger = logging.getLogger(__name__)
@@ -204,6 +204,7 @@ def train_binary(
     data_dirs: list,
     model_type: str = 'efficientnet',
     insectnet_weights: Optional[str] = None,
+    resume_from: Optional[str] = None,
     output_dir: str = 'models',
     epochs: int = 20,
     batch: int = 32,
@@ -225,7 +226,12 @@ def train_binary(
                            contains insect class subdirs (bumblebee, fly,
                            butterfly, other) plus a background/ subdir.
         model_type:        "efficientnet" or "insectnet".
-        insectnet_weights: Path to InsectNet model.pth (required for insectnet).
+        insectnet_weights: Path to InsectNet model.pth. Required for
+                           model_type='insectnet' unless resume_from is set.
+        resume_from:       Path to a previous training checkpoint. When set,
+                           builds the architecture skeleton (no pretrained
+                           download) and loads the full state_dict from this
+                           file. Used for incremental retraining.
         output_dir:        Where to save checkpoints and results.
         epochs, batch, lr, val_frac, test_frac, bg_ratio, seed: training params.
         progress_callback: Optional callback invoked once per epoch.
@@ -276,12 +282,27 @@ def train_binary(
         f'\nCombined {len(data_dirs)} dataset(s). Background: {counts[0]}  Insect: {counts[1]}'
     )
 
-    if model_type == 'insectnet':
-        if not insectnet_weights:
-            raise ValueError('insectnet_weights required for insectnet model')
-        model, img_size = build_insectnet(insectnet_weights, num_classes=2)
+    if resume_from:
+        # Incremental: skeleton only, load full checkpoint from prior training.
+        if model_type == 'insectnet':
+            model, img_size = build_insectnet(None, num_classes=2)
+        else:
+            model, img_size = build_efficientnet_b2(
+                num_classes=2,
+                img_size=256,
+                pretrained=False,
+            )
+        load_checkpoint(model, resume_from, device='cpu')
     else:
-        model, img_size = build_efficientnet_b2(num_classes=2, img_size=256)
+        # Bootstrap: load pretrained backbone, randomize head.
+        if model_type == 'insectnet':
+            if not insectnet_weights:
+                raise ValueError(
+                    'insectnet_weights or resume_from required for insectnet model'
+                )
+            model, img_size = build_insectnet(insectnet_weights, num_classes=2)
+        else:
+            model, img_size = build_efficientnet_b2(num_classes=2, img_size=256)
     model = model.to(device)
 
     train_loader, val_loader, test_loader, criterion = make_loaders(

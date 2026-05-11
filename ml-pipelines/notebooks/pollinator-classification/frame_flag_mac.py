@@ -1,4 +1,3 @@
-
 #  - Play image folders and flag interesting frames on Mac using OpenCV.
 # Usage:
 #  - python frame_flag_mac.py [--list] IMAGE_ROOT --interval 1 --cache-size 24
@@ -30,8 +29,8 @@ import cv2
 import numpy as np
 
 
-IMAGE_EXTS = {".jpg", ".jpeg", ".png", ".tif", ".tiff"}
-WINDOW = "frame mark"
+IMAGE_EXTS = {'.jpg', '.jpeg', '.png', '.tif', '.tiff'}
+WINDOW = 'frame mark'
 
 LEFT_KEYS = {81, 2424832, 65361}
 RIGHT_KEYS = {83, 2555904, 65363}
@@ -40,54 +39,53 @@ RIGHT_KEYS = {83, 2555904, 65363}
 def parse_args():
     script_dir = Path(__file__).resolve().parent
     parser = argparse.ArgumentParser(
-        description="Play image folders and mark interesting frames on Mac using OpenCV."
+        description='Play image folders and mark interesting frames on Mac using OpenCV.'
     )
-    parser.add_argument("root", nargs="?", type=Path, help="Image root folder")
-    parser.add_argument("--list", action="store_true")
+    parser.add_argument('root', nargs='?', type=Path, help='Image root folder')
+    parser.add_argument('--list', action='store_true')
     parser.add_argument(
-        "--interval",
+        '--interval',
         type=float,
-        default=float(os.environ.get("INTERVAL", "2")),
-        help="Seconds between images while playing",
+        default=float(os.environ.get('INTERVAL', '2')),
+        help='Seconds between images while playing',
     )
     parser.add_argument(
-        "--flag-file",
+        '--flag-file',
         type=Path,
-        default=Path(os.environ.get("FLAG_FILE", script_dir / "flags_all.json")),
-        help="JSON file used to save marked images",
+        default=Path(os.environ.get('FLAG_FILE', script_dir / 'flags_all.json')),
+        help='JSON file used to save marked images',
     )
     parser.add_argument(
-        "--mark-key",
-        default=os.environ.get("MARK_KEY", "m"),
-        help="Single key used to mark the current image",
+        '--mark-key',
+        default=os.environ.get('MARK_KEY', 'm'),
+        help='Single key used to mark the current image',
     )
-    parser.add_argument("--max-width", type=int, default=1600)
-    parser.add_argument("--max-height", type=int, default=950)
+    parser.add_argument('--max-width', type=int, default=1600)
+    parser.add_argument('--max-height', type=int, default=950)
     parser.add_argument(
-        "--cache-size",
+        '--cache-size',
         type=int,
         default=8,
-        help="Number of decoded/resized images to keep in memory",
+        help='Number of decoded/resized images to keep in memory',
     )
     parser.add_argument(
-        "--debug-keys",
-        action="store_true",
-        help="Print OpenCV key codes",
+        '--debug-keys',
+        action='store_true',
+        help='Print OpenCV key codes',
     )
     return parser.parse_args()
 
 
 def image_files(folder):
     return sorted(
-        p for p in folder.iterdir()
-        if p.is_file() and p.suffix.lower() in IMAGE_EXTS
+        p for p in folder.iterdir() if p.is_file() and p.suffix.lower() in IMAGE_EXTS
     )
 
 
 def playable_folders(root):
     root = root.resolve()
     for dirpath, dirnames, _ in os.walk(root):
-        dirnames[:] = [d for d in dirnames if not d.startswith(".")]
+        dirnames[:] = [d for d in dirnames if not d.startswith('.')]
         folder = Path(dirpath)
         imgs = image_files(folder)
         if imgs:
@@ -98,7 +96,7 @@ def load_flags(path):
     if not path.exists():
         return {}
     try:
-        data = json.loads(path.read_text(encoding="utf-8"))
+        data = json.loads(path.read_text(encoding='utf-8'))
         return data if isinstance(data, dict) else {}
     except Exception:
         return {}
@@ -106,8 +104,8 @@ def load_flags(path):
 
 def save_flags(path, flags):
     path.parent.mkdir(parents=True, exist_ok=True)
-    tmp = path.with_suffix(path.suffix + ".tmp")
-    tmp.write_text(json.dumps(flags, indent=2, sort_keys=True), encoding="utf-8")
+    tmp = path.with_suffix(path.suffix + '.tmp')
+    tmp.write_text(json.dumps(flags, indent=2, sort_keys=True), encoding='utf-8')
     tmp.replace(path)
 
 
@@ -196,7 +194,7 @@ def render_image(
     if fitted is None:
         put_text(
             canvas,
-            "Could not load image",
+            'Could not load image',
             (40, canvas_h // 2),
             0.9,
             (80, 120, 255),
@@ -220,12 +218,12 @@ def render_image(
         -1,
     )
 
-    folder_txt = f"[{folder_idx + 1}/{folder_total}] {folder}"
-    image_txt = f"[{img_idx + 1}/{img_total}] {path.name}"
+    folder_txt = f'[{folder_idx + 1}/{folder_total}] {folder}'
+    image_txt = f'[{img_idx + 1}/{img_total}] {path.name}'
 
-    status = "PAUSED" if paused else "PLAYING"
+    status = 'PAUSED' if paused else 'PLAYING'
     if marked:
-        status += " | MARKED"
+        status += ' | MARKED'
 
     put_text(canvas, folder_txt, (12, 26), 0.50, (220, 220, 220), 1)
     put_text(canvas, image_txt, (12, 55), 0.58, (245, 245, 245), 1)
@@ -239,8 +237,8 @@ def render_image(
     )
 
     help_txt = (
-        "m=mark  u=unmark  space/h=pause  a/d=prev/next  "
-        "Left/Right=backup  n=next folder  b=prev folder  q/Esc=quit"
+        'm=mark  u=unmark  space/h=pause  a/d=prev/next  '
+        'Left/Right=backup  n=next folder  b=prev folder  q/Esc=quit'
     )
     put_text(canvas, help_txt, (12, canvas_h - 19), 0.50, (190, 190, 190), 1)
 
@@ -269,19 +267,19 @@ def show_folder(
     next_deadline = time.monotonic() + max(0.05, args.interval)
     mark_key = args.mark_key.lower()
 
-    print("=====================================")
-    print(f"Folder: {folder}")
-    print(f"Images: {len(imgs)}")
-    print(f"{args.mark_key} = mark current image")
-    print("u = unmark current image")
-    print("space / h = pause or resume slideshow")
-    print("a / d = previous or next image")
-    print("Left / Right = backup previous or next image")
-    print("n = next folder")
-    print("b = previous folder")
-    print("q / Esc = quit all")
-    print(f"Flags: {flag_file}")
-    print("=====================================")
+    print('=====================================')
+    print(f'Folder: {folder}')
+    print(f'Images: {len(imgs)}')
+    print(f'{args.mark_key} = mark current image')
+    print('u = unmark current image')
+    print('space / h = pause or resume slideshow')
+    print('a / d = previous or next image')
+    print('Left / Right = backup previous or next image')
+    print('n = next folder')
+    print('b = previous folder')
+    print('q / Esc = quit all')
+    print(f'Flags: {flag_file}')
+    print('=====================================')
 
     while True:
         if dirty:
@@ -305,21 +303,21 @@ def show_folder(
 
         key = cv2.waitKeyEx(10)
         key_low = key & 0xFF if key >= 0 else -1
-        ch = chr(key_low).lower() if 0 <= key_low <= 255 else ""
+        ch = chr(key_low).lower() if 0 <= key_low <= 255 else ''
 
         if args.debug_keys and key != -1:
-            print(f"key={key}, key_low={key_low}, ch={repr(ch)}")
+            print(f'key={key}, key_low={key_low}, ch={repr(ch)}')
 
-        if key == 27 or ch == "q":
-            return "quit", idx
+        if key == 27 or ch == 'q':
+            return 'quit', idx
 
-        if ch == "n":
-            return "next_folder", idx
+        if ch == 'n':
+            return 'next_folder', idx
 
-        if ch == "b":
-            return "prev_folder", idx
+        if ch == 'b':
+            return 'prev_folder', idx
 
-        if ch in (" ", "h"):
+        if ch in (' ', 'h'):
             paused = not paused
             next_deadline = time.monotonic() + max(0.05, args.interval)
             dirty = True
@@ -327,22 +325,22 @@ def show_folder(
         elif ch == mark_key:
             flags[str(imgs[idx].resolve())] = True
             save_flags(flag_file, flags)
-            print(f"Marked: {imgs[idx]}")
+            print(f'Marked: {imgs[idx]}')
             dirty = True
 
-        elif ch == "u":
+        elif ch == 'u':
             removed = flags.pop(str(imgs[idx].resolve()), None)
             save_flags(flag_file, flags)
             if removed is not None:
-                print(f"Unmarked: {imgs[idx]}")
+                print(f'Unmarked: {imgs[idx]}')
             dirty = True
 
-        elif ch == "a" or key in LEFT_KEYS:
+        elif ch == 'a' or key in LEFT_KEYS:
             idx = (idx - 1) % len(imgs)
             next_deadline = time.monotonic() + max(0.05, args.interval)
             dirty = True
 
-        elif ch == "d" or key in RIGHT_KEYS:
+        elif ch == 'd' or key in RIGHT_KEYS:
             idx = (idx + 1) % len(imgs)
             next_deadline = time.monotonic() + max(0.05, args.interval)
             dirty = True
@@ -357,27 +355,27 @@ def main():
     args = parse_args()
 
     if args.root is None:
-        print("Usage: python slide_mark.py [--list] IMAGE_ROOT", file=sys.stderr)
+        print('Usage: python slide_mark.py [--list] IMAGE_ROOT', file=sys.stderr)
         return 1
 
     if not args.root.is_dir():
-        print(f"Image root does not exist: {args.root}", file=sys.stderr)
+        print(f'Image root does not exist: {args.root}', file=sys.stderr)
         return 1
 
     if len(args.mark_key) != 1:
-        print("--mark-key must be a single character", file=sys.stderr)
+        print('--mark-key must be a single character', file=sys.stderr)
         return 1
 
     folders = list(playable_folders(args.root))
 
     if args.list:
         for folder, imgs in folders:
-            print(f"{len(imgs):6d}  {folder}")
-        print("List complete.")
+            print(f'{len(imgs):6d}  {folder}')
+        print('List complete.')
         return 0
 
     if not folders:
-        print(f"No image folders found under: {args.root}", file=sys.stderr)
+        print(f'No image folders found under: {args.root}', file=sys.stderr)
         return 1
 
     flag_file = args.flag_file.resolve()
@@ -407,9 +405,9 @@ def main():
 
             folder_positions[str(folder.resolve())] = last_idx
 
-            if result == "quit":
+            if result == 'quit':
                 break
-            elif result == "prev_folder":
+            elif result == 'prev_folder':
                 folder_idx = max(0, folder_idx - 1)
             else:
                 folder_idx += 1
@@ -418,9 +416,9 @@ def main():
         cv2.destroyAllWindows()
 
     save_flags(flag_file, flags)
-    print(f"Done. Mark file: {flag_file}")
+    print(f'Done. Mark file: {flag_file}')
     return 0
 
 
-if __name__ == "__main__":
+if __name__ == '__main__':
     raise SystemExit(main())

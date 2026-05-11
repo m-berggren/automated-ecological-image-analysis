@@ -230,36 +230,49 @@ def train_yolo(
     log_dataset_stats(dataset_root, classes)
 
     # ── Stage 1: frozen backbone ──────────────────────────────────────────
-    logger.info(f'\n{"=" * 60}')
-    logger.info(f'Stage 1 (frozen backbone) | epochs={epochs_stage1} lr={lr_stage1}')
-    logger.info(f'{"=" * 60}')
-
-    model = YOLO(model_size)
-    if progress_callback is not None:
-        model.add_callback(
-            'on_train_epoch_end', _make_epoch_hook('stage1', epochs_stage1, 0)
+    # epochs_stage1=0 skips stage 1 entirely (incremental retrain from input
+    # weights). Stage 2 then starts directly from model_size.
+    if epochs_stage1 > 0:
+        logger.info(f'\n{"=" * 60}')
+        logger.info(
+            f'Stage 1 (frozen backbone) | epochs={epochs_stage1} lr={lr_stage1}'
         )
-    results_s1 = model.train(
-        data=str(yaml_path),
-        epochs=epochs_stage1,
-        imgsz=img_size,
-        batch=batch,
-        lr0=lr_stage1,
-        freeze=freeze_layers,
-        patience=patience_s1,
-        copy_paste=copy_paste,
-        mixup=mixup,
-        mosaic=mosaic,
-        cache='disk',
-        seed=seed,
-        project=str(output_dir),
-        name='stage1_frozen',
-        exist_ok=True,
-        verbose=True,
-    )
-    stage1_best = output_dir / 'stage1_frozen' / 'weights' / 'best.pt'
-    s1_map50 = float(results_s1.results_dict.get('metrics/mAP50(B)', 0.0))
-    logger.info(f'Stage 1 done. Best weights: {stage1_best} | mAP50={s1_map50:.3f}')
+        logger.info(f'{"=" * 60}')
+
+        model = YOLO(model_size)
+        if progress_callback is not None:
+            model.add_callback(
+                'on_train_epoch_end', _make_epoch_hook('stage1', epochs_stage1, 0)
+            )
+        results_s1 = model.train(
+            data=str(yaml_path),
+            epochs=epochs_stage1,
+            imgsz=img_size,
+            batch=batch,
+            lr0=lr_stage1,
+            # Force AdamW so ultralytics respects lr0. With the default
+            # optimizer='auto' it ignores lr0 and silently picks ~0.00125,
+            # which is far too high for stage-2 fine-tuning and prevents
+            # convergence below stage 1.
+            optimizer='AdamW',
+            freeze=freeze_layers,
+            patience=patience_s1,
+            copy_paste=copy_paste,
+            mixup=mixup,
+            mosaic=mosaic,
+            cache='disk',
+            seed=seed,
+            project=str(output_dir),
+            name='stage1_frozen',
+            exist_ok=True,
+            verbose=True,
+        )
+        stage1_best = output_dir / 'stage1_frozen' / 'weights' / 'best.pt'
+        s1_map50 = float(results_s1.results_dict.get('metrics/mAP50(B)', 0.0))
+        logger.info(f'Stage 1 done. Best weights: {stage1_best} | mAP50={s1_map50:.3f}')
+    else:
+        logger.info('Skipping stage 1 (epochs_stage1=0). Stage 2 resumes from input.')
+        stage1_best = Path(model_size)
 
     # ── Stage 2: full fine-tune ───────────────────────────────────────────
     logger.info(f'\n{"=" * 60}')
@@ -278,6 +291,8 @@ def train_yolo(
         imgsz=img_size,
         batch=batch,
         lr0=lr_stage2,
+        # See stage 1 for why optimizer='AdamW' is explicit.
+        optimizer='AdamW',
         freeze=0,
         patience=patience_s2,
         copy_paste=copy_paste,

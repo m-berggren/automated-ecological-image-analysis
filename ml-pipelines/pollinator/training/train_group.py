@@ -50,7 +50,7 @@ import torchvision.transforms as T
 from torch.utils.data import DataLoader, WeightedRandomSampler
 
 from .datasets import CropDataset, letterbox
-from .models import build_efficientnet_b2, build_insectnet
+from .models import build_efficientnet_b2, build_insectnet, load_checkpoint
 
 logger = logging.getLogger(__name__)
 
@@ -292,6 +292,7 @@ def train_group(
     web_dir: Optional[str] = None,
     model_type: str = 'insectnet',
     insectnet_weights: Optional[str] = None,
+    resume_from: Optional[str] = None,
     unfreeze_last_block: bool = True,
     output_dir: str = 'models',
     epochs_s1: int = 20,
@@ -402,16 +403,34 @@ def train_group(
     )
     logger.info(f'Test Web:     {len(web_test_idx)} (web only, generalisation)')
 
-    if model_type == 'insectnet':
-        if not insectnet_weights:
-            raise ValueError('insectnet_weights required for insectnet model')
-        model, img_size = build_insectnet(
-            insectnet_weights,
-            num_classes=len(CLASSES),
-            unfreeze_last_block=unfreeze_last_block,
-        )
+    if resume_from:
+        # Incremental: skeleton only, load full checkpoint from prior training.
+        if model_type == 'insectnet':
+            model, img_size = build_insectnet(
+                None,
+                num_classes=len(CLASSES),
+                unfreeze_last_block=unfreeze_last_block,
+            )
+        else:
+            model, img_size = build_efficientnet_b2(
+                num_classes=len(CLASSES),
+                pretrained=False,
+            )
+        load_checkpoint(model, resume_from, device='cpu')
     else:
-        model, img_size = build_efficientnet_b2(num_classes=len(CLASSES))
+        # Bootstrap: load pretrained backbone, randomize head.
+        if model_type == 'insectnet':
+            if not insectnet_weights:
+                raise ValueError(
+                    'insectnet_weights or resume_from required for insectnet model'
+                )
+            model, img_size = build_insectnet(
+                insectnet_weights,
+                num_classes=len(CLASSES),
+                unfreeze_last_block=unfreeze_last_block,
+            )
+        else:
+            model, img_size = build_efficientnet_b2(num_classes=len(CLASSES))
     model = model.to(device)
 
     val_loader = make_loader(

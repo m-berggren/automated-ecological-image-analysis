@@ -7,6 +7,7 @@ by both binary and group classifier training.
 """
 
 import logging
+from typing import Optional
 
 import torch
 import torch.nn as nn
@@ -18,43 +19,69 @@ INSECTNET_PRETRAIN_CLASSES = 2526
 INSECTNET_FC_IN = 3712
 
 
-def build_efficientnet_b2(num_classes: int, img_size: int = 224) -> tuple:
+def build_efficientnet_b2(
+    num_classes: int, img_size: int = 224, pretrained: bool = True
+) -> tuple:
     """
-    EfficientNet-B2 with an ImageNet-pretrained backbone and a fresh
-    classification head sized to num_classes. All layers trainable.
+    EfficientNet-B2 with a fresh classification head sized to num_classes.
+    All layers trainable.
+
+    pretrained=True (default): ImageNet-pretrained backbone, downloaded on
+    first use. The CLI bootstrap path.
+    pretrained=False: skeleton only, no network access. Caller is responsible
+    for loading weights via load_checkpoint() before training. Used for
+    incremental retraining from a previous best.pth.
+
     Returns (model, img_size).
     """
+    source = 'ImageNet pretrained' if pretrained else 'skeleton (no pretrained)'
     logger.info(
-        f'Building EfficientNet-B2 (ImageNet, {num_classes} classes, {img_size}px, all layers trainable)'
+        f'Building EfficientNet-B2 ({source}, {num_classes} classes, {img_size}px)'
     )
-    model = torchvision.models.efficientnet_b2(weights='IMAGENET1K_V1')
+    weights = 'IMAGENET1K_V1' if pretrained else None
+    model = torchvision.models.efficientnet_b2(weights=weights)
     in_f = model.classifier[-1].in_features
     model.classifier[-1] = nn.Linear(in_f, num_classes)
     return model, img_size
 
 
 def build_insectnet(
-    weights_path: str,
+    weights_path: Optional[str],
     num_classes: int,
     unfreeze_last_block: bool = False,
 ) -> tuple:
     """
-    InsectNet RegNet-Y-32GF with the pretrained 2526-class head replaced by
-    a fresh head sized to num_classes. By default the entire backbone is
-    frozen and only the new fc is trainable. Set unfreeze_last_block=True
-    to also train trunk_output.block4 (used for the group classifier where
-    fine-tuning helps with the small Arctic dataset).
+    InsectNet RegNet-Y-32GF with a fresh head sized to num_classes. By default
+    the entire backbone is frozen and only the new fc is trainable. Set
+    unfreeze_last_block=True to also train trunk_output.block4 (used for the
+    group classifier where fine-tuning helps with the small Arctic dataset).
+
+    weights_path=<path>: load InsectNet 2526-class pretrained backbone, then
+    swap in a fresh head. The CLI bootstrap path.
+    weights_path=None: skeleton only. Caller is responsible for loading
+    weights via load_checkpoint() before training. Used for incremental
+    retraining from a previous best.pth.
+
     Returns (model, img_size).
     """
-    logger.info(f'Building InsectNet (RegNet-Y-32GF, {num_classes} classes)')
+    source = 'InsectNet pretrained' if weights_path else 'skeleton (no pretrained)'
+    logger.info(f'Building InsectNet ({source}, {num_classes} classes)')
     model = torchvision.models.regnet_y_32gf()
-    model.fc = nn.Linear(INSECTNET_FC_IN, INSECTNET_PRETRAIN_CLASSES)
-    state = torch.load(weights_path, map_location='cpu', weights_only=False)
-    model.load_state_dict(state['model'] if 'model' in state else state, strict=True)
 
-    model.fc = nn.Linear(INSECTNET_FC_IN, num_classes)
-    nn.init.xavier_uniform_(model.fc.weight)
-    nn.init.zeros_(model.fc.bias)
+    if weights_path is not None:
+        # Bootstrap: load the 2526-class pretrained backbone, then replace
+        # the head with one sized to the target num_classes.
+        model.fc = nn.Linear(INSECTNET_FC_IN, INSECTNET_PRETRAIN_CLASSES)
+        state = torch.load(weights_path, map_location='cpu', weights_only=False)
+        model.load_state_dict(
+            state['model'] if 'model' in state else state, strict=True
+        )
+        model.fc = nn.Linear(INSECTNET_FC_IN, num_classes)
+        nn.init.xavier_uniform_(model.fc.weight)
+        nn.init.zeros_(model.fc.bias)
+    else:
+        # Skeleton: caller will overwrite with load_checkpoint(model, ...).
+        model.fc = nn.Linear(INSECTNET_FC_IN, num_classes)
 
     for name, p in model.named_parameters():
         p.requires_grad = name.startswith('fc.')
@@ -71,3 +98,20 @@ def build_insectnet(
     n_total = sum(p.numel() for p in model.parameters())
     logger.info(f'Trainable: {n_train:,} / {n_total:,} params')
     return model, 224
+
+
+def load_checkpoint(model: nn.Module, ckpt_path: str, device: str = 'cpu') -> None:
+    """Load a full state_dict from a previous training checkpoint into model.
+
+    Handles both wrapper conventions used in this repo: top-level state_dict
+    with metadata keys ({'state_dict': ..., 'epoch': ...}) and the bare
+    state_dict format from older checkpoints.
+    """
+    state = torch.load(ckpt_path, map_location=device, weights_only=False)
+    state_dict = (
+        state['state_dict']
+        if isinstance(state, dict) and 'state_dict' in state
+        else state
+    )
+    model.load_state_dict(state_dict, strict=True)
+    logger.info(f'Loaded checkpoint from {ckpt_path}')
