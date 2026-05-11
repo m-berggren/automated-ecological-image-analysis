@@ -106,7 +106,7 @@ def run_inference_pipeline(run: InferenceRun) -> None:
         run.started_at = timezone.now()
         run.save(update_fields=['status', 'started_at'])
 
-        from pollinator.inference import run_pipeline as _run_pipeline
+        from pollinator.workflows.inference import run_pipeline as _run_pipeline
 
         upload = run.upload
         if upload is None:
@@ -146,6 +146,12 @@ def run_inference_pipeline(run: InferenceRun) -> None:
         # Frontend start_at_image is 1-based; library skip_first_n is 0-based.
         skip_first = max(0, int(config.get('start_at_image', 1)) - 1)
 
+        # Tile geometry recorded on the YOLO ModelVersion when it was trained.
+        # Inference must slice at the same scale or detections degrade.
+        yolo_tile_cfg = (yolo_mv.parameters or {}).get('tile_config') or {}
+        yolo_slice_size = int(yolo_tile_cfg.get('tile_size', 640))
+        yolo_overlap = float(yolo_tile_cfg.get('overlap', 0.2))
+
         # The pipeline expects all images for one camera plot in a single dir.
         # Symlink the upload's files into a temp dir so other uploads in the
         # same module folder do not bleed into this run.
@@ -170,6 +176,8 @@ def run_inference_pipeline(run: InferenceRun) -> None:
                 group_model=str(group_path),
                 config=prep_config,
                 yolo_confidence=yolo_conf,
+                yolo_slice_size=yolo_slice_size,
+                yolo_overlap=yolo_overlap,
                 binary_threshold=binary_thr,
                 skip_first_n=skip_first,
                 progress_callback=_make_progress_callback(run.pk),

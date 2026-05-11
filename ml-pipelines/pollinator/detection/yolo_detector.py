@@ -1,6 +1,4 @@
 """
-detection/yolo_detector.py
-============================
 YOLO pollinator detector with SAHI-tiled inference.
 
 Loads a trained YOLO checkpoint and detects pollinators in full field

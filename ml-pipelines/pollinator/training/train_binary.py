@@ -1,6 +1,4 @@
 """
-training/train_binary.py
-=========================
 Train binary classifier: insect vs background.
 
 Two architectures available:
@@ -36,8 +34,8 @@ import torch.nn as nn
 import torchvision.transforms as T
 from torch.utils.data import DataLoader, WeightedRandomSampler
 
+from .backbones import build_efficientnet_b2, build_insectnet, load_checkpoint
 from .datasets import CropDataset, letterbox
-from .models import build_efficientnet_b2, build_insectnet, load_checkpoint
 from .sampling import sample_background_balanced
 
 logger = logging.getLogger(__name__)
@@ -87,7 +85,8 @@ def load_and_split(
     for lbl, idxs in by_class.items():
         idxs = list(idxs)
         rng.shuffle(idxs)
-        n_test = max(1, int(len(idxs) * test_frac))
+        # test_frac=0 yields no test split; all non-val samples go to train.
+        n_test = int(len(idxs) * test_frac) if test_frac > 0 else 0
         n_val = max(1, int(len(idxs) * val_frac))
         test_idx.extend(idxs[:n_test])
         val_idx.extend(idxs[n_test : n_test + n_val])
@@ -159,11 +158,15 @@ def make_loaders(
     val_loader = DataLoader(
         CropDataset(val_samples, val_tf), batch_size=batch, shuffle=False, num_workers=0
     )
-    test_loader = DataLoader(
-        CropDataset(test_samples, val_tf),
-        batch_size=batch,
-        shuffle=False,
-        num_workers=0,
+    test_loader = (
+        DataLoader(
+            CropDataset(test_samples, val_tf),
+            batch_size=batch,
+            shuffle=False,
+            num_workers=0,
+        )
+        if test_samples
+        else None
     )
     return train_loader, val_loader, test_loader, criterion
 
@@ -376,14 +379,19 @@ def train_binary(
 
     ckpt = torch.load(ckpt_path, map_location=device, weights_only=False)
     model.load_state_dict(ckpt['state_dict'])
-    test = eval_epoch(model, test_loader, criterion, device)
-
-    logger.info(f'\nTest set (best checkpoint epoch {ckpt["epoch"]}):')
-    logger.info(
-        f'  F1={test["f1"]:.3f}  Recall={test["recall"]:.3f}  '
-        f'Precision={test["precision"]:.3f}  Acc={test["acc"]:.3f}'
-    )
-    logger.info(f'  TP={test["tp"]}  FP={test["fp"]}  FN={test["fn"]}  TN={test["tn"]}')
+    if test_loader is not None:
+        test = eval_epoch(model, test_loader, criterion, device)
+        logger.info(f'\nTest set (best checkpoint epoch {ckpt["epoch"]}):')
+        logger.info(
+            f'  F1={test["f1"]:.3f}  Recall={test["recall"]:.3f}  '
+            f'Precision={test["precision"]:.3f}  Acc={test["acc"]:.3f}'
+        )
+        logger.info(
+            f'  TP={test["tp"]}  FP={test["fp"]}  FN={test["fn"]}  TN={test["tn"]}'
+        )
+    else:
+        logger.info('No test split configured; skipping test evaluation')
+        test = None
 
     results = {
         'model': model_type,
@@ -391,14 +399,14 @@ def train_binary(
         'img_size': img_size,
         'best_epoch': ckpt['epoch'],
         'best_val_f1': best_f1,
-        'test_f1': test['f1'],
-        'test_recall': test['recall'],
-        'test_precision': test['precision'],
-        'test_acc': test['acc'],
-        'test_tp': test['tp'],
-        'test_fp': test['fp'],
-        'test_fn': test['fn'],
-        'test_tn': test['tn'],
+        'test_f1': test['f1'] if test else None,
+        'test_recall': test['recall'] if test else None,
+        'test_precision': test['precision'] if test else None,
+        'test_acc': test['acc'] if test else None,
+        'test_tp': test['tp'] if test else None,
+        'test_fp': test['fp'] if test else None,
+        'test_fn': test['fn'] if test else None,
+        'test_tn': test['tn'] if test else None,
     }
     (out_dir / f'{model_type}_binary_results.json').write_text(
         json.dumps(results, indent=2)

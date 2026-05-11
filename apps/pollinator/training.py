@@ -15,7 +15,9 @@ import random
 import threading
 from collections import defaultdict
 from pathlib import Path
-from typing import Optional
+from typing import Callable, Optional
+
+ProgressCallback = Callable[[int, int, str, str], None]
 
 from django.conf import settings
 from django.db import close_old_connections, transaction
@@ -72,6 +74,30 @@ PER_TRACK_DEFAULTS: dict = {
 }
 
 POLLINATOR_CLASSES = ['bumblebee', 'fly', 'butterfly', 'other']
+
+
+# Tile training defaults. Source images are sliced into overlapping tiles
+# before YOLO training so small pollinators stay at native pixel scale.
+# Inference must use the same geometry; the config is persisted on the
+# resulting ModelVersion.parameters['tile_config'] and read back by
+# apps.pollinator.services.
+TILE_CONFIG_DEFAULTS: dict = {
+    'use_tiles': True,
+    'tile_size': 640,
+    'overlap': 0.2,
+    'min_area': 0.3,
+    'keep_empty_tiles': False,
+}
+
+
+def _resolve_tile_config(source: ModelVersion, config: dict) -> dict:
+    """Merge tile config: defaults < source model's recorded config < job override.
+    Incremental retrains inherit the source's geometry automatically."""
+    cfg = dict(TILE_CONFIG_DEFAULTS)
+    src_cfg = (source.parameters or {}).get('tile_config') or {}
+    cfg.update(src_cfg)
+    cfg.update((config or {}).get('tile_config') or {})
+    return cfg
 
 
 # ──────────────────────────────────────────────────────────────────────────
@@ -286,11 +312,13 @@ def _validate_config(config: dict) -> tuple[str, int, list, dict, int]:
 
     splits = {
         'train': int(config.get('train_split', 80)),
-        'val': int(config.get('val_split', 10)),
-        'test': int(config.get('test_split', 10)),
+        'val': int(config.get('val_split', 20)),
+        'test': int(config.get('test_split', 0)),
     }
     if splits['train'] + splits['val'] + splits['test'] != 100:
         raise ValueError('train_split + val_split + test_split must equal 100')
+    if splits['train'] <= 0 or splits['val'] <= 0:
+        raise ValueError('train_split and val_split must both be positive')
 
     class_filter = config.get('class_filter') or POLLINATOR_CLASSES
     if not class_filter:
@@ -399,25 +427,36 @@ def _train_detector(
     class_filter: list,
     config: dict,
     epochs: int,
-    progress_cb,
+    progress_cb: ProgressCallback,
 ) -> tuple[str, dict, dict]:
     """Run YOLO incremental fine-tune. Returns (weights_path, metrics, parameters)."""
-    from pollinator.training.train_yolo import train_yolo
+    from pollinator.workflows.training_yolo import retrain_yolo
 
     defaults = PER_TRACK_DEFAULTS['detector']
-    img_size = int(
-        config.get('img_size')
-        or (source.parameters or {}).get('img_size')
-        or defaults['img_size']
+    tile_cfg = _resolve_tile_config(source, config)
+
+    img_size = (
+        int(tile_cfg['tile_size'])
+        if tile_cfg['use_tiles']
+        else int(
+            config.get('img_size')
+            or (source.parameters or {}).get('img_size')
+            or defaults['img_size']
+        )
     )
     if img_size % 32 != 0:
         raise ValueError(f'img_size must be a multiple of 32, got {img_size}')
 
-    result = train_yolo(
+    result = retrain_yolo(
         dataset_root=str(dataset_dir),
         output_dir=str(weights_dir),
-        model_size=str(resolve_model_path(source.model_file_path)),
+        use_tiles=tile_cfg['use_tiles'],
+        tile_size=tile_cfg['tile_size'],
+        overlap=tile_cfg['overlap'],
+        min_area=tile_cfg['min_area'],
+        keep_empty_tiles=tile_cfg['keep_empty_tiles'],
         img_size=img_size,
+        model_size=str(resolve_model_path(source.model_file_path)),
         batch=defaults['batch'],
         seed=42,
         epochs_stage1=0,  # incremental: skip frozen-backbone stage
@@ -443,6 +482,7 @@ def _train_detector(
         'source_model_version_id': source.pk,
         'class_filter': class_filter,
         'mode': 'incremental',
+        'tile_config': tile_cfg,
     }
     return weights_path, metrics, parameters
 
@@ -453,9 +493,9 @@ def _train_binary(
     weights_dir: Path,
     splits: dict,
     epochs: int,
-    progress_cb,
+    progress_cb: ProgressCallback,
 ) -> tuple[str, dict, dict]:
-    from pollinator.training.train_binary import train_binary
+    from pollinator.workflows.training_binary import retrain_binary as train_binary
 
     defaults = PER_TRACK_DEFAULTS['binary']
     result = train_binary(
@@ -489,9 +529,9 @@ def _train_group(
     weights_dir: Path,
     splits: dict,
     epochs: int,
-    progress_cb,
+    progress_cb: ProgressCallback,
 ) -> tuple[str, dict, dict]:
-    from pollinator.training.train_group import train_group
+    from pollinator.workflows.training_group import retrain_group as train_group
 
     defaults = PER_TRACK_DEFAULTS['group']
     result = train_group(

@@ -1,6 +1,4 @@
 """
-inference/pipeline.py
-======================
 End-to-end pollinator detection pipeline.
 
 Two parallel detectors operate on the same camera folder:
@@ -47,9 +45,9 @@ import numpy as np
 
 from ..classification import BinaryClassifier, GroupClassifier
 from ..detection import YoloDetector
+from .merge import CLASSES, merge_per_image
 from ..preprocessing import run_preprocessing
 from ..preprocessing.roi import is_in_roi, setup_zone
-from .merge import CLASSES, merge_per_image
 
 logger = logging.getLogger(__name__)
 
@@ -67,6 +65,8 @@ def run_yolo_step(
     crop_dir: Path,
     device: Optional[str],
     zone: Optional[np.ndarray] = None,
+    slice_size: int = 640,
+    overlap: float = 0.2,
 ) -> list:
     """
     Run YOLO on every image and save bbox crops to crop_dir. When `zone` is
@@ -82,6 +82,8 @@ def run_yolo_step(
         yolo_model,
         confidence=yolo_confidence,
         device=device,
+        slice_size=slice_size,
+        overlap=overlap,
     )
 
     out = []
@@ -230,6 +232,8 @@ def run_pipeline(
     group_model: str,
     config: Optional[dict] = None,
     yolo_confidence: float = 0.25,
+    yolo_slice_size: int = 640,
+    yolo_overlap: float = 0.2,
     binary_threshold: float = 0.5,
     iou_threshold: float = 0.3,
     skip_first_n: int = 0,
@@ -335,6 +339,8 @@ def run_pipeline(
         crop_dir=output_dir / 'yolo_crops',
         device=device,
         zone=zone,
+        slice_size=yolo_slice_size,
+        overlap=yolo_overlap,
     )
     _emit(int(n * 0.4), n, f'YOLO detected {len(yolo_dets)} candidates')
 

@@ -1,6 +1,4 @@
 """
-training/sampling.py
-=====================
 Per-plot balanced background sampling for the binary classifier.
 
 Background crops are grouped by (hdd, site, species, plot) parsed from the

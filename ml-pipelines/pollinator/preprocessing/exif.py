@@ -1,6 +1,4 @@
 """
-preprocessing/exif.py
-======================
 EXIF metadata extraction and quality-gate checks (flash skip, foggy-frame skip
 via Laplacian variance). Weather is inferred from shutter speed.
 
