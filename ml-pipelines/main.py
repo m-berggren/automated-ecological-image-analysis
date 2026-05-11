@@ -14,10 +14,24 @@ from seed_src.utils import (
 # SETTINGS
 # -------------------------
 PREPARE_LABELS = True  # Set to True to run the label update on newly added label files
-RETRAIN = False  # Set to True to train a new model, False to use existing weights
-SPECIES_LIST = ['cat','peh','phyca','vau']
-# Map species to their specific yaml files
-CONFIG_MAP = {s: f'../data/seed/{s}_model/{s}.yaml' for s in SPECIES_LIST}
+RETRAIN = False  # Set to True to train a new model from scratch, False to use existing weights
+TRAINING_MODE = 'finetune' # This we can set to either 'fresh' (train from scratch) or 'finetune' (incremental training)
+FINETUNE_WEIGHTS = { # Per-species checkpoint to fine-tune from (best.pt or last.pt). Only used if TRAIN_MODE == 'finetune'
+    'cat': os.path.abspath(os.path.join('..', 'runs', 'obb', 'cat', 'weights', 'best.pt')), # Might need to update these paths later
+    'peh': os.path.abspath(os.path.join('..', 'runs', 'obb', 'peh', 'weights', 'best.pt')),
+    'phyca': os.path.abspath(os.path.join('..', 'runs', 'obb', 'phyca', 'weights', 'best.pt')),
+    'vau': os.path.abspath(os.path.join('..', 'runs', 'obb', 'vau', 'weights', 'best.pt')),
+}
+FINETUNE_RUN_SUFFIX = '_ft1' # Suffix for the new run directory. A bit clunky now so will update later
+# Optional: lower LR for fine-tuning (set to None to use Ultralytics defaults)
+FINETUNE_LR0 = 0.001  # example learning rate, potentially the user should be able to specify/tune this tune (or set to None to use Ultralytics defaults)
+FINETUNE_LRF = 0.01  # example learning rate, same note as LR0
+FINETUNE_EPOCHS = 45  # example, user should definitely be able to specify this (probably will be set to less than a full fresh run)
+
+SPECIES_LIST = ['peh'] # Removed the rest of the species temporarily so I can test incremental training on PEH where we had new images
+# The above is potentially a clunky solution
+
+CONFIG_MAP = {s: f'../data/seed/{s}_model/{s}.yaml' for s in SPECIES_LIST} # Map species to their specific yaml files
 
 # -------------------------
 # LABEL PREPARATION
@@ -50,21 +64,34 @@ if PREPARE_LABELS:
 best_model_paths = {}
 
 for species in SPECIES_LIST:
-    expected_path = os.path.join('..', 'runs', 'obb', species, 'weights', 'best.pt')
+    expected_path = os.path.join('..', 'runs', 'obb', f'{species}{FINETUNE_RUN_SUFFIX}', 'weights', 'best.pt') # Might need to update this path later
 
     if RETRAIN:
         print(f'Training started on {species}...')
-        best_model_paths[species] = train_species_model(species, CONFIG_MAP[species])
-
+        if TRAINING_MODE == 'finetune':
+            ckpt = FINETUNE_WEIGHTS[species]
+            if not os.path.isfile(ckpt):
+                raise FileNotFoundError(f'Fine-tune checkpoint missing: {ckpt}')
+            out_pt = train_species_model(
+                species,
+                CONFIG_MAP[species],
+                epochs=FINETUNE_EPOCHS,
+                finetune_from=ckpt,
+                run_name=f'{species}{FINETUNE_RUN_SUFFIX}',
+                lr0=FINETUNE_LR0,
+                lrf=FINETUNE_LRF,
+            )
+            best_model_paths[species] = os.path.abspath(out_pt)
+        else:
+            new_pt = train_species_model(species, CONFIG_MAP[species])
+            best_model_paths[species] = os.path.abspath(new_pt)
     else:
         best_model_paths[species] = expected_path
 
         if not os.path.exists(best_model_paths[species]):
-            print('No model found at {best_model_paths[species]} → training new one')
-            best_model_paths[species] = train_species_model(
-                species, CONFIG_MAP[species]
-            )
-
+            print(f'No model found at {expected_path} → training new one')
+            new_pt = train_species_model(species, CONFIG_MAP[species])
+            best_model_paths[species] = os.path.abspath(new_pt)
     print(f'Using model: {best_model_paths[species]}')
 
 
