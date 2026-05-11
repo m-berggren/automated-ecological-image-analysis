@@ -1,7 +1,12 @@
 {
   "default": {
     "uploads": [
-      { "id": 1, "name": "PEH batch — May 2026", "image_count": 40, "created_at_offset_seconds": -7200 },
+      {
+        "id": 1,
+        "name": "PEH batch — May 2026",
+        "image_count": 40,
+        "created_at_offset_seconds": -7200
+      },
       { "id": 2, "name": "PHYCA trial A", "image_count": 20, "created_at_offset_seconds": -86400 }
     ],
     "runs": [
@@ -13,7 +18,11 @@
         "image_count": 40,
         "processed_image_count": 40,
         "detection_count": 312,
-        "config": { "selected_seed": "PEH", "notes": "Dry conditions, container shaken 3x", "enable_viability": true },
+        "config": {
+          "selected_seed": "PEH",
+          "notes": "Dry conditions, container shaken 3x",
+          "enable_viability": true
+        },
         "created_at_offset_seconds": -6000,
         "started_at_offset_seconds": -5900,
         "completed_at_offset_seconds": -5600
@@ -39,7 +48,11 @@
         "image_count": 20,
         "processed_image_count": 4,
         "detection_count": 0,
-        "config": { "selected_seed": "PHYCA", "notes": "Images blurry, retake needed", "enable_viability": false },
+        "config": {
+          "selected_seed": "PHYCA",
+          "notes": "Images blurry, retake needed",
+          "enable_viability": false
+        },
         "created_at_offset_seconds": -80000,
         "started_at_offset_seconds": -79900,
         "completed_at_offset_seconds": null

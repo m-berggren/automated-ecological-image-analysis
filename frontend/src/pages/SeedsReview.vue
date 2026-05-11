@@ -6,7 +6,6 @@
   <div v-else-if="loadError" class="flex-1 p-8 text-sm text-red-600">{{ loadError }}</div>
 
   <div v-else class="flex-1 flex flex-col-reverse lg:flex-row min-h-0">
-
     <!-- Left: grid of detections -->
     <section
       class="w-full lg:w-[480px] shrink-0 border-t lg:border-t-0 lg:border-r border-border flex flex-col bg-surface max-h-[55vh] lg:max-h-none"
@@ -47,10 +46,7 @@
         >
           Confirm
         </button>
-        <button
-          class="px-2 py-1 rounded border border-border hover:bg-muted"
-          @click="bulkReject"
-        >
+        <button class="px-2 py-1 rounded border border-border hover:bg-muted" @click="bulkReject">
           Reject
         </button>
         <button class="ml-auto text-muted-foreground hover:text-foreground" @click="clearBulk">
@@ -105,7 +101,10 @@
             </div>
           </div>
         </div>
-        <div v-if="!filteredDetections.length" class="p-8 text-center text-sm text-muted-foreground">
+        <div
+          v-if="!filteredDetections.length"
+          class="p-8 text-center text-sm text-muted-foreground"
+        >
           No detections match the current filter.
         </div>
       </div>
@@ -132,7 +131,9 @@
 
         <div class="flex-1 overflow-auto">
           <!-- Crop preview -->
-          <div class="aspect-video flex items-center justify-center text-7xl bg-eco-mint/20 relative">
+          <div
+            class="aspect-video flex items-center justify-center text-7xl bg-eco-mint/20 relative"
+          >
             <span class="opacity-30">🌱</span>
           </div>
 
@@ -162,7 +163,9 @@
                 <dt class="text-xs text-muted-foreground">Viability</dt>
                 <dd
                   class="font-medium"
-                  :class="selected.viability_status === 'Active' ? 'text-green-600' : 'text-red-500'"
+                  :class="
+                    selected.viability_status === 'Active' ? 'text-green-600' : 'text-red-500'
+                  "
                 >
                   {{ selected.viability_status }}
                 </dd>
@@ -172,7 +175,9 @@
         </div>
 
         <!-- Action bar -->
-        <footer class="border-t border-border bg-surface px-5 py-3 flex items-center justify-between">
+        <footer
+          class="border-t border-border bg-surface px-5 py-3 flex items-center justify-between"
+        >
           <span class="text-[11px] text-muted-foreground font-mono hidden md:block">
             ↵ confirm · x reject · ↑↓ navigate
           </span>
@@ -263,8 +268,14 @@ async function loadFromApi() {
       api(`/api/analysis/runs/${id}/`),
       api(`/api/analysis/runs/${id}/detections/`),
     ])
-    if (!runRes.ok) { loadError.value = `Run: HTTP ${runRes.status}`; return }
-    if (!detRes.ok) { loadError.value = `Detections: HTTP ${detRes.status}`; return }
+    if (!runRes.ok) {
+      loadError.value = `Run: HTTP ${runRes.status}`
+      return
+    }
+    if (!detRes.ok) {
+      loadError.value = `Detections: HTTP ${detRes.status}`
+      return
+    }
     run.value = await runRes.json()
     detections.value = await detRes.json()
   } catch (e) {
@@ -275,7 +286,7 @@ async function loadFromApi() {
 }
 
 const headerTitle = computed(() =>
-  run.value ? `Review · ${run.value.name || `Run #${run.value.id}`}` : 'Review'
+  run.value ? `Review · ${run.value.name || `Run #${run.value.id}`}` : 'Review',
 )
 
 const filteredDetections = computed(() => {
@@ -287,36 +298,46 @@ const filteredDetections = computed(() => {
   return [...list].sort((a, b) => a.confidence - b.confidence)
 })
 
-const selected = computed(() =>
-  detections.value.find((d) => d.id === selectedId.value) ?? null
-)
+const selected = computed(() => detections.value.find((d) => d.id === selectedId.value) ?? null)
 
-watch(filteredDetections, (list) => {
-  if (selectedId.value && !list.find((d) => d.id === selectedId.value)) {
-    selectedId.value = list[0]?.id ?? null
-  } else if (!selectedId.value && list.length) {
-    selectedId.value = list[0].id
-  }
-}, { immediate: true })
+watch(
+  filteredDetections,
+  (list) => {
+    if (selectedId.value && !list.find((d) => d.id === selectedId.value)) {
+      selectedId.value = list[0]?.id ?? null
+    } else if (!selectedId.value && list.length) {
+      selectedId.value = list[0].id
+    }
+  },
+  { immediate: true },
+)
 
 watch(selectedId, async (id) => {
   if (id == null) return
   await nextTick()
-  document.querySelector(`[data-detection-id="${id}"]`)?.scrollIntoView({ block: 'nearest', behavior: 'smooth' })
+  document
+    .querySelector(`[data-detection-id="${id}"]`)
+    ?.scrollIntoView({ block: 'nearest', behavior: 'smooth' })
 })
 
 function statusDotClass(s: ReviewerStatus): string {
   switch (s) {
-    case 'confirmed': return 'bg-green-500'
-    case 'rejected':  return 'bg-red-500'
-    default:          return 'bg-muted-foreground/40'
+    case 'confirmed':
+      return 'bg-green-500'
+    case 'rejected':
+      return 'bg-red-500'
+    default:
+      return 'bg-muted-foreground/40'
   }
 }
 function statusBadgeClass(s: ReviewerStatus): string {
   switch (s) {
-    case 'confirmed': return 'bg-green-100 text-green-700'
-    case 'rejected':  return 'bg-red-100 text-red-700'
-    default:          return 'bg-muted text-muted-foreground'
+    case 'confirmed':
+      return 'bg-green-100 text-green-700'
+    case 'rejected':
+      return 'bg-red-100 text-red-700'
+    default:
+      return 'bg-muted text-muted-foreground'
   }
 }
 function statusLabel(s: ReviewerStatus): string {
@@ -329,8 +350,12 @@ function applyAction(status: ReviewerStatus) {
   advanceToNext()
 }
 
-function confirm() { applyAction('confirmed') }
-function reject()  { applyAction('rejected') }
+function confirm() {
+  applyAction('confirmed')
+}
+function reject() {
+  applyAction('rejected')
+}
 
 function toggleBulk(id: number) {
   const next = new Set(bulkIds.value)
@@ -338,7 +363,9 @@ function toggleBulk(id: number) {
   else next.add(id)
   bulkIds.value = next
 }
-function clearBulk() { bulkIds.value = new Set() }
+function clearBulk() {
+  bulkIds.value = new Set()
+}
 function selectAllVisible() {
   bulkIds.value = new Set(filteredDetections.value.map((d) => d.id))
 }
@@ -371,12 +398,28 @@ function navigate(delta: number) {
 
 function onKeydown(e: KeyboardEvent) {
   if (!selected.value) return
-  if (e.target instanceof HTMLElement && ['INPUT', 'SELECT', 'TEXTAREA'].includes(e.target.tagName)) return
+  if (e.target instanceof HTMLElement && ['INPUT', 'SELECT', 'TEXTAREA'].includes(e.target.tagName))
+    return
   switch (e.key) {
-    case 'Enter':     confirm(); e.preventDefault(); break
-    case 'x': case 'X': reject(); e.preventDefault(); break
-    case 'ArrowDown': case 'j': navigate(1); e.preventDefault(); break
-    case 'ArrowUp':   case 'k': navigate(-1); e.preventDefault(); break
+    case 'Enter':
+      confirm()
+      e.preventDefault()
+      break
+    case 'x':
+    case 'X':
+      reject()
+      e.preventDefault()
+      break
+    case 'ArrowDown':
+    case 'j':
+      navigate(1)
+      e.preventDefault()
+      break
+    case 'ArrowUp':
+    case 'k':
+      navigate(-1)
+      e.preventDefault()
+      break
   }
 }
 

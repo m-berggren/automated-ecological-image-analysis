@@ -7,14 +7,13 @@
     <div v-else-if="loadError" class="text-sm text-red-600">{{ loadError }}</div>
 
     <template v-else-if="run">
-
       <!-- Run summary -->
       <section class="rounded-xl border border-border bg-surface p-5 space-y-1">
         <h2 class="text-sm font-semibold">{{ run.name || `Run #${run.id}` }}</h2>
         <p class="text-xs text-muted-foreground">
           {{ run.detection_count.toLocaleString() }} seeds detected ·
-          {{ run.image_count.toLocaleString() }} images ·
-          completed {{ formatRelative(run.completed_at) }}
+          {{ run.image_count.toLocaleString() }} images · completed
+          {{ formatRelative(run.completed_at) }}
         </p>
       </section>
 
@@ -34,7 +33,7 @@
                 'flex flex-col items-start px-4 py-3 rounded-lg border-2 text-left transition-all flex-1',
                 selectedFormat === fmt.id
                   ? 'border-primary bg-primary/5'
-                  : 'border-border bg-background hover:border-primary/40'
+                  : 'border-border bg-background hover:border-primary/40',
               ]"
             >
               <span class="text-sm font-semibold">{{ fmt.label }}</span>
@@ -55,7 +54,7 @@
                 'flex flex-col items-start px-4 py-3 rounded-lg border-2 text-left transition-all flex-1',
                 selectedFilter === opt.id
                   ? 'border-primary bg-primary/5'
-                  : 'border-border bg-background hover:border-primary/40'
+                  : 'border-border bg-background hover:border-primary/40',
               ]"
             >
               <span class="text-sm font-semibold">{{ opt.label }}</span>
@@ -101,11 +100,7 @@
             </thead>
             <tbody>
               <tr v-for="(row, i) in previewRows" :key="i" class="border-t border-border">
-                <td
-                  v-for="col in enabledColumns"
-                  :key="col.id"
-                  class="px-3 py-2 font-mono"
-                >
+                <td v-for="col in enabledColumns" :key="col.id" class="px-3 py-2 font-mono">
                   {{ row[col.id] ?? '—' }}
                 </td>
               </tr>
@@ -153,7 +148,7 @@ type Format = 'csv' | 'json'
 type FilterOption = 'confirmed' | 'all' | 'unrejected'
 
 const route = useRoute()
-const runId = computed(() => route.params.id ? String(route.params.id) : null)
+const runId = computed(() => (route.params.id ? String(route.params.id) : null))
 const loading = ref(true)
 const loadError = ref('')
 const downloading = ref(false)
@@ -168,34 +163,71 @@ const formats = [
 ]
 
 const filterOptions = [
-  { id: 'confirmed' as FilterOption, label: 'Confirmed only', desc: 'Seeds marked as confirmed in review' },
+  {
+    id: 'confirmed' as FilterOption,
+    label: 'Confirmed only',
+    desc: 'Seeds marked as confirmed in review',
+  },
   { id: 'all' as FilterOption, label: 'All detections', desc: 'Including rejected' },
 ]
 
 const csvColumns = reactive([
-  { id: 'image_id',         label: 'Image ID',        enabled: true },
-  { id: 'image_filename',   label: 'Image filename',  enabled: true },
-  { id: 'seed_count',       label: 'Seed count',      enabled: true },
-  { id: 'confidence',       label: 'Confidence',      enabled: true },
-  { id: 'reviewer_status',  label: 'Review status',   enabled: true },
+  { id: 'image_id', label: 'Image ID', enabled: true },
+  { id: 'image_filename', label: 'Image filename', enabled: true },
+  { id: 'seed_count', label: 'Seed count', enabled: true },
+  { id: 'confidence', label: 'Confidence', enabled: true },
+  { id: 'reviewer_status', label: 'Review status', enabled: true },
 ])
 
 const enabledColumns = computed(() => csvColumns.filter((c) => c.enabled))
 
 const previewRows = ref<Record<string, string | number | null>[]>([
-  { image_id: 'PEH_001', image_filename: 'PEH_001.jpg', seed_count: 8,  confidence: '0.94', reviewer_status: 'confirmed' },
-  { image_id: 'PEH_002', image_filename: 'PEH_002.jpg', seed_count: 6,  confidence: '0.91', reviewer_status: 'confirmed' },
-  { image_id: 'PEH_003', image_filename: 'PEH_003.jpg', seed_count: 11, confidence: '0.88', reviewer_status: 'confirmed' },
-  { image_id: 'PEH_004', image_filename: 'PEH_004.jpg', seed_count: 3,  confidence: '0.71', reviewer_status: 'confirmed' },
-  { image_id: 'PEH_005', image_filename: 'PEH_005.jpg', seed_count: 0,  confidence: '0.58', reviewer_status: 'rejected' },
+  {
+    image_id: 'PEH_001',
+    image_filename: 'PEH_001.jpg',
+    seed_count: 8,
+    confidence: '0.94',
+    reviewer_status: 'confirmed',
+  },
+  {
+    image_id: 'PEH_002',
+    image_filename: 'PEH_002.jpg',
+    seed_count: 6,
+    confidence: '0.91',
+    reviewer_status: 'confirmed',
+  },
+  {
+    image_id: 'PEH_003',
+    image_filename: 'PEH_003.jpg',
+    seed_count: 11,
+    confidence: '0.88',
+    reviewer_status: 'confirmed',
+  },
+  {
+    image_id: 'PEH_004',
+    image_filename: 'PEH_004.jpg',
+    seed_count: 3,
+    confidence: '0.71',
+    reviewer_status: 'confirmed',
+  },
+  {
+    image_id: 'PEH_005',
+    image_filename: 'PEH_005.jpg',
+    seed_count: 0,
+    confidence: '0.58',
+    reviewer_status: 'rejected',
+  },
 ])
 
 const estimatedRows = computed(() => {
   if (!run.value) return 0
   switch (selectedFilter.value) {
-    case 'confirmed':  return Math.round(run.value.detection_count * 0.7)
-    case 'unrejected': return Math.round(run.value.detection_count * 0.9)
-    case 'all':        return run.value.detection_count
+    case 'confirmed':
+      return Math.round(run.value.detection_count * 0.7)
+    case 'unrejected':
+      return Math.round(run.value.detection_count * 0.9)
+    case 'all':
+      return run.value.detection_count
   }
 })
 
@@ -216,10 +248,16 @@ onMounted(async () => {
     loading.value = false
     return
   }
-  if (!runId.value) { loading.value = false; return }
+  if (!runId.value) {
+    loading.value = false
+    return
+  }
   try {
     const res = await api(`/api/analysis/runs/${runId.value}/`)
-    if (!res.ok) { loadError.value = `HTTP ${res.status}`; return }
+    if (!res.ok) {
+      loadError.value = `HTTP ${res.status}`
+      return
+    }
     run.value = await res.json()
   } catch (e) {
     loadError.value = e instanceof Error ? e.message : String(e)
@@ -239,7 +277,10 @@ async function onDownload() {
       columns: enabledColumns.value.map((c) => c.id).join(','),
     })
     const res = await api(`/api/analysis/runs/${runId.value}/export/?${params}`)
-    if (!res.ok) { downloadError.value = `Export failed: HTTP ${res.status}`; return }
+    if (!res.ok) {
+      downloadError.value = `Export failed: HTTP ${res.status}`
+      return
+    }
     const blob = await res.blob()
     const url = URL.createObjectURL(blob)
     const a = document.createElement('a')

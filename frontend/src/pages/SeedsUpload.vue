@@ -127,22 +127,42 @@
         </p>
       </div>
 
-      <!-- Model selectors -->
-      <div class="grid grid-cols-1 md:grid-cols-2 gap-4">
-        <div v-for="seed in seedTypes" :key="seed.id" class="space-y-2">
-          <label class="block text-xs text-muted-foreground"> {{ seed.id }} model version </label>
-
-          <select
-            v-model="config.models[seed.id].model_version_id"
-            class="w-full px-3 py-2 rounded-md border border-border bg-background text-sm"
+      <!-- Model selector — single, filtered by selected seed -->
+      <div class="space-y-2">
+        <label class="block text-xs text-muted-foreground">
+          Model version
+          <span v-if="selectedSeed" class="ml-1 text-foreground font-medium"
+            >for {{ selectedSeed }}</span
           >
-            <option :value="null" disabled>Select model version</option>
+        </label>
+        <select
+          :value="selectedSeed ? config.models[selectedSeed]?.model_version_id : null"
+          @change="
+            (e) => {
+              if (selectedSeed) {
+                config.models[selectedSeed].model_version_id = Number(
+                  (e.target as HTMLSelectElement).value,
+                )
+              }
+            }
+          "
+          :disabled="!selectedSeed"
+          class="w-full px-3 py-2 rounded-md border border-border bg-background text-sm disabled:opacity-50 disabled:cursor-not-allowed"
+        >
+          <option :value="''" disabled>
+            {{ selectedSeed ? 'Select model version' : 'Select a seed type first' }}
+          </option>
 
-            <option v-for="model in modelVersions" :key="model.id" :value="model.id">
-              {{ model.version_name }}
-            </option>
-          </select>
-        </div>
+          <option v-for="model in filteredModelVersions" :key="model.id" :value="model.id">
+            {{ model.version_name }}{{ model.is_active ? ' (active)' : '' }}
+          </option>
+        </select>
+        <p v-if="selectedSeed && !filteredModelVersions.length" class="text-xs text-amber-600">
+          No trained models found for {{ selectedSeed }}. Train one first on the
+          <RouterLink to="/seeds/training" class="underline hover:text-foreground"
+            >Training page</RouterLink
+          >.
+        </p>
       </div>
 
       <!-- Advanced settings -->
@@ -173,12 +193,6 @@
             step="0.05"
             class="w-20 px-2 py-1 rounded border border-border bg-background text-sm font-mono"
           />
-        </label>
-
-        <!-- Viability -->
-        <label class="flex items-center gap-2 text-sm">
-          <input v-model="config.enable_viability" type="checkbox" />
-          <span> Generate viability report </span>
         </label>
       </div>
     </section>
@@ -283,8 +297,9 @@
 </template>
 
 <script setup lang="ts">
-import { computed, onMounted, ref } from 'vue'
+import { computed, onMounted, ref, watch } from 'vue'
 import { useRouter } from 'vue-router'
+import { RouterLink } from 'vue-router'
 
 import { UploadCloud, XCircle } from 'lucide-vue-next'
 
@@ -315,7 +330,6 @@ interface SeedModelConfig {
 interface PipelineConfig {
   confidence_threshold: number
   slice_overlap_ratio: number
-  enable_viability: boolean
 
   models: Record<string, SeedModelConfig>
 }
@@ -370,7 +384,6 @@ const seedTypes = ref<SeedType[]>([
 const config = ref<PipelineConfig>({
   confidence_threshold: 0.25,
   slice_overlap_ratio: 0.25,
-  enable_viability: false,
 
   models: {
     PEH: { model_version_id: null },
@@ -378,6 +391,20 @@ const config = ref<PipelineConfig>({
     VAU: { model_version_id: null },
     CAT: { model_version_id: null },
   },
+})
+
+const filteredModelVersions = computed(() => {
+  if (!selectedSeed.value) return []
+
+  return modelVersions.value.filter((m) => m.module === 'seeds' && m.kind === selectedSeed.value)
+})
+
+watch(selectedSeed, (seed) => {
+  if (!seed) return
+
+  config.value.models[seed] ??= {
+    model_version_id: null,
+  }
 })
 
 const doneCount = computed(() => {
@@ -394,10 +421,14 @@ const recentFailures = computed<UploadItem[]>(() => {
   )
 })
 
-onMounted(() => {
+onMounted(async () => {
   if (folderInput.value) {
     folderInput.value.setAttribute('webkitdirectory', '')
   }
+  try {
+    const res = await api('/api/analysis/models/?module=seeds')
+    if (res.ok) modelVersions.value = await res.json()
+  } catch {}
 })
 
 function onRetry(id: string) {
@@ -411,15 +442,25 @@ function cancelAddSeed() {
 }
 
 function addSeed() {
+  error.value = ''
+
   if (!newSeedId.value.trim()) {
     return
   }
 
   const id = newSeedId.value.trim().toUpperCase()
 
+  if (seedTypes.value.some((seed) => seed.id === id)) {
+    error.value = `Seed type ${id} already exists.`
+
+    return
+  }
+
   seedTypes.value.push({
     id,
+
     species: newSeedSpecies.value.trim(),
+
     isCustom: true,
   })
 

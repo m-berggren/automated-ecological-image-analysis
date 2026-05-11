@@ -7,7 +7,6 @@
     <div v-else-if="loadError" class="text-sm text-red-600">{{ loadError }}</div>
 
     <template v-else-if="run">
-
       <!-- Status card -->
       <section class="rounded-xl border bg-surface p-5" :class="statusBorderClass">
         <div class="flex items-center gap-3 mb-3">
@@ -178,9 +177,9 @@
         <pre
           v-if="showConfig"
           class="border-t border-border px-5 py-3 text-xs overflow-x-auto bg-background"
-        >{{ JSON.stringify(run.config, null, 2) }}</pre>
+          >{{ JSON.stringify(run.config, null, 2) }}</pre
+        >
       </section>
-
     </template>
   </div>
 </template>
@@ -337,9 +336,7 @@ async function loadRun() {
   }
 }
 
-const headerTitle = computed(() =>
-  run.value ? (run.value.name || `Run #${run.value.id}`) : 'Run'
-)
+const headerTitle = computed(() => (run.value ? run.value.name || `Run #${run.value.id}` : 'Run'))
 const headerSubtitle = computed(() => {
   if (!run.value) return ''
   if (run.value.status === 'pending') return 'Queued · awaiting worker'
@@ -348,20 +345,30 @@ const headerSubtitle = computed(() => {
 })
 const statusLabel = computed(() => {
   switch (run.value?.status) {
-    case 'pending':   return 'Queued'
-    case 'running':   return 'Running'
-    case 'completed': return 'Completed'
-    case 'failed':    return 'Failed'
-    default:          return ''
+    case 'pending':
+      return 'Queued'
+    case 'running':
+      return 'Running'
+    case 'completed':
+      return 'Completed'
+    case 'failed':
+      return 'Failed'
+    default:
+      return ''
   }
 })
 const statusBadgeClass = computed(() => {
   switch (run.value?.status) {
-    case 'pending':   return 'bg-muted text-muted-foreground'
-    case 'running':   return 'bg-blue-100 text-blue-700'
-    case 'completed': return 'bg-green-100 text-green-700'
-    case 'failed':    return 'bg-red-100 text-red-700'
-    default:          return 'bg-muted text-muted-foreground'
+    case 'pending':
+      return 'bg-muted text-muted-foreground'
+    case 'running':
+      return 'bg-blue-100 text-blue-700'
+    case 'completed':
+      return 'bg-green-100 text-green-700'
+    case 'failed':
+      return 'bg-red-100 text-red-700'
+    default:
+      return 'bg-muted text-muted-foreground'
   }
 })
 const statusBorderClass = computed(() => {
@@ -391,13 +398,12 @@ const timingLine = computed(() => {
   if (!run.value) return ''
   return `Created ${new Date(run.value.created_at).toLocaleString()}`
 })
-const canCancel = computed(() =>
-  run.value?.status === 'pending' || run.value?.status === 'running'
-)
-const canOpenReview = computed(() =>
-  !!run.value &&
-  run.value.detection_count > 0 &&
-  (run.value.status === 'running' || run.value.status === 'completed')
+const canCancel = computed(() => run.value?.status === 'pending' || run.value?.status === 'running')
+const canOpenReview = computed(
+  () =>
+    !!run.value &&
+    run.value.detection_count > 0 &&
+    (run.value.status === 'running' || run.value.status === 'completed'),
 )
 const avgPerImage = computed(() => {
   if (!run.value || run.value.processed_image_count === 0) return '—'
