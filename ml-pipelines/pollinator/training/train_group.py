@@ -458,13 +458,36 @@ def train_group(
         logger.info('No web images or epochs_s1=0. Skipping Stage 1.')
 
     stage2_ckpt = out_dir / f'group_{model_type}_best.pth'
-    if epochs_s2 == 0:
+    if epochs_s2 == 0 and stage1_active:
+        # Stage 1 trained but stage 2 was skipped on purpose: use stage 1 as final.
         logger.info(
             f'[{model_type}] Skipping Stage 2 (epochs_s2=0). Using Stage 1 checkpoint as final.'
         )
         import shutil
 
         shutil.copy(stage1_ckpt, stage2_ckpt)
+    elif epochs_s2 == 0 and not stage1_active:
+        # Nothing trained yet: no web samples and stage 2 is off. Fall back to
+        # arctic-only training so we don't try to copy a checkpoint that
+        # never got written.
+        logger.warning(
+            f'[{model_type}] No web samples and epochs_s2=0. '
+            f'Falling back to arctic-only training for epochs_s1={epochs_s1} epochs.'
+        )
+        train_loader_fb = make_loader(arctic_samples, arctic_train_idx, img_size, batch)
+        model = run_stage(
+            model,
+            f'{model_type}_arctic_only',
+            train_loader_fb,
+            val_loader,
+            epochs_s1,
+            lr_s1,
+            counts_arctic,
+            stage2_ckpt,
+            device,
+            CLASSES,
+            emit=lambda ep, msg: _emit(ep, total_epochs, msg),
+        )
     else:
         train_loader_s2 = make_loader(arctic_samples, arctic_train_idx, img_size, batch)
         model = run_stage(

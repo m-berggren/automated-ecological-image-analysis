@@ -250,7 +250,7 @@ def train_yolo(
         copy_paste=copy_paste,
         mixup=mixup,
         mosaic=mosaic,
-        cache=True,
+        cache='disk',
         seed=seed,
         project=str(output_dir),
         name='stage1_frozen',
