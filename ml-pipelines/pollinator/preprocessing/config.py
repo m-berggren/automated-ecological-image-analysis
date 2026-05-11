@@ -1,6 +1,4 @@
 """
-preprocessing/config.py
-========================
 Default configuration for the background-subtraction preprocessing pipeline,
 plus CSV field definitions for the internal results CSV.
 """

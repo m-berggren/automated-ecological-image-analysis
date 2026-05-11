@@ -1,6 +1,4 @@
 """
-inference/merge.py
-===================
 IoU geometry helper and per-image merge logic for combining YOLO and
 InsectNet detections into a single set of detection records.
 

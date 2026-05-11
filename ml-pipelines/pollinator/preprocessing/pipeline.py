@@ -1,6 +1,4 @@
 """
-preprocessing/pipeline.py
-==========================
 Background subtraction pipeline for Arctic pollinator detection.
 
 Extracts candidate insect crops from time-lapse field images using:
@@ -161,7 +159,6 @@ def run_preprocessing(
             'n_crops': 0,
             'n_skipped': 0,
         }
-    zone = setup_zone(first, cfg)
     if cfg.get('roi_bbox') is not None:
         logger.info(f'Using caller-provided ROI bbox: {cfg["roi_bbox"]}')
     else:
@@ -194,9 +191,12 @@ def run_preprocessing(
         sh = cfg.get('strip_height', 0)
         if sh and img.shape[0] > sh:
             img = img[: img.shape[0] - sh]
-            zone_crop = zone[: img.shape[0]]
-        else:
-            zone_crop = zone
+
+        # Per-image zone: source images can vary in height (e.g. some
+        # frames include an info-strip, others don't). Rebuilding keeps
+        # zone_crop shape-consistent with img and avoids cross-image
+        # boolean-mask shape mismatches downstream.
+        zone_crop = setup_zone(img, cfg)
 
         meta = get_exif_metadata(str(path), cfg)
         rel_id = path.name
@@ -220,9 +220,13 @@ def run_preprocessing(
             prev_frame = img
             continue
 
-        if prev_frame is not None:
+        # Background reference must have the same shape as the current image.
+        # Source folders can mix frames that include an info-strip with
+        # cropped frames, producing height variation. Mismatched shapes
+        # would crash the downstream boolean mask indexing.
+        if prev_frame is not None and prev_frame.shape == img.shape:
             bg = prev_frame
-        elif global_bg is not None:
+        elif global_bg is not None and global_bg.shape == img.shape:
             bg = global_bg
         else:
             prev_frame = img

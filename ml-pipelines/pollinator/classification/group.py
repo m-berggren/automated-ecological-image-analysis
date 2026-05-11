@@ -1,6 +1,4 @@
 """
-classification/group_classifier.py
-=====================================
 Group classifier: bumblebee / fly / butterfly / other.
 
 Loads a trained EfficientNet-B2 or InsectNet checkpoint and assigns

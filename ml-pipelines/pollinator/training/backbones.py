@@ -1,6 +1,4 @@
 """
-training/models.py
-===================
 Shared model builders for the InsectNet (RegNet-Y-32GF backbone, pretrained
 on 2526 insect classes) and EfficientNet-B2 (ImageNet-pretrained) heads used
 by both binary and group classifier training.
