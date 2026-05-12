@@ -1,7 +1,7 @@
 import os
 from collections import defaultdict
 
-from seed_src.metrics import calculate_tp_fp_fn, calculate_precision_recall_f1_score
+from seed_src.metrics import calculate_precision_recall_f1_score, calculate_tp_fp_fn
 from seed_src.train import train_species_model
 from seed_src.utils import (
     load_ground_truth,
@@ -15,23 +15,33 @@ from seed_src.utils import (
 # -------------------------
 PREPARE_LABELS = True  # Set to True to run the label update on newly added label files
 RETRAIN = False  # Set to True to train a new model from scratch, False to use existing weights
-TRAINING_MODE = 'finetune' # This we can set to either 'fresh' (train from scratch) or 'finetune' (incremental training)
-FINETUNE_WEIGHTS = { # Per-species checkpoint to fine-tune from (best.pt or last.pt). Only used if TRAIN_MODE == 'finetune'
-    'cat': os.path.abspath(os.path.join('..', 'runs', 'obb', 'cat', 'weights', 'best.pt')), # Might need to update these paths later
-    'peh': os.path.abspath(os.path.join('..', 'runs', 'obb', 'peh', 'weights', 'best.pt')),
-    'phyca': os.path.abspath(os.path.join('..', 'runs', 'obb', 'phyca', 'weights', 'best.pt')),
-    'vau': os.path.abspath(os.path.join('..', 'runs', 'obb', 'vau', 'weights', 'best.pt')),
+TRAINING_MODE = 'finetune'  # This we can set to either 'fresh' (train from scratch) or 'finetune' (incremental training)
+FINETUNE_WEIGHTS = {  # Per-species checkpoint to fine-tune from (best.pt or last.pt). Only used if TRAIN_MODE == 'finetune'
+    'cat': os.path.abspath(
+        os.path.join('runs', 'obb', 'cat', 'weights', 'best.pt')
+    ),  # Might need to update these paths later
+    'peh': os.path.abspath(os.path.join('runs', 'obb', 'peh', 'weights', 'best.pt')),
+    'phyca': os.path.abspath(
+        os.path.join('runs', 'obb', 'phyca', 'weights', 'best.pt')
+    ),
+    'vau': os.path.abspath(os.path.join('runs', 'obb', 'vau', 'weights', 'best.pt')),
 }
-FINETUNE_RUN_SUFFIX = '_ft1' # Suffix for the new run directory. A bit clunky now so will update later
+FINETUNE_RUN_SUFFIX = (
+    '_ft1'  # Suffix for the new run directory. A bit clunky now so will update later
+)
 # Optional: lower LR for fine-tuning (set to None to use Ultralytics defaults)
 FINETUNE_LR0 = 0.001  # example learning rate, potentially the user should be able to specify/tune this tune (or set to None to use Ultralytics defaults)
 FINETUNE_LRF = 0.01  # example learning rate, same note as LR0
 FINETUNE_EPOCHS = 45  # example, user should definitely be able to specify this (probably will be set to less than a full fresh run)
 
-SPECIES_LIST = ['peh'] # Removed the rest of the species temporarily so I can test incremental training on PEH where we had new images
+SPECIES_LIST = [
+    'peh'
+]  # Removed the rest of the species temporarily so I can test incremental training on PEH where we had new images
 # The above is potentially a clunky solution
 
-CONFIG_MAP = {s: f'../data/seed/{s}_model/{s}.yaml' for s in SPECIES_LIST} # Map species to their specific yaml files
+CONFIG_MAP = {
+    s: f'../data/seed/{s}_model/{s}.yaml' for s in SPECIES_LIST
+}  # Map species to their specific yaml files
 
 # -------------------------
 # LABEL PREPARATION
@@ -64,7 +74,9 @@ if PREPARE_LABELS:
 best_model_paths = {}
 
 for species in SPECIES_LIST:
-    expected_path = os.path.join('..', 'runs', 'obb', f'{species}{FINETUNE_RUN_SUFFIX}', 'weights', 'best.pt') # Might need to update this path later
+    expected_path = os.path.join(
+        'runs', 'obb', f'{species}{FINETUNE_RUN_SUFFIX}', 'weights', 'best.pt'
+    )  # Might need to update this path later
 
     if RETRAIN:
         print(f'Training started on {species}...')
@@ -220,7 +232,9 @@ print('\n==== PER SPECIES RESULTS ====\n')
 
 for species, r in results.items():
     mae = r['total_error'] / r['images'] if r['images'] > 0 else 0
-    precision, recall, f1 = calculate_precision_recall_f1_score(r["tp"], r["fp"], r["fn"])
+    precision, recall, f1 = calculate_precision_recall_f1_score(
+        r['tp'], r['fp'], r['fn']
+    )
 
     print(f'{species}:')
     print(f'  Images: {r["images"]}')
@@ -236,9 +250,7 @@ overall_tp = sum(r['tp'] for r in results.values())
 overall_fp = sum(r['fp'] for r in results.values())
 overall_fn = sum(r['fn'] for r in results.values())
 
-op, or_, of1 = calculate_precision_recall_f1_score(
-    overall_tp, overall_fp, overall_fn
-)
+op, or_, of1 = calculate_precision_recall_f1_score(overall_tp, overall_fp, overall_fn)
 print('\n==== Overall results ====\n')
 print(f'  TP: {overall_tp} | FP: {overall_fp} | FN: {overall_fn}')
 print(f'  Precision: {op:.2f}')
