@@ -13,14 +13,22 @@ __pycache__/
 data/seed/cat_model/train/
 data/seed/cat_model/val/
 data/seed/cat_model/cohens_kappa
+data/seed/cat_model/train_sliced
+data/seed/cat_model/val_sliced
 data/seed/peh_model/train/
 data/seed/peh_model/val/
 data/seed/peh_model/cohens_kappa
+data/seed/peh_model/train_sliced
+data/seed/peh_model/val_sliced
 data/seed/phyca_model/train/
 data/seed/phyca_model/val/
 data/seed/phyca_model/cohens_kappa
+data/seed/phyca_model/train_sliced
+data/seed/phyca_model/val_sliced
 data/seed/vau_model/train/
 data/seed/vau_model/val/
+data/seed/vau_model/train_sliced
+data/seed/vau_model/val_sliced
 data/seed/vau_model/cohens_kappa
 
 # Jupyter notebook checkpoints
@@ -59,3 +67,4 @@ static/vue/
 *.txt
 
 *.pth
+*.json

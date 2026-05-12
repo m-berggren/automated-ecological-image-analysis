@@ -10,8 +10,8 @@ def load_model(model_path):
     return AutoDetectionModel.from_pretrained(
         model_type='ultralytics',
         model_path=model_path,
-        confidence_threshold=0.25,
-        device='cpu',
+        confidence_threshold=0.3,
+        device=0,
     )
 
 
@@ -21,11 +21,11 @@ def run_sahi(image_path, model):
         model,
         slice_height=768,
         slice_width=768,
-        overlap_height_ratio=0.25,
-        overlap_width_ratio=0.25,
-        postprocess_type='NMS',
-        postprocess_match_metric='IOU',
-        postprocess_match_threshold=0.15,
+        overlap_height_ratio=0.35,
+        overlap_width_ratio=0.35,
+        postprocess_type='GREEDYNMM',
+        postprocess_match_metric='IOS',
+        postprocess_match_threshold=0.3,
     )
 
 
