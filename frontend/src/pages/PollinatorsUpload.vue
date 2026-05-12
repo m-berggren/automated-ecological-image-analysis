@@ -76,7 +76,10 @@
           <span class="text-xs text-muted-foreground">YOLO confidence</span>
           <input
             v-model.number="config.yolo.confidence"
-            type="number" min="0" max="1" step="0.05"
+            type="number"
+            min="0"
+            max="1"
+            step="0.05"
             class="w-full px-2 py-1.5 rounded border border-border bg-background text-sm font-mono"
           />
         </label>
@@ -84,7 +87,10 @@
           <span class="text-xs text-muted-foreground">Binary confidence</span>
           <input
             v-model.number="config.binary_classifier.confidence"
-            type="number" min="0" max="1" step="0.05"
+            type="number"
+            min="0"
+            max="1"
+            step="0.05"
             class="w-full px-2 py-1.5 rounded border border-border bg-background text-sm font-mono"
           />
         </label>
@@ -92,7 +98,10 @@
           <span class="text-xs text-muted-foreground">Group confidence</span>
           <input
             v-model.number="config.group_classifier.confidence"
-            type="number" min="0" max="1" step="0.05"
+            type="number"
+            min="0"
+            max="1"
+            step="0.05"
             class="w-full px-2 py-1.5 rounded border border-border bg-background text-sm font-mono"
           />
         </label>
@@ -108,7 +117,8 @@
           <span class="text-xs text-muted-foreground">Start at image</span>
           <input
             v-model.number="config.start_at_image"
-            type="number" min="1"
+            type="number"
+            min="1"
             class="w-20 px-2 py-1 rounded border border-border bg-background text-sm font-mono"
           />
         </label>
@@ -121,16 +131,16 @@
       >
         {{ showAdvanced ? '▾ Hide advanced' : '▸ Advanced' }}
       </button>
-      <div
-        v-if="showAdvanced"
-        class="border-t border-border pt-3 space-y-3"
-      >
+      <div v-if="showAdvanced" class="border-t border-border pt-3 space-y-3">
         <div class="grid grid-cols-1 md:grid-cols-3 gap-4">
           <label class="space-y-1">
             <span class="text-xs text-muted-foreground">Crop padding</span>
             <input
               v-model.number="config.preprocessing.crop_pad_frac"
-              type="number" min="0" max="2" step="0.1"
+              type="number"
+              min="0"
+              max="2"
+              step="0.1"
               class="w-full px-2 py-1.5 rounded border border-border bg-background text-sm font-mono"
             />
           </label>
@@ -138,7 +148,10 @@
             <span class="text-xs text-muted-foreground">Min contour area (px²)</span>
             <input
               v-model.number="config.preprocessing.min_contour_area"
-              type="number" min="50" max="5000" step="50"
+              type="number"
+              min="50"
+              max="5000"
+              step="50"
               class="w-full px-2 py-1.5 rounded border border-border bg-background text-sm font-mono"
             />
           </label>
@@ -146,7 +159,10 @@
             <span class="text-xs text-muted-foreground">Max contour area (px²)</span>
             <input
               v-model.number="config.preprocessing.max_contour_area"
-              type="number" min="1000" max="200000" step="1000"
+              type="number"
+              min="1000"
+              max="200000"
+              step="1000"
               class="w-full px-2 py-1.5 rounded border border-border bg-background text-sm font-mono"
             />
           </label>
@@ -156,7 +172,9 @@
             <span class="text-xs text-muted-foreground">Background sample size</span>
             <input
               v-model.number="config.preprocessing.background_sample_size"
-              type="number" min="0" max="500"
+              type="number"
+              min="0"
+              max="500"
               class="w-full px-2 py-1.5 rounded border border-border bg-background text-sm font-mono"
             />
           </label>
@@ -164,7 +182,10 @@
             <span class="text-xs text-muted-foreground">Sunny shutter threshold</span>
             <input
               v-model.number="config.preprocessing.sunny_shutter_threshold"
-              type="number" min="50" max="500" step="10"
+              type="number"
+              min="50"
+              max="500"
+              step="10"
               class="w-full px-2 py-1.5 rounded border border-border bg-background text-sm font-mono"
             />
           </label>
@@ -222,9 +243,7 @@
           />
         </label>
       </p>
-      <p class="text-xs text-muted-foreground mt-1">
-        JPG, PNG — up to ~12,000 images per run
-      </p>
+      <p class="text-xs text-muted-foreground mt-1">JPG, PNG — up to ~12,000 images per run</p>
     </section>
 
     <!-- Upload progress + start -->
@@ -270,7 +289,8 @@
         </li>
       </ul>
       <p v-else class="px-5 py-3 text-xs text-muted-foreground">
-        No failures. (Per-file list hidden at this scale — failures will appear here as they happen.)
+        No failures. (Per-file list hidden at this scale — failures will appear here as they
+        happen.)
       </p>
     </section>
 
@@ -331,7 +351,7 @@ interface PipelineConfig {
 }
 
 const config = ref<PipelineConfig>({
-  yolo: { model_version_id: null, confidence: 0.4 },
+  yolo: { model_version_id: null, confidence: 0.6 },
   binary_classifier: { model_version_id: null, confidence: 0.5 },
   group_classifier: { model_version_id: null, confidence: 0.6 },
   preprocessing: {
@@ -370,8 +390,7 @@ onMounted(async () => {
       detectorModels.value = all.filter((m) => m.kind === 'detector')
       binaryModels.value = all.filter((m) => m.kind === 'binary_classifier')
       groupModels.value = all.filter((m) => m.kind === 'group_classifier')
-      const pickDefault = (list: ModelVersion[]) =>
-        list.find((m) => m.is_active) ?? list[0]
+      const pickDefault = (list: ModelVersion[]) => list.find((m) => m.is_active) ?? list[0]
       const yoloDefault = pickDefault(detectorModels.value)
       const binaryDefault = pickDefault(binaryModels.value)
       const groupDefault = pickDefault(groupModels.value)
@@ -414,9 +433,7 @@ const IMAGE_EXT_RE = /\.(jpe?g|png|webp)$/i
 async function handleFiles(files: File[]) {
   // Folder drops can include non-image files (subfolders' siblings,
   // hidden system files like .DS_Store, etc.). Drop them before enqueueing.
-  const images = files.filter(
-    (f) => f.type.startsWith('image/') || IMAGE_EXT_RE.test(f.name),
-  )
+  const images = files.filter((f) => f.type.startsWith('image/') || IMAGE_EXT_RE.test(f.name))
   if (!images.length) return
   const id = await ensureUpload()
   if (!id || !uploader.value) return
@@ -456,7 +473,7 @@ async function onDrop(e: DragEvent) {
 async function collectFiles(entry: FileSystemEntry, out: File[]): Promise<void> {
   if (entry.isFile) {
     const file = await new Promise<File>((resolve, reject) => {
-      (entry as FileSystemFileEntry).file(resolve, reject)
+      ;(entry as FileSystemFileEntry).file(resolve, reject)
     })
     out.push(file)
     return

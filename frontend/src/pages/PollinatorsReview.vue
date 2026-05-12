@@ -209,10 +209,13 @@
           >{{ statusLabel(selected.reviewer_status) }}</span>
         </header>
 
-        <div class="flex-1 overflow-auto">
-          <!-- Source image with bbox overlay. Click to open the zoom modal. -->
+        <div class="flex-1 flex flex-col min-h-0">
+          <!-- Source image with bbox overlay. Click to open the zoom modal.
+               flex-1 + min-h-0 makes it fill whatever vertical space is left
+               after the predictions/label/footer, instead of locking to a
+               16:9 box that forced the right pane to scroll. -->
           <div
-            class="aspect-video relative overflow-hidden"
+            class="flex-1 min-h-0 relative overflow-hidden"
             :class="selected.source_image_url && sourceImage.w ? 'cursor-zoom-in' : ''"
             :style="{ backgroundColor: classBgFor(primaryClass(selected)) }"
             role="button"

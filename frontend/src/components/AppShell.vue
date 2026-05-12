@@ -1,5 +1,5 @@
 <template>
-  <div class="flex min-h-screen bg-background text-foreground">
+  <div class="flex h-screen bg-background text-foreground overflow-hidden">
     <aside class="flex flex-col w-60 shrink-0 border-r border-border bg-surface">
       <RouterLink to="/" class="flex items-center gap-2 px-5 h-16 border-b border-border">
         <Sprout class="w-6 h-6 text-primary" />
@@ -94,7 +94,7 @@
       </div>
     </aside>
 
-    <main class="flex-1 min-w-0 flex flex-col">
+    <main class="flex-1 min-w-0 min-h-0 flex flex-col">
       <RouterView />
     </main>
   </div>
