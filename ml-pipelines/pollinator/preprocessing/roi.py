@@ -1,6 +1,4 @@
 """
-preprocessing/roi.py
-=====================
 ROI primitives.
 
 The pipeline does not decide how an ROI is chosen. It receives one rectangle

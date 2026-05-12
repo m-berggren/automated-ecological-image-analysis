@@ -1,0 +1,17 @@
+meta {
+  name: Unauthorized
+  type: http
+  seq: 5
+}
+
+get {
+  url: {{baseUrl}}/api/datasets/uploads/?module=pollinators
+  body: none
+  auth: none
+}
+
+tests {
+  test("status is 401", function() {
+    expect(res.status).to.equal(401);
+  });
+}

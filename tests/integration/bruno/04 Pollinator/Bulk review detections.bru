@@ -1,0 +1,31 @@
+meta {
+  name: Bulk review detections
+  type: http
+  seq: 7
+}
+
+post {
+  url: {{baseUrl}}/api/analysis/detections/bulk/
+  body: json
+  auth: bearer
+}
+
+auth:bearer {
+  token: {{accessToken}}
+}
+
+body:json {
+  {
+    "ids": [{{detectionId}}],
+    "reviewer_status": "rejected"
+  }
+}
+
+tests {
+  test("status is 200", function() {
+    expect(res.status).to.equal(200);
+  });
+  test("returns updated count", function() {
+    expect(res.body.updated).to.be.a("number");
+  });
+}

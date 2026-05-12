@@ -1,6 +1,4 @@
 """
-classification/binary_classifier.py
-=====================================
 Binary classifier: insect vs background.
 
 Loads a trained EfficientNet-B2 or InsectNet checkpoint and classifies

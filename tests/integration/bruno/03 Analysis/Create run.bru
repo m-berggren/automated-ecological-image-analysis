@@ -1,0 +1,64 @@
+meta {
+  name: Create run
+  type: http
+  seq: 3
+}
+
+post {
+  url: {{baseUrl}}/api/analysis/runs/
+  body: json
+  auth: bearer
+}
+
+auth:bearer {
+  token: {{accessToken}}
+}
+
+body:json {
+  {
+    "module": "pollinators",
+    "upload": {{uploadId}},
+    "name": "Bruno test run",
+    "config": {
+      "yolo": {
+        "model_version_id": {{yoloModelId}},
+        "confidence": 0.4
+      },
+      "binary_classifier": {
+        "model_version_id": {{binaryClassifierModelId}},
+        "confidence": 0.5
+      },
+      "group_classifier": {
+        "model_version_id": {{groupClassifierModelId}},
+        "confidence": 0.6
+      },
+      "preprocessing": {
+        "use_roi": false,
+        "crop_pad_frac": 0.3,
+        "background_sample_size": 100,
+        "min_contour_area": 400,
+        "max_contour_area": 35000,
+        "skip_flash": true,
+        "skip_foggy": true,
+        "enable_large_motion": true
+      },
+      "start_at_image": 1
+    }
+  }
+}
+
+script:post-response {
+  if ((res.status === 200 || res.status === 201) && res.body && res.body.id) {
+    bru.setEnvVar("runId", String(res.body.id));
+  }
+}
+
+tests {
+  test("status is 201", function() {
+    expect(res.status).to.equal(201);
+  });
+  test("returns a run id and pending status", function() {
+    expect(res.body.id).to.be.a("number");
+    expect(["pending", "running"]).to.include(res.body.status);
+  });
+}

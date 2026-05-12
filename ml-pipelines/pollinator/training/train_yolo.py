@@ -1,6 +1,4 @@
 """
-training/train_yolo.py
-=======================
 Train YOLO pollinator detector (two-stage: frozen backbone -> full fine-tune).
 
 Classes: bumblebee / fly / butterfly / other.
@@ -49,16 +47,18 @@ CLASSES = ['bumblebee', 'fly', 'butterfly', 'other']
 
 # ── Dataset config ────────────────────────────────────────────────────────
 def write_data_yaml(dataset_root: Path, classes: list) -> Path:
-    """Write the data.yaml that ultralytics reads."""
+    """Write the data.yaml that ultralytics reads. The test split is
+    optional and only included when images/test/ exists on disk."""
     yaml_path = dataset_root / 'data.yaml'
     cfg = {
         'path': str(dataset_root.resolve()),
         'train': 'images/train',
         'val': 'images/val',
-        'test': 'images/test',
         'nc': len(classes),
         'names': classes,
     }
+    if (dataset_root / 'images' / 'test').exists():
+        cfg['test'] = 'images/test'
     yaml_path.write_text(yaml.dump(cfg, default_flow_style=False))
     logger.info(f'data.yaml written to {yaml_path}')
     return yaml_path
@@ -273,6 +273,7 @@ def train_yolo(
     else:
         logger.info('Skipping stage 1 (epochs_stage1=0). Stage 2 resumes from input.')
         stage1_best = Path(model_size)
+        s1_map50 = None
 
     # ── Stage 2: full fine-tune ───────────────────────────────────────────
     logger.info(f'\n{"=" * 60}')
@@ -309,18 +310,24 @@ def train_yolo(
     s2_map50 = float(results_s2.results_dict.get('metrics/mAP50(B)', 0.0))
     logger.info(f'Stage 2 done. Best weights: {stage2_best} | mAP50={s2_map50:.3f}')
 
-    # ── Evaluation on val + test ──────────────────────────────────────────
+    # ── Evaluation on val (and test if present) ───────────────────────────
     model_eval = YOLO(str(stage2_best))
     val_metrics = log_split_metrics(
         model_eval.val(data=str(yaml_path), split='val', imgsz=img_size, batch=batch),
         'val',
         classes,
     )
-    test_metrics = log_split_metrics(
-        model_eval.val(data=str(yaml_path), split='test', imgsz=img_size, batch=batch),
-        'test',
-        classes,
-    )
+    test_metrics: dict = {}
+    if (Path(dataset_root) / 'images' / 'test').exists():
+        test_metrics = log_split_metrics(
+            model_eval.val(
+                data=str(yaml_path), split='test', imgsz=img_size, batch=batch
+            ),
+            'test',
+            classes,
+        )
+    else:
+        logger.info('No test split found; skipping test evaluation')
 
     summary = {
         'model': str(stage2_best),

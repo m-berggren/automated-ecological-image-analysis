@@ -1,6 +1,4 @@
 """
-training/train_group.py
-========================
 Train group classifier: bumblebee / fly / butterfly / other.
 
 Two architectures available:
@@ -49,8 +47,8 @@ import torch.nn as nn
 import torchvision.transforms as T
 from torch.utils.data import DataLoader, WeightedRandomSampler
 
+from .backbones import build_efficientnet_b2, build_insectnet, load_checkpoint
 from .datasets import CropDataset, letterbox
-from .models import build_efficientnet_b2, build_insectnet, load_checkpoint
 
 logger = logging.getLogger(__name__)
 
@@ -129,7 +127,8 @@ def stratified_split(
     for lbl, idxs in by_class.items():
         idxs = list(idxs)
         rng.shuffle(idxs)
-        n_test = max(1, int(len(idxs) * test_frac))
+        # test_frac=0 yields no test split; all non-val samples go to train.
+        n_test = int(len(idxs) * test_frac) if test_frac > 0 else 0
         n_val = max(1, int(len(idxs) * val_frac))
         test_idx.extend(idxs[:n_test])
         val_idx.extend(idxs[n_test : n_test + n_val])
@@ -383,25 +382,35 @@ def train_group(
     web_train_idx = [i - n_arctic for i in all_train_idx if i >= n_arctic]
     arctic_val_idx = all_val_idx
 
-    used_arctic = set(arctic_train_idx) | {i for i in all_val_idx if i < n_arctic}
-    arctic_test_idx = [i for i in range(n_arctic) if i not in used_arctic]
+    # test_frac=0 disables both arctic and web held-out test sets. Skipping
+    # this branch keeps all leftover arctic samples available for training
+    # via run_stage's loader construction below.
+    if test_frac > 0:
+        used_arctic = set(arctic_train_idx) | {i for i in all_val_idx if i < n_arctic}
+        arctic_test_idx = [i for i in range(n_arctic) if i not in used_arctic]
 
-    used_web_train = set(web_train_idx)
-    used_web_val = {i - n_arctic for i in all_val_idx if i >= n_arctic}
-    used_web = used_web_train | used_web_val
-    web_test_pool = [i for i in range(len(web_samples)) if i not in used_web]
-    rng_test = np.random.default_rng(seed)
-    rng_test.shuffle(web_test_pool)
-    web_test_idx = web_test_pool[: len(arctic_test_idx)]
+        used_web_train = set(web_train_idx)
+        used_web_val = {i - n_arctic for i in all_val_idx if i >= n_arctic}
+        used_web = used_web_train | used_web_val
+        web_test_pool = [i for i in range(len(web_samples)) if i not in used_web]
+        rng_test = np.random.default_rng(seed)
+        rng_test.shuffle(web_test_pool)
+        web_test_idx = web_test_pool[: len(arctic_test_idx)]
+    else:
+        arctic_test_idx = []
+        web_test_idx = []
 
     logger.info(
         f'\nTrain:        {len(arctic_train_idx)} arctic + {len(web_train_idx)} web'
     )
     logger.info(f'Val:          {len(arctic_val_idx)} (arctic + web mixed)')
-    logger.info(
-        f'Test Arctic:  {len(arctic_test_idx)} (Arctic only, real field performance)'
-    )
-    logger.info(f'Test Web:     {len(web_test_idx)} (web only, generalisation)')
+    if test_frac > 0:
+        logger.info(
+            f'Test Arctic:  {len(arctic_test_idx)} (Arctic only, real field performance)'
+        )
+        logger.info(f'Test Web:     {len(web_test_idx)} (web only, generalisation)')
+    else:
+        logger.info('Test:         disabled (test_frac=0)')
 
     if resume_from:
         # Incremental: skeleton only, load full checkpoint from prior training.
@@ -436,11 +445,15 @@ def train_group(
     val_loader = make_loader(
         all_samples_for_split, arctic_val_idx, img_size, batch, augment=False
     )
-    test_loader_arctic = make_loader(
-        arctic_samples, arctic_test_idx, img_size, batch, augment=False
+    test_loader_arctic = (
+        make_loader(arctic_samples, arctic_test_idx, img_size, batch, augment=False)
+        if arctic_test_idx
+        else None
     )
-    test_loader_web = make_loader(
-        web_samples, web_test_idx, img_size, batch, augment=False
+    test_loader_web = (
+        make_loader(web_samples, web_test_idx, img_size, batch, augment=False)
+        if web_test_idx
+        else None
     )
 
     stage1_active = bool(web_samples) and epochs_s1 > 0
@@ -528,21 +541,27 @@ def train_group(
     criterion_final = weighted_criterion(counts_arctic, len(CLASSES), device)
 
     final = eval_epoch(model, val_loader, criterion_final, device, CLASSES)
-    final_test_arctic = eval_epoch(
-        model, test_loader_arctic, criterion_final, device, CLASSES
+    final_test_arctic = (
+        eval_epoch(model, test_loader_arctic, criterion_final, device, CLASSES)
+        if test_loader_arctic is not None
+        else None
     )
-    final_test_web = eval_epoch(
-        model, test_loader_web, criterion_final, device, CLASSES
+    final_test_web = (
+        eval_epoch(model, test_loader_web, criterion_final, device, CLASSES)
+        if test_loader_web is not None
+        else None
     )
 
     logger.info(f'\n{model_type} final report (best checkpoint epoch {ckpt["epoch"]}):')
     logger.info(f'Val         MacroF1={final["macro_f1"]:.3f}  Acc={final["acc"]:.3f}')
-    logger.info(
-        f'Test Arctic MacroF1={final_test_arctic["macro_f1"]:.3f}  Acc={final_test_arctic["acc"]:.3f}  (real field performance)'
-    )
-    logger.info(
-        f'Test Web    MacroF1={final_test_web["macro_f1"]:.3f}  Acc={final_test_web["acc"]:.3f}  (generalisation)'
-    )
+    if final_test_arctic is not None:
+        logger.info(
+            f'Test Arctic MacroF1={final_test_arctic["macro_f1"]:.3f}  Acc={final_test_arctic["acc"]:.3f}  (real field performance)'
+        )
+    if final_test_web is not None:
+        logger.info(
+            f'Test Web    MacroF1={final_test_web["macro_f1"]:.3f}  Acc={final_test_web["acc"]:.3f}  (generalisation)'
+        )
     logger.info('Per-class F1 (val):')
     for cls, f1 in final['per_class_f1'].items():
         logger.info(f'  {cls:20}: {f1:.3f}')
@@ -557,12 +576,18 @@ def train_group(
         'val_macro_f1': final['macro_f1'],
         'val_acc': final['acc'],
         'val_per_class_f1': final['per_class_f1'],
-        'test_arctic_macro_f1': final_test_arctic['macro_f1'],
-        'test_arctic_acc': final_test_arctic['acc'],
-        'test_arctic_per_class': final_test_arctic['per_class_f1'],
-        'test_web_macro_f1': final_test_web['macro_f1'],
-        'test_web_acc': final_test_web['acc'],
-        'test_web_per_class': final_test_web['per_class_f1'],
+        'test_arctic_macro_f1': final_test_arctic['macro_f1']
+        if final_test_arctic
+        else None,
+        'test_arctic_acc': final_test_arctic['acc'] if final_test_arctic else None,
+        'test_arctic_per_class': final_test_arctic['per_class_f1']
+        if final_test_arctic
+        else None,
+        'test_web_macro_f1': final_test_web['macro_f1'] if final_test_web else None,
+        'test_web_acc': final_test_web['acc'] if final_test_web else None,
+        'test_web_per_class': final_test_web['per_class_f1']
+        if final_test_web
+        else None,
     }
     (out_dir / f'group_{model_type}_results.json').write_text(
         json.dumps(results, indent=2)

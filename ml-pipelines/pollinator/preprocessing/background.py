@@ -1,6 +1,4 @@
 """
-preprocessing/background.py
-============================
 Background modeling, foreground detection, contour filtering with large-motion
 tiling, and crop extraction. Also hosts StaticFilter, which suppresses bbox
 locations that appear repeatedly across frames (e.g. wind-blown flowers).

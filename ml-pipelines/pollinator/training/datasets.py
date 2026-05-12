@@ -1,6 +1,4 @@
 """
-training/datasets.py
-=====================
 Shared dataset primitives for binary and group classifier training:
 letterbox image normalization and a generic Dataset class over (path, label) pairs.
 """

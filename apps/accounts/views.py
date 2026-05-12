@@ -30,7 +30,9 @@ def register(request) -> Response:
         return Response({'error': 'Email exists'}, status=400)
 
     user = User.objects.create_user(
-        username=username, password=password, email=email,
+        username=username,
+        password=password,
+        email=email,
     )
 
     refresh = RefreshToken.for_user(user)
@@ -39,7 +41,9 @@ def register(request) -> Response:
     refresh['email'] = user.email
     refresh['is_staff'] = user.is_staff
 
-    return Response({
-        'access': str(refresh.access_token),
-        'refresh': str(refresh),
-    })
+    return Response(
+        {
+            'access': str(refresh.access_token),
+            'refresh': str(refresh),
+        }
+    )

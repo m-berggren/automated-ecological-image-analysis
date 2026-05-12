@@ -1,0 +1,21 @@
+meta {
+  name: Get missing run
+  type: http
+  seq: 6
+}
+
+get {
+  url: {{baseUrl}}/api/analysis/runs/999999/
+  body: none
+  auth: bearer
+}
+
+auth:bearer {
+  token: {{accessToken}}
+}
+
+tests {
+  test("status is 404", function() {
+    expect(res.status).to.equal(404);
+  });
+}

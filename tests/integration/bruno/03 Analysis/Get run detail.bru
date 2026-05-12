@@ -1,0 +1,26 @@
+meta {
+  name: Get run detail
+  type: http
+  seq: 4
+}
+
+get {
+  url: {{baseUrl}}/api/analysis/runs/{{runId}}/
+  body: none
+  auth: bearer
+}
+
+auth:bearer {
+  token: {{accessToken}}
+}
+
+tests {
+  test("status is 200", function() {
+    expect(res.status).to.equal(200);
+  });
+  test("body has progress fields", function() {
+    expect(res.body.processed_image_count).to.be.a("number");
+    expect(res.body.activity_log).to.be.an("array");
+    expect(res.body.config).to.be.an("object");
+  });
+}
