@@ -122,6 +122,10 @@
         </button>
       </div>
 
+      <div v-if="config.preprocessing.roi">
+          Roi selected {{ config.preprocessing.roi }}
+      </div>
+
       <!-- Advanced -->
       <button
         class="text-xs text-muted-foreground hover:text-foreground"
@@ -289,6 +293,7 @@
         v-if="showRoiModal"
         :image-url="previewUrl"
         @close="closeRoiModal"
+        @confirm="onSaveRoi"
       />
     </div>
 
@@ -340,6 +345,12 @@ interface PipelineConfig {
   group_classifier: { model_version_id: number | null; confidence: number }
   preprocessing: {
     use_roi: boolean
+    roi: null | {
+      x: number
+      y: number
+      width: number
+      height: number
+    }
     crop_pad_frac: number
     background_sample_size: number
     min_contour_area: number
@@ -358,6 +369,12 @@ const config = ref<PipelineConfig>({
   group_classifier: { model_version_id: null, confidence: 0.6 },
   preprocessing: {
     use_roi: false,
+    "roi": {
+      "x": 120,
+      "y": 80,
+      "width": 400,
+      "height": 300
+    },
     crop_pad_frac: 0.3,
     background_sample_size: 100,
     min_contour_area: 400,
@@ -573,5 +590,10 @@ function closeRoiModal() {
     URL.revokeObjectURL(previewUrl.value)
     previewUrl.value = null
   }
+}
+
+function onSaveRoi(roi: any) {
+  config.value.preprocessing.roi = roi
+  closeRoiModal()
 }
 </script>
