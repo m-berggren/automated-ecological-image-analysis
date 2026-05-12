@@ -1,6 +1,0 @@
-names:
-  0: Seed
-  1: Unsure
-path: data/seed
-train: images/train
-val: images/val

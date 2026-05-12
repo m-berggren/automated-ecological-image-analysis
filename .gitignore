@@ -10,10 +10,26 @@ __pycache__/
 .venv/
 
 # Images and labels
-data/seed/images/
-data/seed/labels/
-data/seed/train.txt
-data/seed/val.txt
+data/seed/cat_model/train/
+data/seed/cat_model/val/
+data/seed/cat_model/cohens_kappa
+data/seed/cat_model/train_sliced
+data/seed/cat_model/val_sliced
+data/seed/peh_model/train/
+data/seed/peh_model/val/
+data/seed/peh_model/cohens_kappa
+data/seed/peh_model/train_sliced
+data/seed/peh_model/val_sliced
+data/seed/phyca_model/train/
+data/seed/phyca_model/val/
+data/seed/phyca_model/cohens_kappa
+data/seed/phyca_model/train_sliced
+data/seed/phyca_model/val_sliced
+data/seed/vau_model/train/
+data/seed/vau_model/val/
+data/seed/vau_model/train_sliced
+data/seed/vau_model/val_sliced
+data/seed/vau_model/cohens_kappa
 
 # Jupyter notebook checkpoints
 data/seed/.ipynb_checkpoints/
@@ -23,6 +39,18 @@ ml-pipelines/notebooks/seed-counting/.ipynb_checkpoints/
 runs/
 sahi_results/
 
+# Images and labels
+data/seed/train/
+data/seed/val/
+
+# Jupyter notebook checkpoints
+data/seed/.ipynb_checkpoints/
+ml-pipelines/notebooks/seed-counting/.ipynb_checkpoints/
+
+# YOLO outputs
+runs/
+sahi_results/
+debug_outputs/
 # Django
 db.sqlite3
 staticfiles/
