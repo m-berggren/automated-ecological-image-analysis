@@ -102,11 +102,14 @@
                   :class="{ invisible: canUseTrainingPool }"
                   :aria-hidden="canUseTrainingPool"
                 >
-                  Not usable for YOLO — it trains on full reviewed images, not uploaded crops or
-                  the aggregated pool.
+                  Not usable for YOLO — it trains on full reviewed images, not uploaded crops or the
+                  aggregated pool.
                 </div>
               </div>
-              <button class="text-xs text-primary hover:underline shrink-0" @click="openReviewDrawer">
+              <button
+                class="text-xs text-primary hover:underline shrink-0"
+                @click="openReviewDrawer"
+              >
                 Browse pool →
               </button>
             </div>
@@ -144,8 +147,8 @@
           >
             <div class="text-sm font-medium">
               <template v-if="uploadedFiles.length">
-                {{ uploadedFiles.length }} file{{ uploadedFiles.length === 1 ? '' : 's' }} added
-                — drop more or add from
+                {{ uploadedFiles.length }} file{{ uploadedFiles.length === 1 ? '' : 's' }} added —
+                drop more or add from
                 <button class="text-primary hover:underline" @click.stop="triggerFilePicker">
                   files
                 </button>
@@ -187,10 +190,7 @@
 
           <!-- View / clear link row. Shown only when files exist. Clicking
                "View files" opens a modal so the form layout doesn't shift. -->
-          <div
-            v-if="uploadedFiles.length"
-            class="mt-2 text-xs flex items-center justify-end gap-3"
-          >
+          <div v-if="uploadedFiles.length" class="mt-2 text-xs flex items-center justify-end gap-3">
             <button class="text-primary hover:underline" @click.stop="filesModalOpen = true">
               View files →
             </button>
@@ -628,17 +628,11 @@
             >
               <span class="font-mono flex-1 truncate">{{ file.name }}</span>
               <span class="text-muted-foreground shrink-0">{{ formatFileSize(file.size) }}</span>
-              <button
-                class="text-muted-foreground hover:text-red-600"
-                @click="removeUpload(idx)"
-              >
+              <button class="text-muted-foreground hover:text-red-600" @click="removeUpload(idx)">
                 ✕
               </button>
             </li>
-            <li
-              v-if="!uploadedFiles.length"
-              class="text-center text-muted-foreground py-8"
-            >
+            <li v-if="!uploadedFiles.length" class="text-center text-muted-foreground py-8">
               No files added.
             </li>
           </ul>
@@ -758,9 +752,9 @@ const drawerFilter = ref<string>('all')
 const dragOver = ref(false)
 
 const settings = reactive({
-  train_split: 70,
-  val_split: 15,
-  test_split: 15,
+  train_split: 80,
+  val_split: 10,
+  test_split: 10,
   epochs: 5,
   stratified: true,
 })
@@ -928,20 +922,16 @@ async function loadTrainingJobs(versions: BackendModelVersion[]) {
   const jobs: BackendTrainingJobListEntry[] = await res.json()
 
   // version_name lookup so completed history rows show the produced model.
-  const versionNameById = new Map<number, string>(
-    versions.map((v) => [v.id, v.version_name]),
-  )
+  const versionNameById = new Map<number, string>(versions.map((v) => [v.id, v.version_name]))
 
   history.value = jobs.map((job): HistoryEntry => {
     const apiTrack = String(job.config?.track ?? '')
     const trackId = API_TO_UI_TRACK[apiTrack] ?? apiTrack
-    const trackLabel =
-      tracks.value.find((t) => t.id === trackId)?.label ?? apiTrack ?? 'Unknown'
+    const trackLabel = tracks.value.find((t) => t.id === trackId)?.label ?? apiTrack ?? 'Unknown'
     const duration =
       job.completed_at !== null
         ? Math.round(
-            (new Date(job.completed_at).getTime() - new Date(job.started_at).getTime())
-              / 1000,
+            (new Date(job.completed_at).getTime() - new Date(job.started_at).getTime()) / 1000,
           )
         : null
     return {
@@ -949,15 +939,14 @@ async function loadTrainingJobs(versions: BackendModelVersion[]) {
       track_id: trackId,
       track_label: trackLabel,
       version_name:
-        (job.resulting_model !== null && versionNameById.get(job.resulting_model))
-        || `${apiTrack || 'job'}-#${job.id}`,
+        (job.resulting_model !== null && versionNameById.get(job.resulting_model)) ||
+        `${apiTrack || 'job'}-#${job.id}`,
       samples_used: job.image_count,
       epochs_total: job.total_epochs,
       started_at: job.started_at,
       duration_seconds: duration,
       status: job.status as HistoryEntry['status'],
-      main_metric_label:
-        tracks.value.find((t) => t.id === trackId)?.metric_label ?? '',
+      main_metric_label: tracks.value.find((t) => t.id === trackId)?.metric_label ?? '',
       main_metric_value: null,
       initiated_by: '',
     }

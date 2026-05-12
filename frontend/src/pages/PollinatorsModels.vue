@@ -22,6 +22,13 @@
         {{ totalVersions }} {{ totalVersions === 1 ? 'version' : 'versions' }} ·
         {{ activeCount }} active
       </span>
+      <button
+        v-if="canUploadModels"
+        class="px-3 py-1.5 rounded-md text-xs font-medium bg-primary text-primary-foreground hover:bg-primary/90"
+        @click="openUpload"
+      >
+        Upload model
+      </button>
     </div>
 
     <!-- Body -->
@@ -140,6 +147,95 @@
         </section>
       </div>
     </div>
+
+    <!-- Upload model modal -->
+    <div
+      v-if="uploadOpen"
+      class="fixed inset-0 z-50 flex items-center justify-center bg-black/40 p-4"
+      @click.self="uploadOpen = false"
+    >
+      <div class="bg-card border border-border rounded-xl shadow-xl w-full max-w-md">
+        <header class="px-5 py-3 border-b border-border flex items-center justify-between">
+          <h3 class="font-semibold">Upload existing model</h3>
+          <button
+            class="text-muted-foreground hover:text-foreground"
+            @click="uploadOpen = false"
+          >
+            ✕
+          </button>
+        </header>
+        <div class="p-5 space-y-3 text-sm">
+          <label class="block">
+            <span class="text-xs font-medium text-muted-foreground">Kind</span>
+            <select
+              v-model="uploadKind"
+              class="mt-1 w-full px-2 py-1.5 rounded border border-border bg-background"
+            >
+              <option v-for="opt in UPLOAD_KIND_OPTIONS" :key="opt.value" :value="opt.value">
+                {{ opt.label }}
+              </option>
+            </select>
+          </label>
+          <label class="block">
+            <span class="text-xs font-medium text-muted-foreground">
+              Version name
+              <span class="text-red-600">*</span>
+            </span>
+            <input
+              v-model="uploadVersionName"
+              type="text"
+              placeholder="e.g. yolo-v1"
+              class="mt-1 w-full px-2 py-1.5 rounded border border-border bg-background font-mono"
+            />
+            <span class="text-[11px] text-muted-foreground">
+              Used as the filename and must be unique.
+            </span>
+          </label>
+          <label class="block">
+            <span class="text-xs font-medium text-muted-foreground">Description</span>
+            <textarea
+              v-model="uploadDescription"
+              rows="2"
+              placeholder="Optional notes on dataset, training, etc."
+              class="mt-1 w-full px-2 py-1.5 rounded border border-border bg-background"
+            />
+          </label>
+          <label class="block">
+            <span class="text-xs font-medium text-muted-foreground">
+              Weights file
+              <span class="text-red-600">*</span>
+            </span>
+            <input
+              type="file"
+              accept=".pt,.pth,.bin"
+              class="mt-1 w-full text-xs"
+              @change="pickUploadFile"
+            />
+            <span class="text-[11px] text-muted-foreground">
+              .pt / .pth — metadata (img_size, arch, epoch) is auto-extracted if present.
+            </span>
+          </label>
+          <p v-if="uploadError" class="text-xs text-red-600">{{ uploadError }}</p>
+        </div>
+        <footer class="px-5 py-3 border-t border-border flex items-center justify-end gap-2">
+          <button
+            class="px-3 py-1.5 rounded-md text-sm font-medium text-muted-foreground hover:bg-muted"
+            :disabled="uploadSubmitting"
+            @click="uploadOpen = false"
+          >
+            Cancel
+          </button>
+          <button
+            class="px-3 py-1.5 rounded-md text-sm font-medium bg-primary text-primary-foreground hover:bg-primary/90 disabled:opacity-50 disabled:cursor-not-allowed"
+            :disabled="uploadSubmitting"
+            @click="submitUpload"
+          >
+            <span v-if="uploadSubmitting">Uploading…</span>
+            <span v-else>Upload</span>
+          </button>
+        </footer>
+      </div>
+    </div>
   </div>
 </template>
 
@@ -148,6 +244,7 @@ import { computed, onMounted, ref } from 'vue'
 import { useRoute } from 'vue-router'
 import PageHeader from '@/components/PageHeader.vue'
 import { api } from '@/api'
+import { useAuthStore } from '@/stores/auth'
 import {
   tracksFromVersions,
   type BackendModelVersion,
@@ -174,11 +271,81 @@ interface TrackMock {
 }
 
 const route = useRoute()
+const auth = useAuthStore()
 const loading = ref(true)
 const loadError = ref('')
 const tracks = ref<Track[]>([])
 const kindFilter = ref<string>('all')
 const expandedIds = ref<Set<number>>(new Set())
+
+// Toggle that gates the "Upload model" button. Currently checks staff
+// status from the auth store; flip to `true` to make the button visible
+// to everyone (e.g. for local testing without staff users).
+const canUploadModels = computed(() => auth.user?.is_staff === true)
+
+// --- Upload modal state ---
+const uploadOpen = ref(false)
+const uploadKind = ref<string>('detector')
+const uploadVersionName = ref('')
+const uploadDescription = ref('')
+const uploadFile = ref<File | null>(null)
+const uploadSubmitting = ref(false)
+const uploadError = ref('')
+
+const UPLOAD_KIND_OPTIONS = [
+  { value: 'detector', label: 'YOLO detector' },
+  { value: 'binary_classifier', label: 'EfficientNet binary classifier' },
+  { value: 'group_classifier', label: 'InsectNet group classifier' },
+]
+
+function openUpload() {
+  uploadKind.value = 'detector'
+  uploadVersionName.value = ''
+  uploadDescription.value = ''
+  uploadFile.value = null
+  uploadError.value = ''
+  uploadOpen.value = true
+}
+
+function pickUploadFile(e: Event) {
+  const target = e.target as HTMLInputElement
+  uploadFile.value = target.files?.[0] ?? null
+}
+
+async function submitUpload() {
+  uploadError.value = ''
+  if (!uploadFile.value) {
+    uploadError.value = 'Pick a .pt or .pth file.'
+    return
+  }
+  if (!uploadVersionName.value.trim()) {
+    uploadError.value = 'Version name is required.'
+    return
+  }
+  const form = new FormData()
+  form.append('module', 'pollinators')
+  form.append('kind', uploadKind.value)
+  form.append('version_name', uploadVersionName.value.trim())
+  form.append('description', uploadDescription.value.trim())
+  form.append('weights_file', uploadFile.value)
+
+  uploadSubmitting.value = true
+  try {
+    const res = await api('/api/analysis/models/', { method: 'POST', body: form })
+    if (!res.ok) {
+      const data = await res.json().catch(() => ({}))
+      throw new Error(data.detail || `HTTP ${res.status}`)
+    }
+    uploadOpen.value = false
+    // Reload to pick up the new version + any introspected parameters.
+    loading.value = true
+    await loadFromApi()
+  } catch (e) {
+    uploadError.value = e instanceof Error ? e.message : String(e)
+  } finally {
+    uploadSubmitting.value = false
+  }
+}
 
 const previewMode = computed<string | null>(() => {
   const value = route.query.preview

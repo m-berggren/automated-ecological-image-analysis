@@ -44,3 +44,5 @@ static/vue/
 *.txt
 
 *.pth
+
+media/

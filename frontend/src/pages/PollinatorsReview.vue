@@ -121,12 +121,22 @@
                 role="button"
                 tabindex="0"
                 class="relative aspect-square cursor-pointer focus:outline-none"
-                :style="{ backgroundColor: classBgFor(d.yolo_class) }"
+                :style="{ backgroundColor: classBgFor(primaryClass(d)) }"
                 @click="selectedId = d.id"
                 @keydown.enter.prevent="selectedId = d.id"
               >
-                <div class="absolute inset-0 flex items-center justify-center text-2xl font-bold opacity-30">
-                  {{ classGlyph(d.yolo_class) }}
+                <img
+                  v-if="d.crop_url"
+                  :src="d.crop_url"
+                  :alt="`Detection ${d.id}`"
+                  loading="lazy"
+                  class="absolute inset-0 w-full h-full object-contain"
+                />
+                <div
+                  v-else
+                  class="absolute inset-0 flex items-center justify-center text-2xl font-bold opacity-30"
+                >
+                  {{ classGlyph(primaryClass(d)) }}
                 </div>
                 <span
                   class="absolute top-1 left-1 w-2 h-2 rounded-full"
@@ -142,7 +152,7 @@
                 </span>
                 <div
                   class="absolute bottom-0 left-0 right-0 h-1.5"
-                  :style="{ backgroundColor: classColor(d.yolo_class) }"
+                  :style="{ backgroundColor: classColor(primaryClass(d)) }"
                 />
               </div>
               <div
@@ -186,16 +196,41 @@
         </header>
 
         <div class="flex-1 overflow-auto">
-          <!-- Crop preview, edge-to-edge -->
+          <!-- Source image with bbox overlay + crop thumbnail (PiP). -->
           <div
-            class="aspect-video flex items-center justify-center text-7xl font-bold relative"
-            :style="{ backgroundColor: classBgFor(selected.yolo_class) }"
+            class="aspect-video relative overflow-hidden"
+            :style="{ backgroundColor: classBgFor(primaryClass(selected)) }"
           >
             <div
-              class="absolute top-0 left-0 right-0 h-1.5"
-              :style="{ backgroundColor: classColor(selected.yolo_class) }"
+              class="absolute top-0 left-0 right-0 h-1.5 z-10"
+              :style="{ backgroundColor: classColor(primaryClass(selected)) }"
             />
-            <span class="opacity-30">{{ classGlyph(selected.yolo_class) }}</span>
+            <svg
+              v-if="selected.source_image_url && sourceImage.w"
+              :viewBox="`0 0 ${sourceImage.w} ${sourceImage.h}`"
+              preserveAspectRatio="xMidYMid meet"
+              class="absolute inset-0 w-full h-full"
+            >
+              <image
+                :href="selected.source_image_url"
+                :width="sourceImage.w"
+                :height="sourceImage.h"
+              />
+              <rect
+                v-if="selected.bbox"
+                :x="selected.bbox.x1"
+                :y="selected.bbox.y1"
+                :width="selected.bbox.w"
+                :height="selected.bbox.h"
+                fill="none"
+                :stroke="classColor(primaryClass(selected))"
+                :stroke-width="bboxStrokeWidth"
+              />
+            </svg>
+            <span
+              v-else
+              class="absolute inset-0 flex items-center justify-center text-7xl font-bold opacity-30"
+            >{{ classGlyph(primaryClass(selected)) }}</span>
           </div>
 
           <!-- Predictions + Label: stacked below xl, side-by-side at xl+ (Label left, Predictions right) -->
@@ -206,7 +241,7 @@
                 Predictions
               </div>
               <div class="space-y-1.5 text-sm">
-                <div class="flex items-center gap-2">
+                <div v-if="selected.yolo_class != null" class="flex items-center gap-2">
                   <span class="text-muted-foreground w-20">YOLO</span>
                   <span
                     class="w-2 h-2 rounded-full shrink-0"
@@ -214,10 +249,10 @@
                   />
                   <span class="font-medium flex-1">{{ classLabel(selected.yolo_class) }}</span>
                   <span class="font-mono text-xs text-muted-foreground">
-                    {{ selected.yolo_confidence.toFixed(2) }}
+                    {{ (selected.yolo_confidence ?? 0).toFixed(2) }}
                   </span>
                 </div>
-                <div class="flex items-center gap-2">
+                <div v-if="selected.insectnet_class != null" class="flex items-center gap-2">
                   <span class="text-muted-foreground w-20">InsectNet</span>
                   <span
                     class="w-2 h-2 rounded-full shrink-0"
@@ -225,7 +260,7 @@
                   />
                   <span class="font-medium flex-1">{{ classLabel(selected.insectnet_class) }}</span>
                   <span class="font-mono text-xs text-muted-foreground">
-                    {{ selected.insectnet_confidence.toFixed(2) }}
+                    {{ (selected.insectnet_confidence ?? 0).toFixed(2) }}
                   </span>
                 </div>
                 <div v-if="hasDisagreement(selected)" class="text-xs text-amber-700 pt-1">
@@ -315,16 +350,30 @@ type Source = 'yolo' | 'preprocessing' | 'both'
 
 const LOW_CONFIDENCE_THRESHOLD = 0.6
 
+interface BBox {
+  x1: number
+  y1: number
+  x2: number
+  y2: number
+  w: number
+  h: number
+}
+
 interface Detection {
   id: number
-  yolo_class: ClassName
-  yolo_confidence: number
-  insectnet_class: ClassName
-  insectnet_confidence: number
+  // YOLO-only detections have null insectnet_*, preprocessing-only have null
+  // yolo_*. Only source='both' detections populate both branches.
+  yolo_class: ClassName | null
+  yolo_confidence: number | null
+  insectnet_class: ClassName | null
+  insectnet_confidence: number | null
   source: Source
   reviewer_status: ReviewerStatus
   reviewer_label: ClassName | null
   source_image_filename: string
+  bbox: BBox | null
+  source_image_url: string | null
+  crop_url: string | null
 }
 
 interface ReviewBundle {
@@ -366,31 +415,7 @@ interface FailedEntry {
 const failedSaves = ref<Map<number, FailedEntry>>(new Map())
 const retrying = ref(false)
 
-const previewMode = computed<string | null>(() => {
-  const value = route.query.preview
-  return typeof value === 'string' ? value : null
-})
-
-onMounted(async () => {
-  if (previewMode.value) {
-    const bundle = await loadPreview(previewMode.value)
-    if (bundle) {
-      run.value = bundle.run
-      detections.value = bundle.detections
-      loading.value = false
-      return
-    }
-  }
-  await loadFromApi()
-})
-
-async function loadPreview(_mode: string): Promise<ReviewBundle | null> {
-  if (!import.meta.env.DEV) return null
-  const { default: mocks } = await import('@/mocks/pollinator-detections.json')
-  const bundle = (mocks as Record<string, ReviewBundle | undefined>).default
-  if (!bundle) return null
-  return JSON.parse(JSON.stringify(bundle))
-}
+onMounted(loadFromApi)
 
 async function loadFromApi() {
   const id = route.params.id as string
@@ -437,13 +462,14 @@ const filteredDetections = computed(() => {
   if (needsAttentionOnly.value) {
     list = list.filter((d) => needsAttention(d))
   }
-  return [...list].sort((a, b) => a.insectnet_confidence - b.insectnet_confidence)
+  return [...list].sort((a, b) => maxConfidence(a) - maxConfidence(b))
 })
 
 const groupedDetections = computed(() => {
   const groups = new Map<ClassName, Detection[]>()
   for (const d of filteredDetections.value) {
-    const cls = d.yolo_class
+    const cls = primaryClass(d)
+    if (cls == null) continue
     if (!groups.has(cls)) groups.set(cls, [])
     groups.get(cls)!.push(d)
   }
@@ -478,25 +504,79 @@ watch(selectedId, async (id) => {
   el?.scrollIntoView({ block: 'nearest', behavior: 'smooth' })
 })
 
-function classColor(cls: string): string {
+// Preloaded natural dimensions of the currently-selected source image.
+// Needed so the SVG viewBox can match the bbox coords, which are in raw
+// source-image pixels. Reset on URL change so a stale size never lingers.
+const sourceImage = ref<{ w: number; h: number; url: string | null }>({
+  w: 0,
+  h: 0,
+  url: null,
+})
+
+watch(
+  () => selected.value?.source_image_url ?? null,
+  (url) => {
+    sourceImage.value = { w: 0, h: 0, url }
+    if (!url) return
+    const img = new Image()
+    img.onload = () => {
+      if (sourceImage.value.url === url) {
+        sourceImage.value = {
+          w: img.naturalWidth,
+          h: img.naturalHeight,
+          url,
+        }
+      }
+    }
+    img.src = url
+  },
+  { immediate: true },
+)
+
+// SVG strokes scale with the viewBox, so size the bbox outline relative to
+// the source image rather than the screen. ~0.4% of the longest side reads
+// as a 4px line on a 1000px image.
+const bboxStrokeWidth = computed(() => {
+  const longest = Math.max(sourceImage.value.w, sourceImage.value.h)
+  return Math.max(2, longest * 0.004)
+})
+
+function classColor(cls: string | null): string {
+  if (!cls) return '#9aa3ab'
   return CLASS_COLORS[cls as ClassName] ?? '#9aa3ab'
 }
-function classBgFor(cls: string): string {
+function classBgFor(cls: string | null): string {
   const hex = classColor(cls)
   return hex + '14'
 }
-function classGlyph(cls: string): string {
+function classGlyph(cls: string | null): string {
+  if (!cls) return '?'
   return CLASS_GLYPHS[cls as ClassName] ?? '?'
 }
 function classLabel(cls: string | null): string {
   if (!cls) return '—'
   return cls[0].toUpperCase() + cls.slice(1)
 }
+// Class shown on the grid card and used for grouping/coloring. Falls back
+// to whichever branch produced the detection when only one is populated.
+function primaryClass(d: Detection): ClassName | null {
+  return d.yolo_class ?? d.insectnet_class ?? null
+}
+// Highest of the populated confidences. 0 when both are missing (shouldn't
+// happen with valid data, defensive default).
+function maxConfidence(d: Detection): number {
+  return Math.max(d.yolo_confidence ?? 0, d.insectnet_confidence ?? 0)
+}
 function hasDisagreement(d: Detection): boolean {
-  return d.yolo_class !== d.insectnet_class
+  // Disagreement only meaningful when both branches contributed a class.
+  return (
+    d.yolo_class != null &&
+    d.insectnet_class != null &&
+    d.yolo_class !== d.insectnet_class
+  )
 }
 function isLowConfidence(d: Detection): boolean {
-  return Math.max(d.yolo_confidence, d.insectnet_confidence) < LOW_CONFIDENCE_THRESHOLD
+  return maxConfidence(d) < LOW_CONFIDENCE_THRESHOLD
 }
 function needsAttention(d: Detection): boolean {
   return hasDisagreement(d) || isLowConfidence(d)
@@ -529,13 +609,18 @@ function statusBadgeClass(s: ReviewerStatus): string {
 function statusLabel(s: ReviewerStatus): string {
   return s[0].toUpperCase() + s.slice(1)
 }
-function suggestedClass(d: Detection): ClassName {
-  return d.insectnet_confidence >= d.yolo_confidence ? d.insectnet_class : d.yolo_class
+function suggestedClass(d: Detection): ClassName | null {
+  if (d.yolo_class == null) return d.insectnet_class
+  if (d.insectnet_class == null) return d.yolo_class
+  return (d.insectnet_confidence ?? 0) >= (d.yolo_confidence ?? 0)
+    ? d.insectnet_class
+    : d.yolo_class
 }
 
 function effectiveLabel(d: Detection): ClassName | null {
   if (d.reviewer_label) return d.reviewer_label
-  if (d.yolo_class === d.insectnet_class) return d.yolo_class
+  // Consensus only when both branches contributed and agree.
+  if (d.yolo_class != null && d.yolo_class === d.insectnet_class) return d.yolo_class
   return null
 }
 
@@ -596,7 +681,6 @@ async function applyAction(status: ReviewerStatus, label: ClassName | null) {
   d.reviewer_label = label
   advanceToNext()
 
-  if (previewMode.value) return
   const ok = await patchDetection(d.id, status, label)
   if (!ok) {
     failedSaves.value.set(d.id, { status, label, prevStatus, prevLabel })
@@ -643,7 +727,6 @@ async function applyToBulk(status: ReviewerStatus, label: ClassName | null) {
   }
   clearBulk()
 
-  if (previewMode.value) return
   const ok = await postBulkReview(ids, status, label)
   if (!ok) {
     for (const id of ids) {
@@ -724,10 +807,10 @@ function onBulkCorrectChange() {
 // Confirmed only when both models agreed and the user picked that class.
 // When models disagree there's no single prediction to confirm, so any pick
 // is a correction (and the label is preserved server-side).
-function confirmAs(cls: ClassName) {
-  if (!selected.value) return
+function confirmAs(cls: ClassName | null) {
+  if (!selected.value || cls == null) return
   const d = selected.value
-  const consensus = d.yolo_class === d.insectnet_class ? d.yolo_class : null
+  const consensus = d.yolo_class != null && d.yolo_class === d.insectnet_class ? d.yolo_class : null
   if (consensus === cls) applyAction('confirmed', null)
   else applyAction('corrected', cls)
 }
