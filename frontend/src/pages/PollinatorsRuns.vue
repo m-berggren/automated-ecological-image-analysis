@@ -132,6 +132,14 @@
                 >
                   {{ run.status }}
                 </span>
+                <button
+                  v-if="run.status === 'completed'"
+                  class="text-xs px-2 py-1 rounded border border-border hover:bg-muted shrink-0 disabled:opacity-50"
+                  :disabled="exportingRunId === run.id"
+                  @click="exportRunCsv(run.id)"
+                >
+                  {{ exportingRunId === run.id ? 'Exporting…' : 'Export CSV' }}
+                </button>
                 <RouterLink
                   :to="run.status === 'completed'
                     ? `/pollinators/runs/${run.id}/review`
@@ -216,6 +224,32 @@ const loadError = ref('')
 const uploads = ref<Upload[]>([])
 const runs = ref<Run[]>([])
 const statusFilter = ref<StatusFilter>('all')
+const exportingRunId = ref<number | null>(null)
+
+async function exportRunCsv(runId: number) {
+  if (exportingRunId.value != null) return
+  exportingRunId.value = runId
+  try {
+    const res = await api(`/api/pollinator/runs/${runId}/export.csv`)
+    if (!res.ok) {
+      loadError.value = `Export: HTTP ${res.status}`
+      return
+    }
+    const blob = await res.blob()
+    const url = URL.createObjectURL(blob)
+    const a = document.createElement('a')
+    a.href = url
+    a.download = `run-${runId}-detections.csv`
+    document.body.appendChild(a)
+    a.click()
+    a.remove()
+    URL.revokeObjectURL(url)
+  } catch (e) {
+    loadError.value = e instanceof Error ? e.message : String(e)
+  } finally {
+    exportingRunId.value = null
+  }
+}
 
 const previewMode = computed<string | null>(() => {
   const value = route.query.preview

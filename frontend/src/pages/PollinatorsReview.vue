@@ -46,15 +46,29 @@
             <option value="all">All</option>
           </select>
           <label class="ml-auto flex items-center gap-1 text-muted-foreground">
-            <input v-model="needsAttentionOnly" type="checkbox" />
-            Needs attention
+            Confidence
+            <select
+              v-model="confidenceFilter"
+              class="px-2 py-1 rounded border border-border bg-background"
+            >
+              <option value="all">All</option>
+              <option value="needs_attention">Needs attention</option>
+              <option value="agreement">Models agree</option>
+            </select>
           </label>
         </div>
-        <div class="text-xs text-muted-foreground flex items-center justify-between">
-          <span>
+        <div class="text-xs text-muted-foreground flex items-center justify-between gap-3">
+          <span class="flex-1 min-w-0 truncate">
             {{ filteredDetections.length }} of {{ detections.length }} detections ·
             sorted by ascending InsectNet confidence
           </span>
+          <button
+            class="text-primary hover:underline disabled:text-muted-foreground disabled:no-underline"
+            :disabled="exporting || !run"
+            @click="exportCsv"
+          >
+            {{ exporting ? 'Exporting…' : 'Export CSV' }}
+          </button>
           <button
             class="text-primary hover:underline"
             :disabled="!filteredDetections.length"
@@ -196,10 +210,15 @@
         </header>
 
         <div class="flex-1 overflow-auto">
-          <!-- Source image with bbox overlay + crop thumbnail (PiP). -->
+          <!-- Source image with bbox overlay. Click to open the zoom modal. -->
           <div
             class="aspect-video relative overflow-hidden"
+            :class="selected.source_image_url && sourceImage.w ? 'cursor-zoom-in' : ''"
             :style="{ backgroundColor: classBgFor(primaryClass(selected)) }"
+            role="button"
+            tabindex="0"
+            @click="openZoom"
+            @keydown.enter.prevent="openZoom"
           >
             <div
               class="absolute top-0 left-0 right-0 h-1.5 z-10"
@@ -217,13 +236,14 @@
                 :height="sourceImage.h"
               />
               <rect
-                v-if="selected.bbox"
-                :x="selected.bbox.x1"
-                :y="selected.bbox.y1"
-                :width="selected.bbox.w"
-                :height="selected.bbox.h"
-                fill="none"
-                :stroke="classColor(primaryClass(selected))"
+                v-if="bboxOutline"
+                :x="bboxOutline.x"
+                :y="bboxOutline.y"
+                :width="bboxOutline.width"
+                :height="bboxOutline.height"
+                fill="#ef4444"
+                fill-opacity="0.18"
+                stroke="#ef4444"
                 :stroke-width="bboxStrokeWidth"
               />
             </svg>
@@ -334,6 +354,58 @@
     </section>
     </div>
   </div>
+
+  <!-- Fullscreen zoom for the selected detection's source image. Wheel-zooms
+       around the cursor; click-and-drag pans. ESC or backdrop closes. -->
+  <dialog
+    ref="zoomDialog"
+    class="m-0 p-0 w-screen h-screen max-w-none max-h-none bg-black/95 backdrop:bg-black/95"
+    @close="onZoomClose"
+    @click.self="closeZoom"
+  >
+    <div
+      v-if="selected && selected.source_image_url && sourceImage.w"
+      class="w-screen h-screen relative select-none overflow-hidden"
+      @wheel.prevent="onZoomWheel"
+      @mousedown="onPanStart"
+      @mousemove="onPanMove"
+      @mouseup="onPanEnd"
+      @mouseleave="onPanEnd"
+      :style="{ cursor: panning ? 'grabbing' : 'grab' }"
+    >
+      <svg
+        :viewBox="`0 0 ${sourceImage.w} ${sourceImage.h}`"
+        preserveAspectRatio="xMidYMid meet"
+        class="w-full h-full"
+      >
+        <g :transform="`translate(${zoom.tx} ${zoom.ty}) scale(${zoom.scale})`">
+          <image
+            :href="selected.source_image_url"
+            :width="sourceImage.w"
+            :height="sourceImage.h"
+          />
+          <rect
+            v-if="bboxOutline"
+            :x="bboxOutline.x"
+            :y="bboxOutline.y"
+            :width="bboxOutline.width"
+            :height="bboxOutline.height"
+            fill="none"
+            stroke="#ef4444"
+            :stroke-width="bboxStrokeWidth"
+            vector-effect="non-scaling-stroke"
+          />
+        </g>
+      </svg>
+      <button
+        class="absolute top-4 right-4 px-3 py-1.5 rounded-md bg-white/10 text-white text-sm hover:bg-white/20"
+        @click.stop="closeZoom"
+      >Close (Esc)</button>
+      <div class="absolute bottom-4 left-1/2 -translate-x-1/2 text-white/60 text-xs font-mono">
+        scroll to zoom · drag to pan · {{ Math.round(zoom.scale * 100) }}%
+      </div>
+    </div>
+  </dialog>
 </template>
 
 <script setup lang="ts">
@@ -346,6 +418,7 @@ import { api } from '@/api'
 type ClassName = 'fly' | 'bumblebee' | 'butterfly' | 'other'
 type ReviewerStatus = 'unreviewed' | 'confirmed' | 'corrected' | 'rejected' | 'unsure'
 type StatusFilter = 'unreviewed' | 'unsure' | 'reviewed' | 'all'
+type ConfidenceFilter = 'all' | 'needs_attention' | 'agreement'
 type Source = 'yolo' | 'preprocessing' | 'both'
 
 const LOW_CONFIDENCE_THRESHOLD = 0.6
@@ -402,7 +475,7 @@ const run = ref<ReviewBundle['run'] | null>(null)
 const detections = ref<Detection[]>([])
 const selectedId = ref<number | null>(null)
 const statusFilter = ref<StatusFilter>('unreviewed')
-const needsAttentionOnly = ref(false)
+const confidenceFilter = ref<ConfidenceFilter>('all')
 const bulkIds = ref<Set<number>>(new Set())
 const bulkCorrectClass = ref<'' | ClassName>('')
 
@@ -414,6 +487,7 @@ interface FailedEntry {
 }
 const failedSaves = ref<Map<number, FailedEntry>>(new Map())
 const retrying = ref(false)
+const exporting = ref(false)
 
 onMounted(loadFromApi)
 
@@ -459,8 +533,10 @@ const filteredDetections = computed(() => {
         d.reviewer_status === 'rejected',
     )
   }
-  if (needsAttentionOnly.value) {
+  if (confidenceFilter.value === 'needs_attention') {
     list = list.filter((d) => needsAttention(d))
+  } else if (confidenceFilter.value === 'agreement') {
+    list = list.filter((d) => modelsAgree(d))
   }
   return [...list].sort((a, b) => maxConfidence(a) - maxConfidence(b))
 })
@@ -472,6 +548,24 @@ const groupedDetections = computed(() => {
     if (cls == null) continue
     if (!groups.has(cls)) groups.set(cls, [])
     groups.get(cls)!.push(d)
+  }
+  // Within each class, cluster detections that share a source image so a
+  // reviewer who hits a multi-fly photo sees those tiles next to each
+  // other. Tie-break by the original ascending-confidence order so the
+  // worst-first sort still wins between images.
+  for (const list of groups.values()) {
+    const firstIdxByImage = new Map<string, number>()
+    list.forEach((d, i) => {
+      if (!firstIdxByImage.has(d.source_image_filename)) {
+        firstIdxByImage.set(d.source_image_filename, i)
+      }
+    })
+    list.sort((a, b) => {
+      const ai = firstIdxByImage.get(a.source_image_filename)!
+      const bi = firstIdxByImage.get(b.source_image_filename)!
+      if (ai !== bi) return ai - bi
+      return maxConfidence(a) - maxConfidence(b)
+    })
   }
   return CLASSES.filter((cls) => groups.has(cls)).map((cls) => ({
     label: classLabel(cls),
@@ -534,12 +628,105 @@ watch(
 )
 
 // SVG strokes scale with the viewBox, so size the bbox outline relative to
-// the source image rather than the screen. ~0.4% of the longest side reads
-// as a 4px line on a 1000px image.
+// the source image rather than the screen. ~0.15% of the longest side
+// renders as a hairline on a high-res photo without covering small insects.
 const bboxStrokeWidth = computed(() => {
   const longest = Math.max(sourceImage.value.w, sourceImage.value.h)
-  return Math.max(2, longest * 0.004)
+  return Math.max(1, longest * 0.0015)
 })
+
+// The model's bbox sits tight against the insect, so drawing the outline
+// right on it covers the edges. Expand the rectangle outward by ~8% of
+// the longer bbox side so the line frames the insect with a small gap.
+const bboxOutline = computed(() => {
+  const b = selected.value?.bbox
+  if (!b) return null
+  const margin = Math.max(b.w, b.h) * 0.08
+  return {
+    x: b.x1 - margin,
+    y: b.y1 - margin,
+    width: b.w + 2 * margin,
+    height: b.h + 2 * margin,
+  }
+})
+
+// Fullscreen zoom modal. State lives in viewBox units; the SVG <g> is
+// translated then scaled, so the wheel-around-cursor math has to convert
+// the cursor's client coords into viewBox coords before applying.
+const zoomDialog = ref<HTMLDialogElement | null>(null)
+const zoom = ref({ scale: 1, tx: 0, ty: 0 })
+const panning = ref(false)
+const panStart = ref({ x: 0, y: 0, tx: 0, ty: 0 })
+
+function openZoom() {
+  if (!selected.value?.source_image_url || !sourceImage.value.w) return
+  zoom.value = { scale: 1, tx: 0, ty: 0 }
+  zoomDialog.value?.showModal()
+}
+
+function closeZoom() {
+  zoomDialog.value?.close()
+}
+
+function onZoomClose() {
+  panning.value = false
+}
+
+// Zoom toward the cursor: keep the source-image point under the cursor
+// fixed while the scale changes. Done by adjusting the translate so the
+// post-scale cursor location matches the pre-scale one.
+function onZoomWheel(e: WheelEvent) {
+  const target = e.currentTarget as HTMLElement
+  const rect = target.getBoundingClientRect()
+  // Cursor in viewBox coords: the SVG fills the container and uses
+  // preserveAspectRatio=meet, so map via the longest fitted side.
+  const sx = sourceImage.value.w
+  const sy = sourceImage.value.h
+  const fit = Math.min(rect.width / sx, rect.height / sy)
+  const offX = (rect.width - sx * fit) / 2
+  const offY = (rect.height - sy * fit) / 2
+  const vx = (e.clientX - rect.left - offX) / fit
+  const vy = (e.clientY - rect.top - offY) / fit
+
+  const factor = e.deltaY < 0 ? 1.2 : 1 / 1.2
+  const next = Math.max(1, Math.min(20, zoom.value.scale * factor))
+  if (next === zoom.value.scale) return
+  const k = next / zoom.value.scale
+  zoom.value = {
+    scale: next,
+    tx: vx - k * (vx - zoom.value.tx),
+    ty: vy - k * (vy - zoom.value.ty),
+  }
+}
+
+function onPanStart(e: MouseEvent) {
+  if (e.button !== 0) return
+  panning.value = true
+  panStart.value = {
+    x: e.clientX,
+    y: e.clientY,
+    tx: zoom.value.tx,
+    ty: zoom.value.ty,
+  }
+}
+
+function onPanMove(e: MouseEvent) {
+  if (!panning.value) return
+  const target = e.currentTarget as HTMLElement
+  const rect = target.getBoundingClientRect()
+  const sx = sourceImage.value.w
+  const sy = sourceImage.value.h
+  const fit = Math.min(rect.width / sx, rect.height / sy)
+  zoom.value = {
+    ...zoom.value,
+    tx: panStart.value.tx + (e.clientX - panStart.value.x) / fit,
+    ty: panStart.value.ty + (e.clientY - panStart.value.y) / fit,
+  }
+}
+
+function onPanEnd() {
+  panning.value = false
+}
 
 function classColor(cls: string | null): string {
   if (!cls) return '#9aa3ab'
@@ -580,6 +767,17 @@ function isLowConfidence(d: Detection): boolean {
 }
 function needsAttention(d: Detection): boolean {
   return hasDisagreement(d) || isLowConfidence(d)
+}
+// Both branches fired, matched on class, and were each above the low-conf
+// floor. The inverse of needsAttention: tiles a reviewer can blow through.
+function modelsAgree(d: Detection): boolean {
+  return (
+    d.yolo_class != null &&
+    d.insectnet_class != null &&
+    d.yolo_class === d.insectnet_class &&
+    (d.yolo_confidence ?? 0) >= LOW_CONFIDENCE_THRESHOLD &&
+    (d.insectnet_confidence ?? 0) >= LOW_CONFIDENCE_THRESHOLD
+  )
 }
 function reviewedFade(d: Detection): boolean {
   return (
@@ -704,6 +902,31 @@ function clearBulk() {
 
 function selectAllVisible() {
   bulkIds.value = new Set(filteredDetections.value.map((d) => d.id))
+}
+
+async function exportCsv() {
+  if (!run.value || exporting.value) return
+  exporting.value = true
+  try {
+    const res = await api(`/api/pollinator/runs/${run.value.id}/export.csv`)
+    if (!res.ok) {
+      loadError.value = `Export: HTTP ${res.status}`
+      return
+    }
+    const blob = await res.blob()
+    const url = URL.createObjectURL(blob)
+    const a = document.createElement('a')
+    a.href = url
+    a.download = `run-${run.value.id}-detections.csv`
+    document.body.appendChild(a)
+    a.click()
+    a.remove()
+    URL.revokeObjectURL(url)
+  } catch (e) {
+    loadError.value = e instanceof Error ? e.message : String(e)
+  } finally {
+    exporting.value = false
+  }
 }
 
 async function applyToBulk(status: ReviewerStatus, label: ClassName | null) {
@@ -842,6 +1065,7 @@ function navigate(delta: number) {
 
 function onKeydown(e: KeyboardEvent) {
   if (!selected.value) return
+  if (zoomDialog.value?.open) return
   if (e.target instanceof HTMLElement && ['INPUT', 'SELECT', 'TEXTAREA'].includes(e.target.tagName)) {
     return
   }

@@ -1,13 +1,23 @@
+import csv
 from collections import Counter
+from pathlib import Path
 
 from django.db import transaction
 from django.db.models import QuerySet
+from django.http import StreamingHttpResponse
+from django.shortcuts import get_object_or_404
 from rest_framework import generics, serializers, status
 from rest_framework.request import Request
 from rest_framework.response import Response
 from rest_framework.views import APIView
 
-from apps.analysis.models import Detection, JobStatus, TrainingJob
+from apps.analysis.models import (
+    Detection,
+    DetectionStatus,
+    InferenceRun,
+    JobStatus,
+    TrainingJob,
+)
 from apps.analysis.serializers import (
     DetectionReviewSerializer,
     TrainingJobDetailSerializer,
@@ -27,10 +37,125 @@ from .training import (
     spawn_training_job,
 )
 
-
 _POLLINATOR_DETECTION_QS = Detection.objects.filter(
     inference_run__module=Module.POLLINATORS
 ).select_related('image', 'pollinator_detection')
+
+
+# Maria's researcher schema (ml-pipelines/notebooks/pollinator-classification/
+# ls_v5.ipynb -> CSV_FIELDS_MARIA), minus temperature_c, near_marked_flower,
+# and detection_scope (the first two aren't needed; the third would require
+# persisting ROI flags on PollinatorDetection, follow-up).
+_CSV_FIELDS = [
+    'camera_path',
+    'image_name',
+    'crop_filename',
+    'datetime',
+    'weather',
+    'pollinator_detected',
+    'bbox_x',
+    'bbox_y',
+    'bbox_w',
+    'bbox_h',
+    'pollinator_type',
+    'binary_confidence',
+    'group_confidence',
+]
+
+# The notebook pipeline labels butterflies as 'butterfly_moth'; the DB
+# stores the bare 'butterfly'. Map on the way out so downstream scripts
+# keying off the lab schema keep working.
+_CLASS_TO_LAB = {
+    'fly': 'fly',
+    'bumblebee': 'bumblebee',
+    'butterfly': 'butterfly_moth',
+    'other': 'other',
+}
+
+
+def _pollinator_detected(status: str) -> str:
+    if status == DetectionStatus.ACCEPTED:
+        return 'yes'
+    if status == DetectionStatus.REJECTED:
+        return 'no'
+    return 'candidate'
+
+
+def _camera_path(image, upload) -> str:
+    return image.plot or image.site or (upload.name if upload else '') or ''
+
+
+def _format_float(value) -> str:
+    if value is None:
+        return ''
+    return f'{float(value):.4f}'
+
+
+class _Echo:
+    """File-like that returns whatever is written. Used by csv.writer to
+    produce one CSV row per StreamingHttpResponse chunk."""
+
+    def write(self, value: str) -> str:
+        return value
+
+
+def _build_row(d: Detection) -> dict:
+    bbox = d.bbox or {}
+    pd = getattr(d, 'pollinator_detection', None)
+    effective = (d.reviewer_label or d.predicted_class or '').lower()
+    image = d.image
+    upload = d.inference_run.upload if d.inference_run_id else None
+    return {
+        'camera_path': _camera_path(image, upload),
+        'image_name': Path(image.file.name).name if image and image.file else '',
+        'crop_filename': Path(d.crop.name).name if d.crop else '',
+        'datetime': image.captured_at.isoformat() if image and image.captured_at else '',
+        'weather': image.weather if image else '',
+        'pollinator_detected': _pollinator_detected(d.status),
+        'bbox_x': bbox.get('x1', ''),
+        'bbox_y': bbox.get('y1', ''),
+        'bbox_w': bbox.get('w', ''),
+        'bbox_h': bbox.get('h', ''),
+        'pollinator_type': _CLASS_TO_LAB.get(effective, effective),
+        'binary_confidence': _format_float(pd.binary_confidence) if pd else '',
+        'group_confidence': _format_float(pd.insectnet_confidence) if pd else '',
+    }
+
+
+class PollinatorRunExportCSVView(APIView):
+    """GET /api/pollinator/runs/<run_id>/export.csv
+
+    Streams a CSV export of every detection in the run, using the lab's
+    canonical Maria schema. Includes all detections regardless of reviewer
+    status (the column 'pollinator_detected' encodes yes/no/candidate);
+    consumers filter in pandas/R.
+    """
+
+    def get(self, request: Request, run_id: int) -> StreamingHttpResponse:
+        run = get_object_or_404(
+            InferenceRun.objects.select_related('upload'),
+            pk=run_id,
+            module=Module.POLLINATORS,
+        )
+        qs = (
+            _POLLINATOR_DETECTION_QS
+            .filter(inference_run=run)
+            .order_by('id')
+            .iterator(chunk_size=500)
+        )
+
+        writer = csv.writer(_Echo())
+
+        def rows():
+            yield writer.writerow(_CSV_FIELDS)
+            for d in qs:
+                row = _build_row(d)
+                yield writer.writerow([row[k] for k in _CSV_FIELDS])
+
+        filename = f'run-{run.pk}-detections.csv'
+        response = StreamingHttpResponse(rows(), content_type='text/csv')
+        response['Content-Disposition'] = f'attachment; filename="{filename}"'
+        return response
 
 
 class PollinatorDetectionListView(generics.ListAPIView):
