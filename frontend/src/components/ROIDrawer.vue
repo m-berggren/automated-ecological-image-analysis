@@ -305,7 +305,7 @@ onUnmounted(() => {
   border: 2px solid RED;
   background: color-mix(in srgb, RED 15%, transparent);
   box-sizing: border-box;
-  pointer-events: none;
+  pointer-events: all;
   animation: bbox-pulse 2s ease-in-out infinite;
 }
 

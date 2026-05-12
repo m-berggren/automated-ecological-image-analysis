@@ -112,6 +112,14 @@
             class="w-20 px-2 py-1 rounded border border-border bg-background text-sm font-mono"
           />
         </label>
+        <!-- Button to open the ROI drawer -->
+        <button
+          v-if="config.preprocessing.use_roi"
+          class="px-3 py-1.5 text-sm rounded bg-primary text-white hover:bg-primary/90"
+          @click="openRoiModal"
+        >
+          Open ROI editor
+        </button>
       </div>
 
       <!-- Advanced -->
@@ -275,6 +283,15 @@
     </section>
 
     <p v-if="error" class="text-sm text-red-600">{{ error }}</p>
+    <!-- The ROI drawer modal -->
+    <div>
+      <ROIDrawer
+        v-if="showRoiModal"
+        :image-url="previewUrl"
+        @close="closeRoiModal"
+      />
+    </div>
+
   </div>
 </template>
 
@@ -286,6 +303,7 @@ import PollinatorsStepper from '@/components/PollinatorsStepper.vue'
 import { createUploader, type UploadItem } from '@/lib/uploader'
 import { api } from '@/api'
 import { UploadCloud, XCircle } from 'lucide-vue-next'
+import ROIDrawer from '@/components/ROIDrawer.vue'
 
 interface ModelVersion {
   id: number
@@ -294,6 +312,10 @@ interface ModelVersion {
   version_name: string
   is_active: boolean
 }
+
+const localFiles = ref<File[]>([])
+const showRoiModal = ref(false)
+const previewUrl = ref<string | null>(null)
 
 const router = useRouter()
 const dragOver = ref(false)
@@ -421,6 +443,7 @@ async function handleFiles(files: File[]) {
   const id = await ensureUpload()
   if (!id || !uploader.value) return
   uploader.value.enqueue(images)
+  localFiles.value = images
 }
 
 function onPick(e: Event, _isFolder: boolean) {
@@ -519,6 +542,36 @@ async function startDetection() {
     error.value = e instanceof Error ? e.message : String(e)
   } finally {
     starting.value = false
+  }
+}
+
+// Choses the current selected manual roi image and makes the ROI drawing modal appear
+function openRoiModal() {
+  if (!localFiles.value.length) return
+
+  const index = (config.value.start_at_image || 1) - 1
+
+  if (index < 0 || index >= localFiles.value.length) return
+
+
+  const file = localFiles.value[index]
+
+  // clean up old URL
+  if (previewUrl.value) {
+    URL.revokeObjectURL(previewUrl.value)
+  }
+
+  previewUrl.value = URL.createObjectURL(file)
+  showRoiModal.value = true
+}
+
+// Makes the modal disappear and clears up the old image URL
+function closeRoiModal() {
+  showRoiModal.value = false
+
+  if (previewUrl.value) {
+    URL.revokeObjectURL(previewUrl.value)
+    previewUrl.value = null
   }
 }
 </script>
