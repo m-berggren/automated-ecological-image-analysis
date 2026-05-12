@@ -349,11 +349,22 @@ class Detection(models.Model):
         related_name='detections',
     )
 
-    bbox = models.JSONField(help_text='{x, y, w, h, rotation}')
+    bbox = models.JSONField(
+        help_text=(
+            'Source-image pixel coords: {x1, y1, x2, y2, w, h}. Written by '
+            'the ML pipeline in ml-pipelines/pollinator/workflows.'
+        ),
+    )
     confidence = models.FloatField()
     predicted_class = models.CharField(max_length=50)
     area = models.FloatField(
         help_text='Pixel area of bbox; persisted to drive the seeds volume filter',
+    )
+    crop = models.ImageField(
+        upload_to='runs/crops/',
+        null=True,
+        blank=True,
+        help_text='Cropped bbox image, written after inference for review and training.',
     )
 
     status = models.CharField(

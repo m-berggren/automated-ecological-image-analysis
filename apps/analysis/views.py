@@ -1,9 +1,13 @@
 import logging
+from pathlib import Path
 
+from django.conf import settings
 from django.db import transaction
 from django.db.models import QuerySet
 from django.utils import timezone
 from rest_framework import generics, serializers, status
+from rest_framework.parsers import FormParser, JSONParser, MultiPartParser
+from rest_framework.permissions import IsAdminUser
 from rest_framework.request import Request
 from rest_framework.response import Response
 from rest_framework.views import APIView
@@ -36,15 +40,59 @@ def _parse_bool(value: str) -> bool | None:
     return None
 
 
-class ModelVersionListView(generics.ListAPIView):
-    """GET /api/analysis/models/?module=<module>
+def _extract_checkpoint_metadata(path: Path) -> dict:
+    """Pull a small set of standard metadata keys from a torch checkpoint.
 
-    Lists trained model versions, optionally filtered by module. Newest first.
-    Returns a flat JSON array (no pagination) to match the frontend's expected shape.
+    Returns {} on any failure (non-torch file, corrupt pickle, missing torch).
+    Reads both our own trainer outputs (img_size, arch, epoch, model_type,
+    best_val_f1) and ultralytics YOLO train_args (imgsz, epochs, batch, lr0).
+    """
+    try:
+        import torch
+
+        ckpt = torch.load(str(path), map_location='cpu', weights_only=False)
+    except Exception:
+        logger.exception(f'Could not introspect checkpoint at {path}')
+        return {}
+
+    if not isinstance(ckpt, dict):
+        return {}
+
+    out: dict = {}
+    for key in ('img_size', 'arch', 'epoch', 'model_type', 'best_val_f1'):
+        v = ckpt.get(key)
+        if v is not None and not callable(v):
+            out[key] = v
+
+    train_args = ckpt.get('train_args')
+    if isinstance(train_args, dict):
+        for key in ('imgsz', 'epochs', 'batch', 'lr0', 'optimizer'):
+            if key in train_args:
+                out[f'yolo_{key}'] = train_args[key]
+
+    return out
+
+
+class ModelVersionListCreateView(generics.ListAPIView):
+    """GET  /api/analysis/models/?module=<module> - list versions (anyone).
+    POST /api/analysis/models/ - create a version from an uploaded weights
+    file (staff only).
+
+    POST is multipart/form-data with fields:
+        module, kind, version_name, description, weights_file
+    On success the file is written to MEDIA_ROOT/models/<module>/<version>.<ext>,
+    .pth metadata is introspected into parameters, and the new ModelVersion
+    is returned.
     """
 
     serializer_class = ModelVersionSerializer
     pagination_class = None
+    parser_classes = [MultiPartParser, FormParser, JSONParser]
+
+    def get_permissions(self):
+        if self.request.method == 'POST':
+            return [IsAdminUser()]
+        return super().get_permissions()
 
     def get_queryset(self) -> QuerySet[ModelVersion]:
         qs = ModelVersion.objects.all().order_by('-created_at')
@@ -52,6 +100,57 @@ class ModelVersionListView(generics.ListAPIView):
         if module:
             qs = qs.filter(module=module)
         return qs
+
+    def post(self, request: Request, *args, **kwargs) -> Response:
+        module = (request.data.get('module') or '').strip()
+        kind = (request.data.get('kind') or '').strip()
+        version_name = (request.data.get('version_name') or '').strip()
+        description = (request.data.get('description') or '').strip()
+        upload = request.FILES.get('weights_file')
+
+        if not module or not version_name:
+            return Response(
+                {'detail': 'module and version_name are required'},
+                status=status.HTTP_400_BAD_REQUEST,
+            )
+        if not upload:
+            return Response(
+                {'detail': 'weights_file is required'},
+                status=status.HTTP_400_BAD_REQUEST,
+            )
+        if ModelVersion.objects.filter(version_name=version_name).exists():
+            return Response(
+                {'detail': f'version_name "{version_name}" already exists'},
+                status=status.HTTP_400_BAD_REQUEST,
+            )
+
+        dest_dir = Path(settings.MEDIA_ROOT) / 'models' / module
+        dest_dir.mkdir(parents=True, exist_ok=True)
+        ext = Path(upload.name).suffix or '.bin'
+        dest = dest_dir / f'{version_name}{ext}'
+        with dest.open('wb') as out:
+            for chunk in upload.chunks():
+                out.write(chunk)
+
+        parameters = _extract_checkpoint_metadata(dest)
+
+        mv = ModelVersion.objects.create(
+            module=module,
+            kind=kind,
+            version_name=version_name,
+            model_file_path=str(dest),
+            description=description,
+            parameters=parameters,
+            created_by=request.user if request.user.is_authenticated else None,
+        )
+        logger.info(
+            f'ModelVersion {mv.pk} created by {request.user}: '
+            f'{module}/{version_name} ({dest.stat().st_size} bytes)'
+        )
+        return Response(
+            ModelVersionSerializer(mv).data,
+            status=status.HTTP_201_CREATED,
+        )
 
 
 class InferenceRunListCreateView(generics.ListCreateAPIView):
