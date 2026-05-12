@@ -152,6 +152,8 @@ class BaseDetectionReadSerializer(serializers.ModelSerializer):
 
     reviewer_status = serializers.SerializerMethodField()
     source_image_filename = serializers.SerializerMethodField()
+    source_image_url = serializers.SerializerMethodField()
+    crop_url = serializers.SerializerMethodField()
 
     class Meta:
         model = Detection
@@ -163,6 +165,8 @@ class BaseDetectionReadSerializer(serializers.ModelSerializer):
             'reviewer_status',
             'reviewer_label',
             'source_image_filename',
+            'source_image_url',
+            'crop_url',
         )
 
     def get_reviewer_status(self, obj: Detection) -> str:
@@ -178,6 +182,20 @@ class BaseDetectionReadSerializer(serializers.ModelSerializer):
         if obj.image and obj.image.file:
             return Path(obj.image.file.name).name
         return ''
+
+    def get_source_image_url(self, obj: Detection) -> str | None:
+        if not (obj.image and obj.image.file):
+            return None
+        return self._abs_url(obj.image.file.url)
+
+    def get_crop_url(self, obj: Detection) -> str | None:
+        if not obj.crop:
+            return None
+        return self._abs_url(obj.crop.url)
+
+    def _abs_url(self, url: str) -> str:
+        request = self.context.get('request')
+        return request.build_absolute_uri(url) if request else url
 
 
 class DetectionReviewSerializer(serializers.Serializer):

@@ -27,6 +27,7 @@ from django.db import close_old_connections, transaction
 from django.utils import timezone
 
 from apps.analysis.cancellation import RunCancelled
+from apps.analysis.crops import write_detection_crop
 from apps.analysis.models import (
     Detection,
     DetectionStatus,
@@ -239,6 +240,16 @@ def run_inference_pipeline(run: InferenceRun) -> None:
                     for det, data in zip(created, pol_data)
                 ]
             )
+
+        # Render the per-detection crop files after the rows are committed
+        # so we have stable detection pks for the filenames, and so a PIL
+        # failure on one image can't roll back the whole run.
+        crop_updates: list[Detection] = []
+        for det in created:
+            if write_detection_crop(det):
+                crop_updates.append(det)
+        if crop_updates:
+            Detection.objects.bulk_update(crop_updates, ['crop'])
 
         run.status = JobStatus.COMPLETED
         run.completed_at = timezone.now()

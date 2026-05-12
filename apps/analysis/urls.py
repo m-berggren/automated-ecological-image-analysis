@@ -5,7 +5,7 @@ from .views import (
     InferenceRunCancelView,
     InferenceRunDetailView,
     InferenceRunListCreateView,
-    ModelVersionListView,
+    ModelVersionListCreateView,
     ModelVersionSetActiveView,
     TrainingJobCancelView,
     TrainingJobDetailView,
@@ -13,7 +13,11 @@ from .views import (
 )
 
 urlpatterns = [
-    path('models/', ModelVersionListView.as_view(), name='model-version-list'),
+    path(
+        'models/',
+        ModelVersionListCreateView.as_view(),
+        name='model-version-list-create',
+    ),
     path(
         'models/<int:pk>/set-active/',
         ModelVersionSetActiveView.as_view(),
