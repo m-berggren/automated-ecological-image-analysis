@@ -42,29 +42,25 @@ _POLLINATOR_DETECTION_QS = Detection.objects.filter(
 ).select_related('image', 'pollinator_detection')
 
 
-# Maria's researcher schema (ml-pipelines/notebooks/pollinator-classification/
-# ls_v5.ipynb -> CSV_FIELDS_MARIA), minus temperature_c, near_marked_flower,
-# and detection_scope (the first two aren't needed; the third would require
-# persisting ROI flags on PollinatorDetection, follow-up).
+# One row per image, with per-class counts of reviewer-validated detections
+# (accepted: confirmed or corrected; rejected and unreviewed don't count).
+# Empty photos still get a row of zeros so the CSV doubles as a survey
+# denominator for visit-rate / occupancy stats.
 _CSV_FIELDS = [
-    'camera_path',
+    'session',
     'image_name',
-    'crop_filename',
+    'camera_name',
     'datetime',
     'weather',
-    'pollinator_detected',
-    'bbox_x',
-    'bbox_y',
-    'bbox_w',
-    'bbox_h',
-    'pollinator_type',
-    'binary_confidence',
-    'group_confidence',
+    'fly_count',
+    'bumblebee_count',
+    'butterfly_moth_count',
+    'other_count',
+    'total_count',
 ]
 
-# The notebook pipeline labels butterflies as 'butterfly_moth'; the DB
-# stores the bare 'butterfly'. Map on the way out so downstream scripts
-# keying off the lab schema keep working.
+# DB class -> lab class. butterfly_moth is also the column-name root, so
+# this drives both the count bucket and any future per-class column.
 _CLASS_TO_LAB = {
     'fly': 'fly',
     'bumblebee': 'bumblebee',
@@ -72,23 +68,14 @@ _CLASS_TO_LAB = {
     'other': 'other',
 }
 
-
-def _pollinator_detected(status: str) -> str:
-    if status == DetectionStatus.ACCEPTED:
-        return 'yes'
-    if status == DetectionStatus.REJECTED:
-        return 'no'
-    return 'candidate'
+_COUNT_BUCKETS = ('fly', 'bumblebee', 'butterfly_moth', 'other')
 
 
-def _camera_path(image, upload) -> str:
-    return image.plot or image.site or (upload.name if upload else '') or ''
-
-
-def _format_float(value) -> str:
-    if value is None:
-        return ''
-    return f'{float(value):.4f}'
+def _camera_name(image) -> str:
+    exif = image.exif or {}
+    make = (exif.get('Make') or '').strip()
+    model = (exif.get('Model') or '').strip()
+    return f'{make} {model}'.strip()
 
 
 class _Echo:
@@ -99,36 +86,29 @@ class _Echo:
         return value
 
 
-def _build_row(d: Detection) -> dict:
-    bbox = d.bbox or {}
-    pd = getattr(d, 'pollinator_detection', None)
-    effective = (d.reviewer_label or d.predicted_class or '').lower()
-    image = d.image
-    upload = d.inference_run.upload if d.inference_run_id else None
+def _build_image_row(image, counts: dict[str, int], session: str) -> dict:
     return {
-        'camera_path': _camera_path(image, upload),
-        'image_name': Path(image.file.name).name if image and image.file else '',
-        'crop_filename': Path(d.crop.name).name if d.crop else '',
-        'datetime': image.captured_at.isoformat() if image and image.captured_at else '',
-        'weather': image.weather if image else '',
-        'pollinator_detected': _pollinator_detected(d.status),
-        'bbox_x': bbox.get('x1', ''),
-        'bbox_y': bbox.get('y1', ''),
-        'bbox_w': bbox.get('w', ''),
-        'bbox_h': bbox.get('h', ''),
-        'pollinator_type': _CLASS_TO_LAB.get(effective, effective),
-        'binary_confidence': _format_float(pd.binary_confidence) if pd else '',
-        'group_confidence': _format_float(pd.insectnet_confidence) if pd else '',
+        'session': session,
+        'image_name': Path(image.file.name).name if image.file else '',
+        'camera_name': _camera_name(image),
+        'datetime': image.captured_at.isoformat() if image.captured_at else '',
+        'weather': image.weather or '',
+        'fly_count': counts.get('fly', 0),
+        'bumblebee_count': counts.get('bumblebee', 0),
+        'butterfly_moth_count': counts.get('butterfly_moth', 0),
+        'other_count': counts.get('other', 0),
+        'total_count': sum(counts.get(b, 0) for b in _COUNT_BUCKETS),
     }
 
 
 class PollinatorRunExportCSVView(APIView):
     """GET /api/pollinator/runs/<run_id>/export.csv
 
-    Streams a CSV export of every detection in the run, using the lab's
-    canonical Maria schema. Includes all detections regardless of reviewer
-    status (the column 'pollinator_detected' encodes yes/no/candidate);
-    consumers filter in pandas/R.
+    Streams one row per image in the run's upload, with per-class counts of
+    reviewer-validated detections (status=accepted, i.e. confirmed or
+    corrected). Photos with zero validated detections still appear as
+    all-zero rows so the file is a complete survey record (denominator for
+    visit-rate / occupancy stats).
     """
 
     def get(self, request: Request, run_id: int) -> StreamingHttpResponse:
@@ -137,22 +117,45 @@ class PollinatorRunExportCSVView(APIView):
             pk=run_id,
             module=Module.POLLINATORS,
         )
-        qs = (
-            _POLLINATOR_DETECTION_QS
-            .filter(inference_run=run)
-            .order_by('id')
-            .iterator(chunk_size=500)
+
+        # Pre-aggregate validated detections by image_id so we can emit one
+        # streamed row per image without a per-image DB hit.
+        counts_by_image: dict[int, dict[str, int]] = {}
+        validated = (
+            Detection.objects
+            .filter(inference_run=run, status=DetectionStatus.ACCEPTED)
+            .values_list('image_id', 'predicted_class', 'reviewer_label')
         )
+        for image_id, predicted, reviewer in validated:
+            effective = (reviewer or predicted or '').lower()
+            bucket = _CLASS_TO_LAB.get(effective, effective)
+            if bucket not in _COUNT_BUCKETS:
+                continue
+            counts_by_image.setdefault(image_id, {})
+            counts_by_image[image_id][bucket] = (
+                counts_by_image[image_id].get(bucket, 0) + 1
+            )
+
+        upload = run.upload
+        if upload is None:
+            images = []
+        else:
+            images = upload.images.order_by('captured_at', 'id').iterator(
+                chunk_size=500,
+            )
+        session = run.name or f'Run #{run.pk}'
 
         writer = csv.writer(_Echo())
 
         def rows():
             yield writer.writerow(_CSV_FIELDS)
-            for d in qs:
-                row = _build_row(d)
+            for img in images:
+                row = _build_image_row(
+                    img, counts_by_image.get(img.id, {}), session,
+                )
                 yield writer.writerow([row[k] for k in _CSV_FIELDS])
 
-        filename = f'run-{run.pk}-detections.csv'
+        filename = f'run-{run.pk}-images.csv'
         response = StreamingHttpResponse(rows(), content_type='text/csv')
         response['Content-Disposition'] = f'attachment; filename="{filename}"'
         return response

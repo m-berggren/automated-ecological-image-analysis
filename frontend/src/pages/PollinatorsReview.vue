@@ -40,35 +40,74 @@
             v-model="statusFilter"
             class="px-2 py-1 rounded border border-border bg-background"
           >
-            <option value="unreviewed">Unreviewed</option>
+            <option value="todo">Todo</option>
             <option value="unsure">Unsure</option>
-            <option value="reviewed">Reviewed</option>
+            <option value="rejected">Rejected</option>
             <option value="all">All</option>
           </select>
-          <label class="ml-auto flex items-center gap-1 text-muted-foreground">
-            Confidence
-            <select
-              v-model="confidenceFilter"
-              class="px-2 py-1 rounded border border-border bg-background"
-            >
-              <option value="all">All</option>
-              <option value="needs_attention">Needs attention</option>
-              <option value="agreement">Models agree</option>
-            </select>
-          </label>
-        </div>
-        <div class="text-xs text-muted-foreground flex items-center justify-between gap-3">
-          <span class="flex-1 min-w-0 truncate">
-            {{ filteredDetections.length }} of {{ detections.length }} detections ·
-            sorted by ascending InsectNet confidence
-          </span>
+          <label class="text-muted-foreground">Class</label>
+          <select
+            v-model="classFilter"
+            class="px-2 py-1 rounded border border-border bg-background"
+          >
+            <option value="all">All</option>
+            <option v-for="cls in CLASSES" :key="cls" :value="cls">
+              {{ classLabel(cls) }}
+            </option>
+          </select>
           <button
-            class="text-primary hover:underline disabled:text-muted-foreground disabled:no-underline"
+            class="ml-auto px-2 py-1 rounded border border-border hover:bg-muted disabled:opacity-50 disabled:hover:bg-transparent"
             :disabled="exporting || !run"
             @click="exportCsv"
           >
             {{ exporting ? 'Exporting…' : 'Export CSV' }}
           </button>
+        </div>
+        <!-- Per-detector minimum confidence. Detections from the other branch
+             pass through unaffected (preprocessing-only crops have no YOLO
+             score and so on). Step 0.05 keeps the slider snappy. -->
+        <div class="grid grid-cols-[auto_1fr_auto] items-center gap-x-2 gap-y-1 text-xs">
+          <label for="yolo-min" class="text-muted-foreground">YOLO ≥</label>
+          <input
+            id="yolo-min"
+            type="range"
+            :min="inferenceYoloThreshold"
+            max="1"
+            step="0.05"
+            v-model.number="yoloMinConf"
+            class="w-full accent-primary"
+            :title="`Inference threshold: ${inferenceYoloThreshold.toFixed(2)}`"
+          />
+          <span class="font-mono w-10 text-right">{{ yoloMinConf.toFixed(2) }}</span>
+          <label for="insectnet-min" class="text-muted-foreground">InsectNet ≥</label>
+          <input
+            id="insectnet-min"
+            type="range"
+            :min="inferenceInsectnetThreshold"
+            max="1"
+            step="0.05"
+            v-model.number="insectnetMinConf"
+            class="w-full accent-primary"
+            :title="`Inference threshold: ${inferenceInsectnetThreshold.toFixed(2)}`"
+          />
+          <span class="font-mono w-10 text-right">{{ insectnetMinConf.toFixed(2) }}</span>
+        </div>
+        <div
+          v-if="belowThresholdIds.length"
+          class="flex items-center justify-end text-xs"
+        >
+          <button
+            class="px-2 py-1 rounded border border-red-300 text-red-700 hover:bg-red-50 disabled:opacity-50"
+            :disabled="rejectingBelow"
+            @click="rejectBelowThreshold"
+          >
+            {{ rejectingBelow ? 'Rejecting…' : `Reject ${belowThresholdIds.length} below threshold` }}
+          </button>
+        </div>
+        <div class="text-xs text-muted-foreground flex items-center justify-between gap-3">
+          <span class="flex-1 min-w-0 truncate">
+            {{ filteredDetections.length }} of {{ detections.length }} detections
+          </span>
           <button
             class="text-primary hover:underline"
             :disabled="!filteredDetections.length"
@@ -114,11 +153,39 @@
           Clear
         </button>
       </div>
+      <div
+        v-if="bulkConfirmSkipped > 0"
+        class="px-4 py-2 border-b border-border bg-amber-50 text-amber-800 flex items-center gap-2 text-xs"
+      >
+        <span>
+          Skipped {{ bulkConfirmSkipped }} row{{ bulkConfirmSkipped === 1 ? '' : 's' }}
+          with no predicted class. Correct them explicitly so they're included in
+          group/detector training.
+        </span>
+        <button
+          class="ml-auto text-amber-700 hover:text-amber-900"
+          @click="bulkConfirmSkipped = 0"
+        >
+          Dismiss
+        </button>
+      </div>
 
       <div class="flex-1 overflow-auto">
         <div v-for="group in groupedDetections" :key="group.label" class="border-b border-border">
-          <header class="px-4 py-2 text-xs font-semibold uppercase tracking-wide text-muted-foreground bg-surface/50 sticky top-0">
-            {{ group.label }} <span class="font-normal">({{ group.detections.length }})</span>
+          <header
+            class="px-4 py-2 text-xs font-semibold uppercase tracking-wide bg-surface sticky top-0 z-20 border-b border-border"
+            :class="
+              group.kind === 'needs_review' ? 'text-amber-700'
+              : group.kind === 'unclassified' ? 'text-indigo-700'
+              : group.kind === 'background' ? 'text-muted-foreground/70'
+              : 'text-muted-foreground'
+            "
+          >
+            <span v-if="group.kind === 'needs_review'" class="mr-1">⚠</span>
+            <span v-else-if="group.kind === 'unclassified'" class="mr-1">?</span>
+            <span v-else-if="group.kind === 'background'" class="mr-1">✗</span>
+            {{ group.label }}
+            <span class="font-normal">({{ group.detections.length }})</span>
           </header>
           <div class="grid grid-cols-5 gap-1 p-2">
             <div
@@ -134,10 +201,10 @@
                 :data-detection-id="d.id"
                 role="button"
                 tabindex="0"
-                class="relative aspect-square cursor-pointer focus:outline-none"
-                :style="{ backgroundColor: classBgFor(primaryClass(d)) }"
-                @click="selectedId = d.id"
-                @keydown.enter.prevent="selectedId = d.id"
+                class="relative aspect-square cursor-pointer focus:outline-none select-none"
+                :class="imageParityById.get(d.id) ? 'bg-muted/60' : 'bg-background'"
+                @click="onTileClick(d, $event)"
+                @keydown.enter.prevent="onTileClick(d, $event)"
               >
                 <img
                   v-if="d.crop_url"
@@ -152,22 +219,6 @@
                 >
                   {{ classGlyph(primaryClass(d)) }}
                 </div>
-                <span
-                  class="absolute top-1 left-1 w-2 h-2 rounded-full"
-                  :class="statusDotClass(d.reviewer_status)"
-                />
-                <span
-                  v-if="needsAttention(d)"
-                  class="absolute top-1 right-1 text-amber-600 text-xs leading-none"
-                  :title="hasDisagreement(d) ? 'YOLO and InsectNet disagree' : 'Low confidence'"
-                >⚠</span>
-                <span class="absolute bottom-2 left-1 text-[9px] text-muted-foreground/70 font-mono">
-                  {{ d.source === 'preprocessing' ? 'P' : d.source === 'both' ? 'YP' : 'Y' }}
-                </span>
-                <div
-                  class="absolute bottom-0 left-0 right-0 h-1.5"
-                  :style="{ backgroundColor: classColor(primaryClass(d)) }"
-                />
               </div>
               <div
                 role="checkbox"
@@ -264,26 +315,26 @@
                 Predictions
               </div>
               <div class="space-y-1.5 text-sm">
-                <div v-if="selected.yolo_class != null" class="flex items-center gap-2">
+                <div class="flex items-center gap-2" :class="selected.yolo_class == null ? 'opacity-60' : ''">
                   <span class="text-muted-foreground w-20">YOLO</span>
                   <span
                     class="w-2 h-2 rounded-full shrink-0"
                     :style="{ backgroundColor: classColor(selected.yolo_class) }"
                   />
-                  <span class="font-medium flex-1">{{ classLabel(selected.yolo_class) }}</span>
+                  <span class="font-medium flex-1">{{ selected.yolo_class ? classLabel(selected.yolo_class) : '—' }}</span>
                   <span class="font-mono text-xs text-muted-foreground">
-                    {{ (selected.yolo_confidence ?? 0).toFixed(2) }}
+                    {{ selected.yolo_confidence != null ? selected.yolo_confidence.toFixed(2) : '—' }}
                   </span>
                 </div>
-                <div v-if="selected.insectnet_class != null" class="flex items-center gap-2">
+                <div class="flex items-center gap-2" :class="selected.insectnet_class == null ? 'opacity-60' : ''">
                   <span class="text-muted-foreground w-20">InsectNet</span>
                   <span
                     class="w-2 h-2 rounded-full shrink-0"
                     :style="{ backgroundColor: classColor(selected.insectnet_class) }"
                   />
-                  <span class="font-medium flex-1">{{ classLabel(selected.insectnet_class) }}</span>
+                  <span class="font-medium flex-1">{{ selected.insectnet_class ? classLabel(selected.insectnet_class) : '—' }}</span>
                   <span class="font-mono text-xs text-muted-foreground">
-                    {{ (selected.insectnet_confidence ?? 0).toFixed(2) }}
+                    {{ selected.insectnet_confidence != null ? selected.insectnet_confidence.toFixed(2) : '—' }}
                   </span>
                 </div>
                 <div v-if="hasDisagreement(selected)" class="text-xs text-amber-700 pt-1">
@@ -321,6 +372,26 @@
                     class="w-4 h-4"
                   />
                 </label>
+                <!-- 5th option: rejecting means "this is background" — the
+                     binary classifier trains rejected detections as the
+                     'background' class. Treating it as a label keeps the
+                     Label panel as a single source of truth for what the
+                     reviewer decided. -->
+                <label
+                  class="flex items-center gap-3 py-2 px-2 -mx-2 rounded cursor-pointer"
+                >
+                  <span class="w-2 h-2 rounded-full shrink-0 bg-muted-foreground/40" />
+                  <span class="flex-1 text-sm">
+                    Background
+                    <span class="text-[10px] text-muted-foreground ml-1">(reject)</span>
+                  </span>
+                  <input
+                    type="checkbox"
+                    :checked="selected.reviewer_status === 'rejected'"
+                    @change="reject()"
+                    class="w-4 h-4"
+                  />
+                </label>
               </div>
             </div>
           </div>
@@ -329,9 +400,17 @@
         <!-- Bottom action bar -->
         <footer class="border-t border-border bg-surface px-5 py-3 flex items-center justify-between">
           <span class="text-[11px] text-muted-foreground font-mono hidden md:block">
-            1-4 confirm · x reject · u unsure · ⏎ suggested · ←→↑↓ navigate
+            1-4 confirm · x reject · u unsure · z undo · ⏎ suggested · ←→↑↓ navigate · ⇧ + arrows / click: range select · esc: clear
           </span>
           <div class="flex gap-2 ml-auto">
+            <button
+              class="px-3 py-1.5 rounded-md text-sm font-medium border border-border hover:bg-muted disabled:opacity-50 disabled:cursor-not-allowed"
+              :disabled="!lastAction || undoing"
+              :title="lastAction ? `Undo last action on detection #${lastAction.id}` : 'Nothing to undo'"
+              @click="undoLast"
+            >
+              {{ undoing ? 'Undoing…' : 'Undo' }}
+            </button>
             <button
               class="px-3 py-1.5 rounded-md text-sm font-medium border border-border hover:bg-muted"
               @click="reject"
@@ -345,11 +424,12 @@
               Unsure
             </button>
             <button
-              class="px-3 py-1.5 rounded-md text-sm font-medium bg-primary text-primary-foreground hover:bg-primary/90"
-              @click="confirmAs(suggestedClass(selected))"
+              class="px-3 py-1.5 rounded-md text-sm font-medium bg-primary text-primary-foreground hover:bg-primary/90 disabled:opacity-50 disabled:cursor-not-allowed disabled:hover:bg-primary"
+              :disabled="!effectiveLabel(selected)"
+              :title="effectiveLabel(selected) ? '' : 'Pick a label or wait for models to agree'"
+              @click="confirmAs(effectiveLabel(selected))"
             >
-              {{ hasDisagreement(selected) ? 'Use suggested:' : 'Confirm as' }}
-              {{ classLabel(suggestedClass(selected)) }}
+              Confirm
             </button>
           </div>
         </footer>
@@ -420,8 +500,11 @@ import { api } from '@/api'
 
 type ClassName = 'fly' | 'bumblebee' | 'butterfly' | 'other'
 type ReviewerStatus = 'unreviewed' | 'confirmed' | 'corrected' | 'rejected' | 'unsure'
-type StatusFilter = 'unreviewed' | 'unsure' | 'reviewed' | 'all'
-type ConfidenceFilter = 'all' | 'needs_attention' | 'agreement'
+// Frontend workflow labels (not the backend reviewer_status). 'todo' is
+// the active queue (unreviewed). 'unsure' / 'rejected' are explicit sub-
+// queues you typically revisit later. 'all' shows everything, with
+// confirmed/corrected ones in their class groups.
+type StatusFilter = 'todo' | 'unsure' | 'rejected' | 'all'
 type Source = 'yolo' | 'preprocessing' | 'both'
 
 const LOW_CONFIDENCE_THRESHOLD = 0.6
@@ -446,6 +529,7 @@ interface Detection {
   source: Source
   reviewer_status: ReviewerStatus
   reviewer_label: ClassName | null
+  predicted_class: ClassName | null
   source_image_filename: string
   bbox: BBox | null
   source_image_url: string | null
@@ -453,7 +537,16 @@ interface Detection {
 }
 
 interface ReviewBundle {
-  run: { id: number; name: string; status: string; detection_count: number }
+  run: {
+    id: number
+    name: string
+    status: string
+    detection_count: number
+    config?: {
+      yolo?: { confidence?: number }
+      binary_classifier?: { confidence?: number }
+    }
+  }
   detections: Detection[]
 }
 
@@ -477,10 +570,35 @@ const loadError = ref('')
 const run = ref<ReviewBundle['run'] | null>(null)
 const detections = ref<Detection[]>([])
 const selectedId = ref<number | null>(null)
-const statusFilter = ref<StatusFilter>('unreviewed')
-const confidenceFilter = ref<ConfidenceFilter>('all')
+const statusFilter = ref<StatusFilter>('todo')
+type ClassFilter = ClassName | 'all'
+const classFilter = ref<ClassFilter>('all')
+// Inference-time thresholds. Anything below these never made it into the
+// DB, so the sliders can't usefully go lower.
+const inferenceYoloThreshold = computed(
+  () => run.value?.config?.yolo?.confidence ?? 0,
+)
+const inferenceInsectnetThreshold = computed(
+  () => run.value?.config?.binary_classifier?.confidence ?? 0,
+)
+const yoloMinConf = ref(0)
+const insectnetMinConf = ref(0)
+// Snap sliders to the inference thresholds when the run loads so "no
+// filter" matches the actual data floor instead of a misleading 0.
+watch(
+  [inferenceYoloThreshold, inferenceInsectnetThreshold],
+  ([y, i]) => {
+    yoloMinConf.value = y
+    insectnetMinConf.value = i
+  },
+  { immediate: true },
+)
 const bulkIds = ref<Set<number>>(new Set())
 const bulkCorrectClass = ref<'' | ClassName>('')
+// Surfaces how many rows the most recent bulk-confirm skipped because they
+// had no derivable class. Reset when the reviewer next interacts with the
+// bulk bar (selection change or explicit clear).
+const bulkConfirmSkipped = ref(0)
 
 interface FailedEntry {
   status: ReviewerStatus
@@ -491,6 +609,7 @@ interface FailedEntry {
 const failedSaves = ref<Map<number, FailedEntry>>(new Map())
 const retrying = ref(false)
 const exporting = ref(false)
+const rejectingBelow = ref(false)
 
 onMounted(loadFromApi)
 
@@ -524,56 +643,130 @@ const headerTitle = computed(() =>
 
 const filteredDetections = computed(() => {
   let list = detections.value
-  if (statusFilter.value === 'unreviewed') {
+  if (statusFilter.value === 'todo') {
     list = list.filter((d) => d.reviewer_status === 'unreviewed')
   } else if (statusFilter.value === 'unsure') {
     list = list.filter((d) => d.reviewer_status === 'unsure')
-  } else if (statusFilter.value === 'reviewed') {
+  } else if (statusFilter.value === 'rejected') {
+    list = list.filter((d) => d.reviewer_status === 'rejected')
+  }
+  // Class filter: a broad match so spotting duplicates works regardless of
+  // who labelled it — accept if any signal (yolo, insectnet, reviewer,
+  // primary) says this class.
+  if (classFilter.value !== 'all') {
+    const cls = classFilter.value
     list = list.filter(
       (d) =>
-        d.reviewer_status === 'confirmed' ||
-        d.reviewer_status === 'corrected' ||
-        d.reviewer_status === 'rejected',
+        d.yolo_class === cls ||
+        d.insectnet_class === cls ||
+        d.reviewer_label === cls ||
+        d.predicted_class === cls,
     )
   }
-  if (confidenceFilter.value === 'needs_attention') {
-    list = list.filter((d) => needsAttention(d))
-  } else if (confidenceFilter.value === 'agreement') {
-    list = list.filter((d) => modelsAgree(d))
+  if (yoloMinConf.value > 0) {
+    list = list.filter(
+      (d) => d.yolo_confidence == null || d.yolo_confidence >= yoloMinConf.value,
+    )
+  }
+  if (insectnetMinConf.value > 0) {
+    list = list.filter(
+      (d) =>
+        d.insectnet_confidence == null ||
+        d.insectnet_confidence >= insectnetMinConf.value,
+    )
   }
   return [...list].sort((a, b) => maxConfidence(a) - maxConfidence(b))
 })
 
 const groupedDetections = computed(() => {
-  const groups = new Map<ClassName, Detection[]>()
+  const review: Detection[] = []
+  const unclassified: Detection[] = []
+  const background: Detection[] = []
+  const classGroups = new Map<ClassName, Detection[]>()
+  // Placement priority:
+  // 1. Rejected detections are labelled "background" — they go to the
+  //    Background bucket regardless of detector state. Keeping them under
+  //    a Fly / Needs-review header would suggest they belonged to that
+  //    class, which they don't.
+  // 2. Confirmed/corrected detections have a settled class — drop them
+  //    into that class group, even when the detectors split.
+  // 3. Unreviewed/unsure detections fall back to detector logic: needs-
+  //    review when the detectors aren't unanimous, the agreed class when
+  //    they are, unclassified when neither named a class.
+  // When the user filtered to a specific class, drop the needs-review /
+  // unclassified split: everything that matched is a candidate for *this*
+  // class. Background still gets pulled aside so duplicate-spotting in
+  // Class=Fly doesn't count rejected things.
+  const collapseToClass = classFilter.value !== 'all' ? classFilter.value : null
   for (const d of filteredDetections.value) {
+    if (d.reviewer_status === 'rejected') {
+      background.push(d)
+      continue
+    }
+    if (collapseToClass != null) {
+      if (!classGroups.has(collapseToClass)) classGroups.set(collapseToClass, [])
+      classGroups.get(collapseToClass)!.push(d)
+      continue
+    }
+    const settled = settledClass(d)
+    if (settled != null) {
+      if (!classGroups.has(settled)) classGroups.set(settled, [])
+      classGroups.get(settled)!.push(d)
+      continue
+    }
+    if (needsReview(d)) {
+      review.push(d)
+      continue
+    }
     const cls = primaryClass(d)
-    if (cls == null) continue
-    if (!groups.has(cls)) groups.set(cls, [])
-    groups.get(cls)!.push(d)
+    if (cls == null) {
+      unclassified.push(d)
+      continue
+    }
+    if (!classGroups.has(cls)) classGroups.set(cls, [])
+    classGroups.get(cls)!.push(d)
   }
-  // Within each class, cluster detections that share a source image so a
-  // reviewer who hits a multi-fly photo sees those tiles next to each
-  // other. Tie-break by the original ascending-confidence order so the
-  // worst-first sort still wins between images.
-  for (const list of groups.values()) {
-    const firstIdxByImage = new Map<string, number>()
-    list.forEach((d, i) => {
-      if (!firstIdxByImage.has(d.source_image_filename)) {
-        firstIdxByImage.set(d.source_image_filename, i)
-      }
-    })
+  // Cluster same-image detections within each group so multi-insect photos
+  // sit next to each other in the grid.
+  // Stable cluster order: alphabetical by source image filename, then by
+  // ascending confidence within an image. Earlier we ordered clusters by
+  // "first appearance in the pre-sort list", which made removing the
+  // lowest-confidence detection in an image silently slide the whole
+  // cluster past its neighbours — looked like two crops swapped places.
+  const clusterByImage = (list: Detection[]) => {
     list.sort((a, b) => {
-      const ai = firstIdxByImage.get(a.source_image_filename)!
-      const bi = firstIdxByImage.get(b.source_image_filename)!
-      if (ai !== bi) return ai - bi
+      const af = a.source_image_filename
+      const bf = b.source_image_filename
+      if (af !== bf) return af.localeCompare(bf)
       return maxConfidence(a) - maxConfidence(b)
     })
   }
-  return CLASSES.filter((cls) => groups.has(cls)).map((cls) => ({
-    label: classLabel(cls),
-    detections: groups.get(cls)!,
-  }))
+  clusterByImage(review)
+  clusterByImage(unclassified)
+  clusterByImage(background)
+  for (const list of classGroups.values()) clusterByImage(list)
+
+  const out: {
+    label: string
+    kind: 'needs_review' | 'unclassified' | 'class' | 'background'
+    detections: Detection[]
+  }[] = []
+  if (unclassified.length) {
+    out.push({ label: 'Unclassified', kind: 'unclassified', detections: unclassified })
+  }
+  if (review.length) {
+    out.push({ label: 'Needs review', kind: 'needs_review', detections: review })
+  }
+  for (const cls of CLASSES) {
+    const list = classGroups.get(cls)
+    if (list) out.push({ label: classLabel(cls), kind: 'class', detections: list })
+  }
+  // Background pinned to the bottom: rejected stuff is the "done pile",
+  // not the working queue.
+  if (background.length) {
+    out.push({ label: 'Background', kind: 'background', detections: background })
+  }
+  return out
 })
 
 // Flattened in the same order the grid renders, so keyboard navigation
@@ -581,6 +774,26 @@ const groupedDetections = computed(() => {
 const flatVisible = computed(() =>
   groupedDetections.value.flatMap((g) => g.detections),
 )
+
+// Stripe by source image: same image → same tile background, image
+// changes → flip. Restarts per group so each group's first cluster is
+// always the same shade. Lets reviewers eyeball "two tiles from img0091
+// in a row → possible duplicate".
+const imageParityById = computed(() => {
+  const map = new Map<number, 0 | 1>()
+  for (const group of groupedDetections.value) {
+    let parity: 0 | 1 = 0
+    let lastImage: string | null = null
+    for (const d of group.detections) {
+      if (lastImage !== null && d.source_image_filename !== lastImage) {
+        parity = (parity === 0 ? 1 : 0)
+      }
+      lastImage = d.source_image_filename
+      map.set(d.id, parity)
+    }
+  }
+  return map
+})
 
 const selected = computed(() =>
   detections.value.find((d) => d.id === selectedId.value) ?? null,
@@ -757,6 +970,16 @@ function primaryClass(d: Detection): ClassName | null {
 function maxConfidence(d: Detection): number {
   return Math.max(d.yolo_confidence ?? 0, d.insectnet_confidence ?? 0)
 }
+// A detection needs reviewer eyes when the two detectors aren't unanimous:
+// either they fired on different classes, or only one fired at all. The
+// class group is reserved for detections both detectors agreed on.
+function needsReview(d: Detection): boolean {
+  if (hasDisagreement(d)) return true
+  const yoloFired = !!d.yolo_class
+  const insectnetFired = !!d.insectnet_class
+  return yoloFired !== insectnetFired
+}
+
 function hasDisagreement(d: Detection): boolean {
   // Disagreement only meaningful when both branches contributed a class.
   return (
@@ -768,35 +991,12 @@ function hasDisagreement(d: Detection): boolean {
 function isLowConfidence(d: Detection): boolean {
   return maxConfidence(d) < LOW_CONFIDENCE_THRESHOLD
 }
-function needsAttention(d: Detection): boolean {
-  return hasDisagreement(d) || isLowConfidence(d)
-}
-// Both branches fired, matched on class, and were each above the low-conf
-// floor. The inverse of needsAttention: tiles a reviewer can blow through.
-function modelsAgree(d: Detection): boolean {
-  return (
-    d.yolo_class != null &&
-    d.insectnet_class != null &&
-    d.yolo_class === d.insectnet_class &&
-    (d.yolo_confidence ?? 0) >= LOW_CONFIDENCE_THRESHOLD &&
-    (d.insectnet_confidence ?? 0) >= LOW_CONFIDENCE_THRESHOLD
-  )
-}
 function reviewedFade(d: Detection): boolean {
   return (
     d.reviewer_status === 'confirmed' ||
     d.reviewer_status === 'corrected' ||
     d.reviewer_status === 'rejected'
   )
-}
-function statusDotClass(s: ReviewerStatus): string {
-  switch (s) {
-    case 'confirmed': return 'bg-green-500'
-    case 'corrected': return 'bg-blue-500'
-    case 'rejected': return 'bg-red-500'
-    case 'unsure': return 'bg-amber-500'
-    default: return 'bg-muted-foreground/40'
-  }
 }
 function statusBadgeClass(s: ReviewerStatus): string {
   switch (s) {
@@ -818,10 +1018,31 @@ function suggestedClass(d: Detection): ClassName | null {
     : d.yolo_class
 }
 
+// The class to use for grouping a *reviewed* detection. Returns the
+// reviewer's settled call (confirmed or corrected) so the row visibly
+// moves into that class group. Returns null for rejected/unsure/
+// unreviewed — those use the detector-state fallback in
+// groupedDetections.
+function settledClass(d: Detection): ClassName | null {
+  if (d.reviewer_status === 'confirmed' || d.reviewer_status === 'corrected') {
+    return effectiveLabel(d)
+  }
+  return null
+}
+
 function effectiveLabel(d: Detection): ClassName | null {
+  // Rejected = background, which isn't one of the four class labels. Clear
+  // any class hint so the Label panel doesn't end up with both Fly and
+  // Background ticked when a previously-consensus-Fly is rejected.
+  if (d.reviewer_status === 'rejected') return null
   if (d.reviewer_label) return d.reviewer_label
-  // Consensus only when both branches contributed and agree.
+  // Consensus: both detectors fired with the same class.
   if (d.yolo_class != null && d.yolo_class === d.insectnet_class) return d.yolo_class
+  // Single-detector hit: suggest the only class on offer. The detection
+  // still lives in "Needs review" (no consensus), but Confirm can now act
+  // on it directly instead of forcing the reviewer to tick the checkbox.
+  if (d.yolo_class != null && d.insectnet_class == null) return d.yolo_class
+  if (d.insectnet_class != null && d.yolo_class == null) return d.insectnet_class
   return null
 }
 
@@ -870,6 +1091,18 @@ function clearFailedSave(id: number) {
   failedSaves.value = new Map(failedSaves.value)
 }
 
+// Single-step undo. Records the state of the most recently reviewed
+// detection so it can be restored before any subsequent action overwrites
+// the slot. Cleared on successful undo (no undo-an-undo) and on bulk
+// actions (which would need their own snapshot).
+interface UndoEntry {
+  id: number
+  prevStatus: ReviewerStatus
+  prevLabel: ClassName | null
+}
+const lastAction = ref<UndoEntry | null>(null)
+const undoing = ref(false)
+
 async function applyAction(status: ReviewerStatus, label: ClassName | null) {
   if (!selected.value) return
   const d = selected.value
@@ -878,9 +1111,17 @@ async function applyAction(status: ReviewerStatus, label: ClassName | null) {
   const existing = failedSaves.value.get(d.id)
   const prevStatus = existing ? existing.prevStatus : d.reviewer_status
   const prevLabel = existing ? existing.prevLabel : d.reviewer_label
+  // Capture the next tile in the *current* view BEFORE mutating. After the
+  // mutation, d may move out of the view (e.g. labelling under Show:Todo
+  // makes it no longer todo). If we waited, advanceToNext would see d gone
+  // from flatVisible and the filteredDetections watcher would reset
+  // selection to list[0] — the "random jump" the reviewer experiences.
+  const nextId = nextVisibleId(d.id)
+  if (nextId != null) selectedId.value = nextId
+
   d.reviewer_status = status
   d.reviewer_label = label
-  advanceToNext()
+  lastAction.value = { id: d.id, prevStatus, prevLabel }
 
   const ok = await patchDetection(d.id, status, label)
   if (!ok) {
@@ -889,6 +1130,41 @@ async function applyAction(status: ReviewerStatus, label: ClassName | null) {
   } else {
     clearFailedSave(d.id)
   }
+}
+
+async function undoLast() {
+  if (!lastAction.value || undoing.value) return
+  const entry = lastAction.value
+  const d = detections.value.find((x) => x.id === entry.id)
+  if (!d) {
+    lastAction.value = null
+    return
+  }
+  undoing.value = true
+  // Optimistic local restore. Jump back to the reverted detection so the
+  // reviewer sees the result of the undo, not the tile they had advanced to.
+  const newStatus = entry.prevStatus
+  const newLabel = entry.prevLabel
+  d.reviewer_status = newStatus
+  d.reviewer_label = newLabel
+  selectedId.value = entry.id
+
+  const ok = await patchDetection(entry.id, newStatus, newLabel)
+  undoing.value = false
+  if (!ok) {
+    // Mirror applyAction's failure handling so the retry banner can pick
+    // this up like any other failed save.
+    failedSaves.value.set(entry.id, {
+      status: newStatus,
+      label: newLabel,
+      prevStatus: newStatus,
+      prevLabel: newLabel,
+    })
+    failedSaves.value = new Map(failedSaves.value)
+  } else {
+    clearFailedSave(entry.id)
+  }
+  lastAction.value = null
 }
 
 function toggleBulk(id: number) {
@@ -907,6 +1183,58 @@ function selectAllVisible() {
   bulkIds.value = new Set(filteredDetections.value.map((d) => d.id))
 }
 
+// Unreviewed detections that the confidence sliders are currently hiding.
+// Restricted to 'unreviewed' so we never silently overwrite a reviewer's
+// confirmed/corrected/unsure call when the slider moves.
+const belowThresholdIds = computed<number[]>(() => {
+  if (yoloMinConf.value === 0 && insectnetMinConf.value === 0) return []
+  return detections.value
+    .filter((d) => {
+      if (d.reviewer_status !== 'unreviewed') return false
+      const yoloFails =
+        d.yolo_confidence != null && d.yolo_confidence < yoloMinConf.value
+      const insectFails =
+        d.insectnet_confidence != null &&
+        d.insectnet_confidence < insectnetMinConf.value
+      return yoloFails || insectFails
+    })
+    .map((d) => d.id)
+})
+
+async function rejectBelowThreshold() {
+  if (rejectingBelow.value) return
+  const ids = belowThresholdIds.value
+  if (!ids.length) return
+  // Bulk action; single-step undo doesn't model multi-row reverts.
+  lastAction.value = null
+  rejectingBelow.value = true
+  const snapshot = new Map<number, ReviewerStatus>()
+  for (const d of detections.value) {
+    if (belowThresholdIds.value.includes(d.id)) {
+      snapshot.set(d.id, d.reviewer_status)
+      d.reviewer_status = 'rejected'
+      d.reviewer_label = null
+    }
+  }
+  try {
+    const ok = await postBulkReview(ids, 'rejected', null)
+    if (!ok) {
+      for (const id of ids) {
+        const prev = snapshot.get(id)!
+        failedSaves.value.set(id, {
+          status: 'rejected',
+          label: null,
+          prevStatus: prev,
+          prevLabel: null,
+        })
+      }
+      failedSaves.value = new Map(failedSaves.value)
+    }
+  } finally {
+    rejectingBelow.value = false
+  }
+}
+
 async function exportCsv() {
   if (!run.value || exporting.value) return
   exporting.value = true
@@ -920,7 +1248,7 @@ async function exportCsv() {
     const url = URL.createObjectURL(blob)
     const a = document.createElement('a')
     a.href = url
-    a.download = `run-${run.value.id}-detections.csv`
+    a.download = `run-${run.value.id}-images.csv`
     document.body.appendChild(a)
     a.click()
     a.remove()
@@ -932,16 +1260,19 @@ async function exportCsv() {
   }
 }
 
-async function applyToBulk(status: ReviewerStatus, label: ClassName | null) {
-  const ids = [...bulkIds.value]
-  // For each id, the prev to revert to is its original state before any
-  // failed save in this session, falling back to the current state.
+async function submitBulk(
+  ids: number[],
+  status: ReviewerStatus,
+  label: ClassName | null,
+) {
+  if (!ids.length) return
+  const idSet = new Set(ids)
   const snapshot = new Map<
     number,
     { status: ReviewerStatus; label: ClassName | null }
   >()
   for (const d of detections.value) {
-    if (bulkIds.value.has(d.id)) {
+    if (idSet.has(d.id)) {
       const existing = failedSaves.value.get(d.id)
       snapshot.set(d.id, {
         status: existing ? existing.prevStatus : d.reviewer_status,
@@ -951,7 +1282,6 @@ async function applyToBulk(status: ReviewerStatus, label: ClassName | null) {
       d.reviewer_label = label
     }
   }
-  clearBulk()
 
   const ok = await postBulkReview(ids, status, label)
   if (!ok) {
@@ -972,6 +1302,15 @@ async function applyToBulk(status: ReviewerStatus, label: ClassName | null) {
     }
     if (changed) failedSaves.value = new Map(failedSaves.value)
   }
+}
+
+async function applyToBulk(status: ReviewerStatus, label: ClassName | null) {
+  // Single-step undo only covers single-detection actions; clear it so a
+  // post-bulk Z doesn't surprise the reviewer by un-doing one random row.
+  lastAction.value = null
+  const ids = [...bulkIds.value]
+  clearBulk()
+  await submitBulk(ids, status, label)
 }
 
 async function retryFailedSaves() {
@@ -1015,10 +1354,32 @@ function dismissFailedSaves() {
   failedSaves.value = new Map()
 }
 
-// 'confirmed' status forces reviewer_label='' server-side (only 'corrected'
-// keeps the label), so we don't seed yolo_class locally.
-function bulkConfirm() {
-  applyToBulk('confirmed', null)
+// Bulk-confirming the raw selection used to send ('confirmed', null) for every
+// row, which clears reviewer_label server-side. Rows where the group classifier
+// fell below threshold at inference land with predicted_class='' too, and the
+// training-pool gate (reviewer_label or predicted_class in canonical classes)
+// then drops them silently. Partition by effective label and send each bucket
+// as 'corrected' so reviewer_label is always populated. Rows with no derivable
+// class are skipped and surfaced to the reviewer.
+async function bulkConfirm() {
+  lastAction.value = null
+  const buckets = new Map<ClassName, number[]>()
+  let skipped = 0
+  for (const d of detections.value) {
+    if (!bulkIds.value.has(d.id)) continue
+    const lbl = effectiveLabel(d)
+    if (lbl == null) {
+      skipped++
+      continue
+    }
+    if (!buckets.has(lbl)) buckets.set(lbl, [])
+    buckets.get(lbl)!.push(d.id)
+  }
+  bulkConfirmSkipped.value = skipped
+  clearBulk()
+  for (const [label, ids] of buckets) {
+    await submitBulk(ids, 'corrected', label)
+  }
 }
 
 function bulkReject() {
@@ -1050,20 +1411,70 @@ function markUnsure() {
   applyAction('unsure', null)
 }
 
-function advanceToNext() {
+function nextVisibleId(currentId: number): number | null {
   const list = flatVisible.value
-  const idx = list.findIndex((d) => d.id === selectedId.value)
-  if (idx >= 0 && idx + 1 < list.length) {
-    selectedId.value = list[idx + 1].id
-  }
+  const idx = list.findIndex((d) => d.id === currentId)
+  if (idx < 0) return null
+  // Forward if possible; otherwise fall back to the previous tile so a
+  // reject on the last visible item doesn't snap selection to list[0].
+  if (idx + 1 < list.length) return list[idx + 1].id
+  if (idx > 0) return list[idx - 1].id
+  return null
 }
 
-function navigate(delta: number) {
+// Grid is 5 columns. Down/Up jump a row, Left/Right step one tile.
+const GRID_COLS = 5
+
+// Anchor for range selection. Set by every plain click and by every
+// non-extending keyboard navigation. Shift+arrow / shift+click define the
+// range anchor->current; backtracking shrinks rather than accumulating.
+const anchorId = ref<number | null>(null)
+// Bulk ids that pre-date the current shift gesture. The active shift range
+// gets layered on top so backtracking through it doesn't erase manual picks.
+const stableBulkIds = ref<Set<number>>(new Set())
+
+function setShiftRange(fromIdx: number, toIdx: number) {
+  const list = flatVisible.value
+  const [lo, hi] = fromIdx <= toIdx ? [fromIdx, toIdx] : [toIdx, fromIdx]
+  const next = new Set(stableBulkIds.value)
+  for (let i = lo; i <= hi; i++) next.add(list[i].id)
+  bulkIds.value = next
+}
+
+function navigate(delta: number, extend: boolean) {
   const list = flatVisible.value
   const idx = list.findIndex((d) => d.id === selectedId.value)
   if (idx < 0) return
-  const next = list[Math.max(0, Math.min(list.length - 1, idx + delta))]
-  if (next) selectedId.value = next.id
+  const newIdx = Math.max(0, Math.min(list.length - 1, idx + delta))
+  if (newIdx === idx) return
+  selectedId.value = list[newIdx].id
+  if (extend) {
+    // First key in a shift gesture: snapshot the current bulk so the range
+    // we're about to paint on top can be backtracked without erasing it.
+    if (anchorId.value == null) {
+      anchorId.value = list[idx].id
+      stableBulkIds.value = new Set(bulkIds.value)
+    }
+    const anchorIdx = list.findIndex((d) => d.id === anchorId.value)
+    setShiftRange(anchorIdx >= 0 ? anchorIdx : idx, newIdx)
+  } else {
+    anchorId.value = list[newIdx].id
+    stableBulkIds.value = new Set(bulkIds.value)
+  }
+}
+
+function onTileClick(d: Detection, e: MouseEvent | KeyboardEvent) {
+  if (e.shiftKey && anchorId.value != null) {
+    const list = flatVisible.value
+    const ai = list.findIndex((x) => x.id === anchorId.value)
+    const ci = list.findIndex((x) => x.id === d.id)
+    if (ai >= 0 && ci >= 0) setShiftRange(ai, ci)
+    selectedId.value = d.id
+    return
+  }
+  selectedId.value = d.id
+  anchorId.value = d.id
+  stableBulkIds.value = new Set(bulkIds.value)
 }
 
 function onKeydown(e: KeyboardEvent) {
@@ -1072,24 +1483,53 @@ function onKeydown(e: KeyboardEvent) {
   if (e.target instanceof HTMLElement && ['INPUT', 'SELECT', 'TEXTAREA'].includes(e.target.tagName)) {
     return
   }
+  // Escape clears any bulk selection without losing the currently-focused tile.
+  if (e.key === 'Escape' && bulkIds.value.size > 0) {
+    clearBulk()
+    e.preventDefault()
+    return
+  }
+  // Bulk-aware shortcuts: when one or more tiles are checkbox-selected,
+  // class keys (1-4), reject (x) and unsure (u) apply to the whole bulk
+  // instead of just the focused tile. Lets the reviewer do "select 30
+  // crops, press x" without reaching for the bulk action bar.
+  const bulkMode = bulkIds.value.size > 0
+  const classKeyAction = (cls: ClassName) =>
+    bulkMode ? applyToBulk('corrected', cls) : confirmAs(cls)
   switch (e.key) {
-    case '1': confirmAs('fly'); e.preventDefault(); break
-    case '2': confirmAs('bumblebee'); e.preventDefault(); break
-    case '3': confirmAs('butterfly'); e.preventDefault(); break
-    case '4': confirmAs('other'); e.preventDefault(); break
+    case '1': classKeyAction('fly'); e.preventDefault(); break
+    case '2': classKeyAction('bumblebee'); e.preventDefault(); break
+    case '3': classKeyAction('butterfly'); e.preventDefault(); break
+    case '4': classKeyAction('other'); e.preventDefault(); break
     case 'x':
-    case 'X': reject(); e.preventDefault(); break
+    case 'X':
+      if (bulkMode) applyToBulk('rejected', null)
+      else reject()
+      e.preventDefault()
+      break
     case 'u':
-    case 'U': markUnsure(); e.preventDefault(); break
+    case 'U':
+      if (bulkMode) applyToBulk('unsure', null)
+      else markUnsure()
+      e.preventDefault()
+      break
+    case 'z':
+    case 'Z':
+      // Cmd+Z / Ctrl+Z also accepted so the muscle memory works.
+      if (lastAction.value) {
+        void undoLast()
+        e.preventDefault()
+      }
+      break
     case 'Enter': confirmAs(suggestedClass(selected.value)); e.preventDefault(); break
     case 'ArrowDown':
-    case 'ArrowRight':
-    case 'j':
-    case 'l': navigate(1); e.preventDefault(); break
+    case 'j': navigate(GRID_COLS, e.shiftKey); e.preventDefault(); break
     case 'ArrowUp':
+    case 'k': navigate(-GRID_COLS, e.shiftKey); e.preventDefault(); break
+    case 'ArrowRight':
+    case 'l': navigate(1, e.shiftKey); e.preventDefault(); break
     case 'ArrowLeft':
-    case 'k':
-    case 'h': navigate(-1); e.preventDefault(); break
+    case 'h': navigate(-1, e.shiftKey); e.preventDefault(); break
   }
 }
 

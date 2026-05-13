@@ -16,19 +16,17 @@ class PollinatorDetectionSerializer(BaseDetectionReadSerializer):
     detection reaching this serializer must have a pollinator_detection row.
     """
 
-    yolo_class = serializers.CharField(
-        source='pollinator_detection.yolo_class',
-        read_only=True,
-    )
+    # The DB stores unset classes as '' (CharField blank=True). Surface them
+    # as null so the frontend's `class != null` checks actually mean
+    # "the branch fired" — otherwise hasDisagreement reads '' !== 'fly' as a
+    # class disagreement when really only YOLO ran.
+    yolo_class = serializers.SerializerMethodField()
     yolo_confidence = serializers.FloatField(
         source='pollinator_detection.yolo_confidence',
         read_only=True,
         allow_null=True,
     )
-    insectnet_class = serializers.CharField(
-        source='pollinator_detection.insectnet_class',
-        read_only=True,
-    )
+    insectnet_class = serializers.SerializerMethodField()
     insectnet_confidence = serializers.FloatField(
         source='pollinator_detection.insectnet_confidence',
         read_only=True,
@@ -65,6 +63,14 @@ class PollinatorDetectionSerializer(BaseDetectionReadSerializer):
             'source',
             'merge_iou',
         )
+
+    def get_yolo_class(self, obj: Detection) -> str | None:
+        pd = getattr(obj, 'pollinator_detection', None)
+        return (pd.yolo_class or None) if pd else None
+
+    def get_insectnet_class(self, obj: Detection) -> str | None:
+        pd = getattr(obj, 'pollinator_detection', None)
+        return (pd.insectnet_class or None) if pd else None
 
 
 # ──────────────────────────────────────────────────────────────────────────
