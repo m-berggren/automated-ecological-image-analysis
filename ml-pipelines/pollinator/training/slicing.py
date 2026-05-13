@@ -17,19 +17,30 @@ Tile config:
                     Higher overlap reduces edge-clipped-bbox loss but
                     multiplies tile count.
   min_area:         clipped bbox kept only if remaining area is at least
-                    min_area * original area. Avoids tiny slivers that
-                    confuse training.
-  keep_empty_tiles: when False (default) drop tiles that contain no labels
-                    after clipping. Set True to include all tiles as
-                    negative samples (helps reduce false positives but
-                    slows training and biases away from rare classes).
+                    min_area * original area. 0.1 keeps boundary-clipped
+                    insects; 0.3 drops them (cleaner edges, fewer samples).
+  keep_empty_tiles: how many label-free tiles to keep as negatives.
+                    - False or 0: drop all empties (training sees only
+                      positives; the model never learns "no insect here")
+                    - True: keep every empty tile (typically 20-30x more
+                      empties than positives at this tile size; swamps
+                      gradient and explodes disk)
+                    - int >= 1: keep up to N empties per labeled tile
+                      (negative:positive ratio). 2-3 is a sane default.
+                    - float in (0, 1]: keep this fraction of all empties.
+                    - dict mapping split -> any of the above. Missing
+                      splits default to False. Use this to balance train
+                      tightly while leaving the test split untouched.
+                    Empties are sampled deterministically with `seed`.
 """
 
 from __future__ import annotations
 
 import logging
+import random
+from collections import defaultdict
 from pathlib import Path
-from typing import Optional
+from typing import Optional, Union
 
 from PIL import Image
 
@@ -96,19 +107,48 @@ def _to_yolo_line(
     return f'{cls} {cx:.6f} {cy:.6f} {bw:.6f} {bh:.6f}'
 
 
+def _resolve_target_empties(
+    keep_empty_tiles: Union[bool, int, float], n_positive: int, n_empty: int
+) -> int:
+    """Map the tri-state keep_empty_tiles to a concrete target count.
+
+    bool is checked before int because bool is a subclass of int in Python;
+    without this, True/False would silently route to the int branch.
+    """
+    if isinstance(keep_empty_tiles, bool):
+        return n_empty if keep_empty_tiles else 0
+    if isinstance(keep_empty_tiles, int):
+        if keep_empty_tiles < 0:
+            raise ValueError('keep_empty_tiles int must be >= 0')
+        return min(n_empty, n_positive * keep_empty_tiles)
+    if isinstance(keep_empty_tiles, float):
+        if not 0.0 <= keep_empty_tiles <= 1.0:
+            raise ValueError('keep_empty_tiles float must be in [0, 1]')
+        return int(round(n_empty * keep_empty_tiles))
+    raise TypeError(
+        f'keep_empty_tiles must be bool, int, or float; got {type(keep_empty_tiles).__name__}'
+    )
+
+
 def slice_dataset(
     dataset_root: str,
     output_root: str,
     tile_size: int = 640,
     overlap: float = 0.2,
-    min_area: float = 0.3,
+    min_area: float = 0.1,
     splits: tuple = ('train', 'val', 'test'),
-    keep_empty_tiles: bool = False,
+    keep_empty_tiles: Union[bool, int, float, dict] = False,
+    seed: int = 42,
     jpeg_quality: int = 90,
 ) -> dict:
     """Slice a YOLO-format dataset into overlapping tiles.
 
-    Returns per-split counts: {split: {source_images, tiles, labeled_tiles}}.
+    Empty tiles (no surviving boxes after clipping) are sampled according
+    to `keep_empty_tiles`; see module docstring for the five accepted
+    shapes. Sampling is deterministic for a given `seed`.
+
+    Returns per-split counts: {split: {source_images, tiles, labeled_tiles,
+    empties_total, empties_kept}}.
     """
     src = Path(dataset_root)
     dst = Path(output_root)
@@ -125,9 +165,13 @@ def slice_dataset(
         dst_img_dir.mkdir(parents=True, exist_ok=True)
         dst_lbl_dir.mkdir(parents=True, exist_ok=True)
 
+        # Pass 1: enumerate every tile candidate per source image. Store
+        # (x0, y0, clipped_boxes) so we can decide what to write without
+        # re-parsing labels.
+        candidates: dict = {}  # img_path -> list[(x0, y0, clipped)]
         n_source = 0
-        n_tiles = 0
-        n_labeled = 0
+        n_positive = 0
+        n_empty = 0
 
         for img_path in sorted(src_img_dir.iterdir()):
             if img_path.suffix.lower() not in ('.jpg', '.jpeg', '.png'):
@@ -138,61 +182,114 @@ def slice_dataset(
                 with Image.open(img_path) as img:
                     img.load()
                     width, height = img.size
+            except Exception as e:
+                logger.warning(f'failed to open {img_path.name}: {e}')
+                continue
 
-                    label_path = src_lbl_dir / f'{img_path.stem}.txt'
-                    boxes: list = []
-                    if label_path.exists():
-                        for line in label_path.read_text().splitlines():
-                            b = _parse_yolo_line(line, width, height)
-                            if b is not None:
-                                boxes.append(b)
+            label_path = src_lbl_dir / f'{img_path.stem}.txt'
+            boxes: list = []
+            if label_path.exists():
+                for line in label_path.read_text().splitlines():
+                    b = _parse_yolo_line(line, width, height)
+                    if b is not None:
+                        boxes.append(b)
 
-                    xs = _tile_origins(width, tile_size, overlap)
-                    ys = _tile_origins(height, tile_size, overlap)
-                    for y0 in ys:
-                        for x0 in xs:
-                            tile = (x0, y0, x0 + tile_size, y0 + tile_size)
-                            clipped = [
-                                cb
-                                for cb in (
-                                    _clip_to_tile(b, tile, min_area) for b in boxes
-                                )
-                                if cb is not None
-                            ]
+            xs = _tile_origins(width, tile_size, overlap)
+            ys = _tile_origins(height, tile_size, overlap)
+            per_image: list = []
+            for y0 in ys:
+                for x0 in xs:
+                    tile = (x0, y0, x0 + tile_size, y0 + tile_size)
+                    clipped = [
+                        cb
+                        for cb in (_clip_to_tile(b, tile, min_area) for b in boxes)
+                        if cb is not None
+                    ]
+                    per_image.append((x0, y0, clipped))
+                    if clipped:
+                        n_positive += 1
+                    else:
+                        n_empty += 1
+            if per_image:
+                candidates[img_path] = per_image
 
-                            if not clipped and not keep_empty_tiles:
+        # Resolve the empty-tile budget for this split. A dict lets the
+        # caller balance train/val tightly while leaving test untouched.
+        if isinstance(keep_empty_tiles, dict):
+            keep_for_split = keep_empty_tiles.get(split, False)
+        else:
+            keep_for_split = keep_empty_tiles
+        target_empties = _resolve_target_empties(keep_for_split, n_positive, n_empty)
+
+        keep_empty_set: set = set()
+        if target_empties > 0 and target_empties < n_empty:
+            all_empties = [
+                (img_path, x0, y0)
+                for img_path, items in candidates.items()
+                for x0, y0, clipped in items
+                if not clipped
+            ]
+            rng = random.Random(seed)
+            keep_empty_set = set(rng.sample(all_empties, target_empties))
+
+        # Pass 2: open each source once and write the selected tiles.
+        n_tiles = 0
+        n_labeled = 0
+        for img_path, items in candidates.items():
+            try:
+                with Image.open(img_path) as img:
+                    img.load()
+                    for x0, y0, clipped in items:
+                        if not clipped:
+                            if target_empties >= n_empty:
+                                pass  # keep every empty
+                            elif target_empties == 0:
+                                continue
+                            elif (img_path, x0, y0) not in keep_empty_set:
                                 continue
 
-                            stem = f'{img_path.stem}_t{y0}_{x0}'
-                            tile_img = img.crop(tile).convert('RGB')
+                        stem = f'{img_path.stem}_t{y0}_{x0}'
+                        tile_box = (x0, y0, x0 + tile_size, y0 + tile_size)
+                        try:
+                            tile_img = img.crop(tile_box).convert('RGB')
                             tile_img.save(
                                 dst_img_dir / f'{stem}.jpg',
                                 'JPEG',
                                 quality=jpeg_quality,
                             )
+                        except Exception as e:
+                            logger.warning(f'failed to write tile {stem}: {e}')
+                            continue
 
+                        label_path = dst_lbl_dir / f'{stem}.txt'
+                        if clipped:
                             lines = [
                                 _to_yolo_line(*c, w=tile_size, h=tile_size)
                                 for c in clipped
                             ]
-                            (dst_lbl_dir / f'{stem}.txt').write_text(
-                                '\n'.join(lines) + '\n'
-                            )
+                            label_path.write_text('\n'.join(lines) + '\n')
+                            n_labeled += 1
+                        else:
+                            # Empty label file is the YOLO convention for
+                            # an explicit background sample. Use 0 bytes so
+                            # downstream "is this empty?" checks based on
+                            # file size are unambiguous.
+                            label_path.write_text('')
 
-                            n_tiles += 1
-                            if clipped:
-                                n_labeled += 1
+                        n_tiles += 1
             except Exception as e:
-                logger.warning(f'slicing failed on {img_path.name}: {e}')
+                logger.warning(f'failed during tiling of {img_path.name}: {e}')
 
         stats[split] = {
             'source_images': n_source,
             'tiles': n_tiles,
             'labeled_tiles': n_labeled,
+            'empties_total': n_empty,
+            'empties_kept': n_tiles - n_labeled,
         }
         logger.info(
             f'sliced {split}: {n_source} source -> {n_tiles} tiles '
-            f'({n_labeled} with labels)'
+            f'({n_labeled} labeled, {n_tiles - n_labeled} of {n_empty} empties kept)'
         )
 
     return stats
