@@ -2,7 +2,7 @@
   <PageHeader title="Upload" subtitle="Configure and upload a camera-trap folder" />
   <PollinatorsStepper current="upload" />
 
-  <div class="flex-1 p-8 space-y-6 max-w-3xl mx-auto w-full">
+  <div class="flex-1 min-h-0 overflow-y-auto p-8 space-y-6 max-w-3xl mx-auto w-full">
     <!-- Run details -->
     <section class="rounded-xl border border-border bg-surface p-5 space-y-3">
       <h2 class="text-sm font-semibold">Run details</h2>
@@ -234,10 +234,14 @@
         /
         <label class="text-primary cursor-pointer hover:underline">
           browse folder
+          <!-- webkitdirectory makes the OS dialog let you pick a folder
+               (instead of files). Without it the link is a no-op. -->
           <input
             ref="folderInput"
             type="file"
             multiple
+            webkitdirectory
+            directory
             class="hidden"
             @change="onPick($event, true)"
           />
@@ -246,22 +250,29 @@
       <p class="text-xs text-muted-foreground mt-1">JPG, PNG — up to ~12,000 images per run</p>
     </section>
 
-    <!-- Upload progress + start -->
-    <section
-      v-if="uploader && uploader.items.length"
-      class="rounded-xl border border-border bg-surface"
-    >
+    <!-- Upload progress + start. Always rendered so the Start button is
+         visible even before any image has been picked; it's disabled with
+         an explanatory hint when there's nothing to run on yet. -->
+    <section class="rounded-xl border border-border bg-surface">
       <header class="flex items-center justify-between px-5 py-3 border-b border-border">
         <div class="text-sm">
-          <span class="font-medium">{{ doneCount }}</span>
-          <span class="text-muted-foreground"> of </span>
-          <span class="font-medium">{{ uploader.items.length }}</span>
-          <span class="text-muted-foreground"> uploaded</span>
-          <span v-if="failedCount" class="ml-3 text-red-600">{{ failedCount }} failed</span>
+          <template v-if="uploader && uploader.items.length">
+            <span class="font-medium">{{ doneCount }}</span>
+            <span class="text-muted-foreground"> of </span>
+            <span class="font-medium">{{ uploader.items.length }}</span>
+            <span class="text-muted-foreground"> uploaded</span>
+            <span v-if="failedCount" class="ml-3 text-red-600">{{ failedCount }} failed</span>
+          </template>
+          <template v-else>
+            <span class="text-muted-foreground">
+              Drop or browse images above, then start detection.
+            </span>
+          </template>
         </div>
         <div class="flex items-center gap-2">
           <button
             :disabled="!doneCount || starting"
+            :title="!doneCount ? 'Upload at least one image first' : ''"
             class="px-3 py-1.5 rounded-md text-sm font-medium bg-primary text-primary-foreground hover:bg-primary/90 disabled:opacity-50 disabled:cursor-not-allowed"
             @click="startDetection"
           >
@@ -271,7 +282,10 @@
         </div>
       </header>
 
-      <ul v-if="recentFailures.length" class="max-h-60 overflow-auto divide-y divide-border">
+      <ul
+        v-if="recentFailures.length"
+        class="max-h-60 overflow-auto divide-y divide-border"
+      >
         <li
           v-for="item in recentFailures"
           :key="item.id"
@@ -288,7 +302,10 @@
           </button>
         </li>
       </ul>
-      <p v-else class="px-5 py-3 text-xs text-muted-foreground">
+      <p
+        v-else-if="uploader && uploader.items.length"
+        class="px-5 py-3 text-xs text-muted-foreground"
+      >
         No failures. (Per-file list hidden at this scale — failures will appear here as they
         happen.)
       </p>

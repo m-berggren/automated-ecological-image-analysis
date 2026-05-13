@@ -2,7 +2,7 @@
   <PageHeader :title="headerTitle" :subtitle="headerSubtitle" />
   <PollinatorsStepper current="detect" :runId="run?.id" />
 
-  <div class="flex-1 p-8 max-w-4xl mx-auto w-full space-y-6">
+  <div class="flex-1 min-h-0 overflow-y-auto p-8 max-w-4xl mx-auto w-full space-y-6">
     <div v-if="loading" class="text-sm text-muted-foreground">Loading…</div>
     <div v-else-if="loadError" class="text-sm text-red-600">{{ loadError }}</div>
 
@@ -58,10 +58,11 @@
         <div class="mt-4 flex gap-2">
           <button
             v-if="canCancel"
-            class="text-sm px-3 py-1.5 rounded-md border border-border hover:bg-muted"
+            class="text-sm px-3 py-1.5 rounded-md border border-border hover:bg-muted disabled:opacity-50"
+            :disabled="cancelling"
             @click="onCancel"
           >
-            Cancel run
+            {{ cancelling ? 'Cancelling…' : 'Cancel run' }}
           </button>
           <RouterLink
             v-if="canOpenReview"
@@ -171,7 +172,7 @@ import PageHeader from '@/components/PageHeader.vue'
 import PollinatorsStepper from '@/components/PollinatorsStepper.vue'
 import { api } from '@/api'
 
-type RunStatus = 'pending' | 'running' | 'completed' | 'failed'
+type RunStatus = 'pending' | 'running' | 'completed' | 'failed' | 'cancelled'
 type PreviewMode = 'queued' | 'running' | 'completed' | 'failed'
 
 interface ActivityEntry {
@@ -450,11 +451,38 @@ function logLevelClass(level: ActivityEntry['level']): string {
   return ''
 }
 
-function onCancel() {
-  // Real cancel will hit a backend endpoint; preview just flips status locally.
-  if (previewMode.value && run.value) {
-    run.value.status = 'failed'
+const cancelling = ref(false)
+
+async function onCancel() {
+  if (!run.value || cancelling.value) return
+  if (previewMode.value) {
+    run.value.status = 'cancelled'
     run.value.error_message = 'Cancelled by user.'
+    return
+  }
+  if (!window.confirm('Cancel this run? The worker stops at the next checkpoint and partial results are discarded.')) {
+    return
+  }
+  cancelling.value = true
+  try {
+    const res = await api(`/api/analysis/runs/${run.value.id}/cancel/`, {
+      method: 'POST',
+    })
+    if (!res.ok) {
+      let detail = `HTTP ${res.status}`
+      try {
+        const body = await res.json()
+        detail = body.error || body.detail || detail
+      } catch {}
+      loadError.value = `Cancel failed: ${detail}`
+      return
+    }
+    const data = await res.json()
+    run.value = { ...run.value, ...data }
+  } catch (e) {
+    loadError.value = e instanceof Error ? e.message : String(e)
+  } finally {
+    cancelling.value = false
   }
 }
 

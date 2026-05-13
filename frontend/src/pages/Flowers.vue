@@ -1,6 +1,6 @@
 <template>
   <PageHeader title="Flowers" subtitle="Paused: Unsure if time to implement" />
-  <div class="flex-1 p-8">
+  <div class="flex-1 min-h-0 overflow-y-auto p-8">
     <div class="rounded-xl border border-border bg-surface p-8 max-w-2xl">
       <h2 class="font-display font-semibold mb-2">Out of scope.</h2>
     </div>

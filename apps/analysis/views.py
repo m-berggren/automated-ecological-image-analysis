@@ -217,16 +217,49 @@ class InferenceRunListCreateView(generics.ListCreateAPIView):
         )
 
 
-class InferenceRunDetailView(generics.RetrieveAPIView):
-    """GET /api/analysis/runs/<id>/
+class InferenceRunDetailView(generics.RetrieveDestroyAPIView):
+    """GET    /api/analysis/runs/<id>/  read the run (polled while running).
+    DELETE /api/analysis/runs/<id>/  remove the run and everything tied to it.
 
-    Returns the full run record including config and activity_log. Polled
-    by the frontend's detect/review pages while the run is in progress.
+    DB cascade handles Detection and PollinatorDetection (via FK on_delete).
+    The on-disk run output dir (MEDIA_ROOT/runs/<id>/, holding crops,
+    yolo_crops, preprocessing, results.json) is removed explicitly because
+    Django's storage backend never auto-deletes ImageField files. Source
+    images are left alone — they live on the Upload and can be reused by
+    other runs.
+
+    Refuses to delete an in-flight run (pending/running) to keep the
+    worker from racing the delete; cancel it first.
     """
 
     queryset = InferenceRun.objects.all()
     serializer_class = InferenceRunDetailSerializer
     lookup_field = 'pk'
+
+    def perform_destroy(self, instance: InferenceRun) -> None:
+        from apps.analysis.models import JobStatus
+
+        if instance.status in (JobStatus.PENDING, JobStatus.RUNNING):
+            raise serializers.ValidationError(
+                {
+                    'error': (
+                        f'Run is still {instance.status}. Cancel it before '
+                        f'deleting so the background worker stops cleanly.'
+                    ),
+                },
+            )
+        # Delete the on-disk output directory if it exists. Wrap in try/
+        # except so DB cleanup still runs even if the filesystem step
+        # fails (e.g., perms, partial dir).
+        run_dir = Path(settings.MEDIA_ROOT) / 'runs' / str(instance.pk)
+        if run_dir.exists():
+            import shutil
+
+            try:
+                shutil.rmtree(run_dir)
+            except OSError:
+                logger.exception(f'Failed to remove {run_dir}; continuing with DB delete')
+        super().perform_destroy(instance)
 
 
 class DetectionBulkView(APIView):

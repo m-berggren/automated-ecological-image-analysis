@@ -51,8 +51,26 @@
           class="rounded-xl border border-border bg-card overflow-hidden shadow-md"
         >
           <header class="px-5 py-4 bg-primary/[0.22] border-b border-border flex items-baseline gap-3">
-            <h2 class="font-bold text-lg tracking-tight">
-              {{ group.upload?.name || (group.upload ? `Upload #${group.upload.id}` : 'Unattached runs') }}
+            <input
+              v-if="group.upload && editingUploadId === group.upload.id"
+              ref="renameInputRef"
+              v-model="editingValue"
+              class="font-bold text-lg tracking-tight bg-transparent border-b border-foreground/50 focus:outline-none flex-1 min-w-0"
+              :disabled="savingRename"
+              @blur="commitRename(group.upload)"
+              @keydown.enter.prevent="commitRename(group.upload)"
+              @keydown.esc.prevent="cancelRename"
+            />
+            <h2
+              v-else-if="group.upload"
+              class="font-bold text-lg tracking-tight cursor-text"
+              :title="'Double-click to rename'"
+              @dblclick="startRename(group.upload)"
+            >
+              {{ group.upload.name || `Upload #${group.upload.id}` }}
+            </h2>
+            <h2 v-else class="font-bold text-lg tracking-tight">
+              Unattached runs
             </h2>
             <span v-if="group.upload" class="text-xs text-muted-foreground">
               {{ group.upload.image_count.toLocaleString() }} images
@@ -72,7 +90,7 @@
                 <div class="flex-1 min-w-0">
                   <div class="flex items-baseline gap-2">
                     <span class="font-medium text-sm truncate">
-                      {{ run.name || `Run #${run.id}` }}
+                      {{ runDisplayName(run, group.upload) }}
                     </span>
                     <span class="text-xs text-muted-foreground shrink-0">
                       created {{ formatDate(run.created_at) }}
@@ -148,6 +166,15 @@
                 >
                   {{ run.status === 'completed' ? 'Review' : 'Open' }}
                 </RouterLink>
+                <button
+                  v-if="!isRunInFlight(run)"
+                  class="text-xs px-2 py-1 rounded border border-red-300 text-red-700 hover:bg-red-50 shrink-0 disabled:opacity-50"
+                  :disabled="deletingRunId === run.id"
+                  :title="`Delete run #${run.id} and all its detections`"
+                  @click="deleteRun(run)"
+                >
+                  {{ deletingRunId === run.id ? 'Deleting…' : 'Delete' }}
+                </button>
               </div>
             </li>
           </ul>
@@ -158,7 +185,7 @@
 </template>
 
 <script setup lang="ts">
-import { computed, onMounted, ref } from 'vue'
+import { computed, nextTick, onMounted, ref } from 'vue'
 import { RouterLink, useRoute } from 'vue-router'
 import PageHeader from '@/components/PageHeader.vue'
 import { api } from '@/api'
@@ -225,6 +252,95 @@ const uploads = ref<Upload[]>([])
 const runs = ref<Run[]>([])
 const statusFilter = ref<StatusFilter>('all')
 const exportingRunId = ref<number | null>(null)
+const deletingRunId = ref<number | null>(null)
+const editingUploadId = ref<number | null>(null)
+const editingValue = ref('')
+const savingRename = ref(false)
+const renameInputRef = ref<HTMLInputElement | HTMLInputElement[] | null>(null)
+
+// The upload page uses one text field for both Upload.name and Run.name,
+// so they end up identical and the title double-renders on the Runs page.
+// Hide the run name when it duplicates the upload's; otherwise show it.
+function runDisplayName(run: Run, upload: Upload | null | undefined): string {
+  if (!run.name) return `Run #${run.id}`
+  if (upload && run.name === upload.name) return `Run #${run.id}`
+  return run.name
+}
+
+async function startRename(upload: Upload) {
+  if (editingUploadId.value === upload.id) return
+  editingUploadId.value = upload.id
+  editingValue.value = upload.name || ''
+  await nextTick()
+  const el = renameInputRef.value
+  const input = Array.isArray(el) ? el[0] : el
+  input?.focus()
+  input?.select()
+}
+
+function cancelRename() {
+  editingUploadId.value = null
+  editingValue.value = ''
+}
+
+async function commitRename(upload: Upload) {
+  if (savingRename.value || editingUploadId.value !== upload.id) return
+  const trimmed = editingValue.value.trim()
+  if (trimmed === (upload.name || '')) {
+    cancelRename()
+    return
+  }
+  savingRename.value = true
+  try {
+    const res = await api(`/api/datasets/uploads/${upload.id}/`, {
+      method: 'PATCH',
+      body: JSON.stringify({ name: trimmed }),
+    })
+    if (!res.ok) {
+      loadError.value = `Rename failed: HTTP ${res.status}`
+      return
+    }
+    const data = await res.json()
+    const idx = uploads.value.findIndex((u) => u.id === upload.id)
+    if (idx >= 0) uploads.value[idx] = { ...uploads.value[idx], name: data.name ?? trimmed }
+  } catch (e) {
+    loadError.value = e instanceof Error ? e.message : String(e)
+  } finally {
+    savingRename.value = false
+    editingUploadId.value = null
+    editingValue.value = ''
+  }
+}
+
+function isRunInFlight(run: Run): boolean {
+  return run.status === 'pending' || run.status === 'running'
+}
+
+async function deleteRun(run: Run) {
+  if (deletingRunId.value != null) return
+  const label = run.name || `Run #${run.id}`
+  if (!window.confirm(
+    `Delete ${label}? This permanently removes the run, every detection in it, and the saved crops on disk. Source images stay.`,
+  )) return
+  deletingRunId.value = run.id
+  try {
+    const res = await api(`/api/analysis/runs/${run.id}/`, { method: 'DELETE' })
+    if (!res.ok && res.status !== 204) {
+      let detail = `HTTP ${res.status}`
+      try {
+        const body = await res.json()
+        detail = body.error || body.detail || detail
+      } catch {}
+      loadError.value = `Delete failed: ${detail}`
+      return
+    }
+    runs.value = runs.value.filter((r) => r.id !== run.id)
+  } catch (e) {
+    loadError.value = e instanceof Error ? e.message : String(e)
+  } finally {
+    deletingRunId.value = null
+  }
+}
 
 async function exportRunCsv(runId: number) {
   if (exportingRunId.value != null) return
@@ -239,7 +355,7 @@ async function exportRunCsv(runId: number) {
     const url = URL.createObjectURL(blob)
     const a = document.createElement('a')
     a.href = url
-    a.download = `run-${runId}-detections.csv`
+    a.download = `run-${runId}-images.csv`
     document.body.appendChild(a)
     a.click()
     a.remove()
