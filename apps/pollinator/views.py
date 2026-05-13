@@ -123,7 +123,11 @@ class PollinatorRunExportCSVView(APIView):
         counts_by_image: dict[int, dict[str, int]] = {}
         validated = (
             Detection.objects
-            .filter(inference_run=run, status=DetectionStatus.ACCEPTED)
+            .filter(
+                inference_run=run,
+                status=DetectionStatus.ACCEPTED,
+                excluded_from_export=False,
+            )
             .values_list('image_id', 'predicted_class', 'reviewer_label')
         )
         for image_id, predicted, reviewer in validated:

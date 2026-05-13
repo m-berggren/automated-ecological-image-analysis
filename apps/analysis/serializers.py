@@ -9,6 +9,7 @@ from .models import (  # noqa: F401
     Detection,
     DetectionStatus,
     InferenceRun,
+    ModelArtifact,
     ModelVersion,
     TrainingJob,
 )
@@ -24,8 +25,30 @@ REVIEWER_STATUS_MAP = {
 REVIEWER_STATUS_CHOICES = list(REVIEWER_STATUS_MAP.keys())
 
 
+class ModelArtifactSerializer(serializers.ModelSerializer):
+    """Read serializer for files attached to a ModelVersion (curves, sample
+    tiles, results.csv, etc.). The `url` is built from the FileField storage
+    backend so the frontend can render images and download links directly."""
+
+    url = serializers.SerializerMethodField()
+
+    class Meta:
+        model = ModelArtifact
+        fields = ('id', 'kind', 'caption', 'url', 'created_at')
+        read_only_fields = fields
+
+    def get_url(self, obj: ModelArtifact) -> str | None:
+        if not obj.file:
+            return None
+        request = self.context.get('request')
+        url = obj.file.url
+        return request.build_absolute_uri(url) if request else url
+
+
 class ModelVersionSerializer(serializers.ModelSerializer):
     """Read serializer for trained model versions."""
+
+    artifacts = ModelArtifactSerializer(many=True, read_only=True)
 
     class Meta:
         model = ModelVersion
@@ -38,6 +61,7 @@ class ModelVersionSerializer(serializers.ModelSerializer):
             'metrics',
             'parameters',
             'created_at',
+            'artifacts',
         )
         read_only_fields = ('id', 'created_at')
 
@@ -164,6 +188,7 @@ class BaseDetectionReadSerializer(serializers.ModelSerializer):
             'predicted_class',
             'reviewer_status',
             'reviewer_label',
+            'excluded_from_export',
             'source_image_filename',
             'source_image_url',
             'crop_url',

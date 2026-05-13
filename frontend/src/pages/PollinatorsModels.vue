@@ -136,6 +136,67 @@
                         </dl>
                       </div>
                     </div>
+                    <div
+                      v-if="v.artifacts.length > 0"
+                      class="mt-4 pt-3 border-t border-border"
+                    >
+                      <button
+                        class="flex items-center gap-1.5 text-[11px] font-semibold uppercase tracking-wider text-muted-foreground hover:text-foreground"
+                        @click="toggleArtifacts(v.id)"
+                      >
+                        <span>{{ expandedArtifactIds.has(v.id) ? '▾' : '▸' }}</span>
+                        <span>Training artifacts ({{ v.artifacts.length }})</span>
+                      </button>
+                      <div v-if="expandedArtifactIds.has(v.id)" class="mt-3 space-y-4">
+                        <div
+                          v-for="group in groupedArtifacts(v)"
+                          :key="group.kind"
+                        >
+                          <div class="text-xs font-medium text-foreground mb-1.5">
+                            {{ group.label }}
+                          </div>
+                          <div v-if="group.isImage" class="flex flex-wrap gap-3">
+                            <a
+                              v-for="a in group.items"
+                              :key="a.id"
+                              :href="a.url ?? '#'"
+                              target="_blank"
+                              rel="noopener"
+                              class="block border border-border rounded-md overflow-hidden hover:border-primary"
+                              :title="a.caption || ''"
+                            >
+                              <img
+                                v-if="a.url"
+                                :src="a.url"
+                                :alt="a.caption || group.label"
+                                class="block w-60 h-auto bg-background"
+                                loading="lazy"
+                              />
+                              <div
+                                v-if="a.caption"
+                                class="px-2 py-1 text-[10px] text-muted-foreground bg-muted/40"
+                              >
+                                {{ a.caption }}
+                              </div>
+                            </a>
+                          </div>
+                          <ul v-else class="text-xs space-y-1">
+                            <li v-for="a in group.items" :key="a.id">
+                              <a
+                                v-if="a.url"
+                                :href="a.url"
+                                target="_blank"
+                                rel="noopener"
+                                class="text-primary hover:underline font-mono"
+                                :download="true"
+                              >
+                                Download{{ a.caption ? ` (${a.caption})` : '' }}
+                              </a>
+                            </li>
+                          </ul>
+                        </div>
+                      </div>
+                    </div>
                     <div class="text-xs text-muted-foreground mt-3 pt-3 border-t border-border">
                       Trained {{ formatRelative(v.trained_at) }}
                     </div>
@@ -200,7 +261,28 @@
               class="mt-1 w-full px-2 py-1.5 rounded border border-border bg-background"
             />
           </label>
-          <label class="block">
+          <div>
+            <span class="text-xs font-medium text-muted-foreground">Source</span>
+            <div class="mt-1 inline-flex rounded border border-border overflow-hidden text-xs">
+              <button
+                type="button"
+                class="px-3 py-1.5"
+                :class="uploadMode === 'file' ? 'bg-primary text-primary-foreground' : 'bg-background hover:bg-muted'"
+                @click="uploadMode = 'file'"
+              >
+                Single weights file
+              </button>
+              <button
+                type="button"
+                class="px-3 py-1.5"
+                :class="uploadMode === 'folder' ? 'bg-primary text-primary-foreground' : 'bg-background hover:bg-muted'"
+                @click="uploadMode = 'folder'"
+              >
+                Training run folder
+              </button>
+            </div>
+          </div>
+          <label v-if="uploadMode === 'file'" class="block">
             <span class="text-xs font-medium text-muted-foreground">
               Weights file
               <span class="text-red-600">*</span>
@@ -215,6 +297,50 @@
               .pt / .pth — metadata (img_size, arch, epoch) is auto-extracted if present.
             </span>
           </label>
+          <div v-else class="block">
+            <span class="text-xs font-medium text-muted-foreground">
+              Ultralytics run folder
+              <span class="text-red-600">*</span>
+            </span>
+            <input
+              type="file"
+              webkitdirectory
+              directory
+              multiple
+              class="mt-1 w-full text-xs"
+              @change="pickUploadFolder"
+            />
+            <span class="text-[11px] text-muted-foreground">
+              Pick the run folder; the server takes weights/best.pt (fallback last.pt) and
+              ingests recognised siblings (curves, confusion matrix, results.csv, sample tiles, args.yaml).
+            </span>
+            <div
+              v-if="uploadFolderFiles.length"
+              class="mt-2 rounded border border-border bg-muted/30 p-2 text-[11px] space-y-1"
+            >
+              <div>
+                <span class="font-medium">Weights:</span>
+                <span v-if="folderPreview.weightsLabel" class="ml-1 font-mono">
+                  {{ folderPreview.weightsLabel }}
+                </span>
+                <span v-else class="ml-1 text-red-600">
+                  not found (need weights/best.pt or weights/last.pt)
+                </span>
+              </div>
+              <div>
+                <span class="font-medium">
+                  Artifacts ({{ folderPreview.recognised.length }}):
+                </span>
+                <span v-if="folderPreview.recognised.length" class="ml-1 font-mono">
+                  {{ folderPreview.recognised.join(', ') }}
+                </span>
+                <span v-else class="ml-1 text-muted-foreground">none recognised</span>
+              </div>
+              <div v-if="folderPreview.skipped > 0" class="text-muted-foreground">
+                {{ folderPreview.skipped }} other file(s) will be ignored.
+              </div>
+            </div>
+          </div>
           <p v-if="uploadError" class="text-xs text-red-600">{{ uploadError }}</p>
         </div>
         <footer class="px-5 py-3 border-t border-border flex items-center justify-end gap-2">
@@ -277,6 +403,44 @@ const loadError = ref('')
 const tracks = ref<Track[]>([])
 const kindFilter = ref<string>('all')
 const expandedIds = ref<Set<number>>(new Set())
+// Parallel set: when a version id is in here, the training-artifacts panel
+// inside its (already-expanded) row is open. Kept separate from expandedIds
+// so users can leave the parameters/metrics view open while flipping artifacts.
+const expandedArtifactIds = ref<Set<number>>(new Set())
+
+function toggleArtifacts(id: number) {
+  const next = new Set(expandedArtifactIds.value)
+  if (next.has(id)) next.delete(id)
+  else next.add(id)
+  expandedArtifactIds.value = next
+}
+
+// Display labels + ordering for each ModelArtifactKind. Image kinds render as
+// thumbnails; non-image kinds (results.csv) render as a download link.
+const ARTIFACT_GROUPS: Array<{ kind: string; label: string; isImage: boolean }> = [
+  { kind: 'training_curve', label: 'Training curves (results.png)', isImage: true },
+  { kind: 'confusion_matrix', label: 'Confusion matrix', isImage: true },
+  { kind: 'f1_curve', label: 'F1 vs confidence', isImage: true },
+  { kind: 'pr_curve', label: 'Precision-Recall', isImage: true },
+  { kind: 'precision_curve', label: 'Precision vs confidence', isImage: true },
+  { kind: 'recall_curve', label: 'Recall vs confidence', isImage: true },
+  { kind: 'labels', label: 'Label distribution', isImage: true },
+  { kind: 'sample_predictions', label: 'Sample predictions', isImage: true },
+  { kind: 'results_csv', label: 'Per-epoch metrics CSV', isImage: false },
+  { kind: 'other', label: 'Other', isImage: false },
+]
+
+function groupedArtifacts(v: Version) {
+  const byKind = new Map<string, typeof v.artifacts>()
+  for (const a of v.artifacts) {
+    if (!byKind.has(a.kind)) byKind.set(a.kind, [])
+    byKind.get(a.kind)!.push(a)
+  }
+  return ARTIFACT_GROUPS.filter((g) => byKind.has(g.kind)).map((g) => ({
+    ...g,
+    items: byKind.get(g.kind)!,
+  }))
+}
 
 // Toggle that gates the "Upload model" button. Currently checks staff
 // status from the auth store; flip to `true` to make the button visible
@@ -291,6 +455,73 @@ const uploadDescription = ref('')
 const uploadFile = ref<File | null>(null)
 const uploadSubmitting = ref(false)
 const uploadError = ref('')
+// 'file' = a single .pt/.pth weights file (legacy path).
+// 'folder' = a YOLO Ultralytics run folder; the backend picks weights/best.pt
+// (or last.pt) and ingests recognized siblings as ModelArtifact rows.
+const uploadMode = ref<'file' | 'folder'>('file')
+const uploadFolderFiles = ref<File[]>([])
+
+// Names the backend recognises and ingests into ModelArtifact. Used by the
+// preview list so the user sees what will land in the DB before they submit.
+// Kept aligned with _ARTIFACT_NAME_MAP in apps/analysis/views.py — when one
+// changes, update the other.
+const KNOWN_ARTIFACT_NAMES = new Set([
+  'BoxF1_curve.png', 'BoxP_curve.png', 'BoxPR_curve.png', 'BoxR_curve.png',
+  'F1_curve.png', 'P_curve.png', 'PR_curve.png', 'R_curve.png',
+  'confusion_matrix.png', 'confusion_matrix_normalized.png',
+  'labels.jpg', 'labels_correlogram.jpg',
+  'results.csv', 'results.png',
+  'args.yaml',
+])
+const SAMPLE_PREFIXES = ['train_batch', 'val_batch']
+
+function basename(path: string): string {
+  return path.includes('/') ? path.slice(path.lastIndexOf('/') + 1) : path
+}
+
+function isRecognisedArtifact(name: string): boolean {
+  if (KNOWN_ARTIFACT_NAMES.has(name)) return true
+  return SAMPLE_PREFIXES.some((p) => name.startsWith(p))
+}
+
+interface FolderPreview {
+  weightsLabel: string | null
+  recognised: string[]
+  skipped: number
+}
+
+const folderPreview = computed<FolderPreview>(() => {
+  let weights: File | null = null
+  let weightsRank = 99
+  const recognised: string[] = []
+  let skipped = 0
+  for (const f of uploadFolderFiles.value) {
+    const rel = (f as File & { webkitRelativePath?: string }).webkitRelativePath || f.name
+    const tail = basename(rel)
+    // weights/best.pt outranks weights/last.pt; the segment match is on the
+    // immediate parent so a stray best.pt elsewhere in the tree is ignored.
+    const segs = rel.split('/')
+    const parent = segs.length >= 2 ? segs[segs.length - 2] : ''
+    if (parent === 'weights' && tail === 'best.pt' && weightsRank > 0) {
+      weights = f
+      weightsRank = 0
+    } else if (parent === 'weights' && tail === 'last.pt' && weightsRank > 1) {
+      weights = f
+      weightsRank = 1
+    } else if (isRecognisedArtifact(tail)) {
+      recognised.push(tail)
+    } else {
+      skipped++
+    }
+  }
+  return {
+    weightsLabel: weights
+      ? ((weights as File & { webkitRelativePath?: string }).webkitRelativePath || weights.name)
+      : null,
+    recognised: recognised.sort((a, b) => a.localeCompare(b)),
+    skipped,
+  }
+})
 
 const UPLOAD_KIND_OPTIONS = [
   { value: 'detector', label: 'YOLO detector' },
@@ -303,6 +534,8 @@ function openUpload() {
   uploadVersionName.value = ''
   uploadDescription.value = ''
   uploadFile.value = null
+  uploadFolderFiles.value = []
+  uploadMode.value = 'file'
   uploadError.value = ''
   uploadOpen.value = true
 }
@@ -312,12 +545,13 @@ function pickUploadFile(e: Event) {
   uploadFile.value = target.files?.[0] ?? null
 }
 
+function pickUploadFolder(e: Event) {
+  const target = e.target as HTMLInputElement
+  uploadFolderFiles.value = target.files ? Array.from(target.files) : []
+}
+
 async function submitUpload() {
   uploadError.value = ''
-  if (!uploadFile.value) {
-    uploadError.value = 'Pick a .pt or .pth file.'
-    return
-  }
   if (!uploadVersionName.value.trim()) {
     uploadError.value = 'Version name is required.'
     return
@@ -327,7 +561,34 @@ async function submitUpload() {
   form.append('kind', uploadKind.value)
   form.append('version_name', uploadVersionName.value.trim())
   form.append('description', uploadDescription.value.trim())
-  form.append('weights_file', uploadFile.value)
+
+  if (uploadMode.value === 'file') {
+    if (!uploadFile.value) {
+      uploadError.value = 'Pick a .pt or .pth file.'
+      return
+    }
+    form.append('weights_file', uploadFile.value)
+  } else {
+    if (!uploadFolderFiles.value.length) {
+      uploadError.value = 'Pick a training run folder.'
+      return
+    }
+    if (!folderPreview.value.weightsLabel) {
+      uploadError.value = 'No weights/best.pt or weights/last.pt found in the selected folder.'
+      return
+    }
+    // Browsers (Firefox at least) strip '/' from FormData filenames as a
+    // path-traversal guard, so we can't smuggle the relative path through
+    // the filename slot. Send paths as a parallel JSON array in the same
+    // order as the file entries; the backend pairs by index.
+    const paths: string[] = []
+    for (const f of uploadFolderFiles.value) {
+      const rel = (f as File & { webkitRelativePath?: string }).webkitRelativePath || f.name
+      paths.push(rel)
+      form.append('artifacts', f)
+    }
+    form.append('artifact_paths', JSON.stringify(paths))
+  }
 
   uploadSubmitting.value = true
   try {
@@ -384,6 +645,7 @@ async function loadPreview(_mode: string): Promise<Track[] | null> {
       metrics: v.metrics,
       parameters: v.parameters,
       trained_at: new Date(now + v.trained_at_offset_seconds * 1000).toISOString(),
+      artifacts: [],
     })),
   }))
 }

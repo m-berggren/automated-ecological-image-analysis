@@ -73,10 +73,12 @@
           </RouterLink>
           <button
             v-if="run.status === 'failed'"
-            class="ml-auto text-sm px-3 py-1.5 rounded-md border border-border hover:bg-muted"
-            disabled
+            class="ml-auto text-sm px-3 py-1.5 rounded-md border border-border hover:bg-muted disabled:opacity-50"
+            :disabled="rerunning || run.upload == null || !run.module"
+            :title="run.upload == null || !run.module ? 'Original upload missing from this run record' : ''"
+            @click="onRerun"
           >
-            Re-run with same config
+            {{ rerunning ? 'Restarting…' : 'Re-run with same config' }}
           </button>
         </div>
       </section>
@@ -167,7 +169,7 @@
 
 <script setup lang="ts">
 import { computed, onMounted, onUnmounted, ref } from 'vue'
-import { RouterLink, useRoute } from 'vue-router'
+import { RouterLink, useRoute, useRouter } from 'vue-router'
 import PageHeader from '@/components/PageHeader.vue'
 import PollinatorsStepper from '@/components/PollinatorsStepper.vue'
 import { api } from '@/api'
@@ -197,6 +199,11 @@ interface RunDetail {
   activity_log: ActivityEntry[]
   config: Record<string, unknown>
   error_message?: string
+  // Present on real-API runs; optional so the preview-mode mock loader
+  // (which doesn't include them) still satisfies the type.
+  module?: string
+  upload?: number
+  model_version?: number | null
 }
 
 interface RunDetailMock {
@@ -231,7 +238,9 @@ const SOURCE_LABELS: Record<string, string> = {
 }
 
 const route = useRoute()
+const router = useRouter()
 const run = ref<RunDetail | null>(null)
+const rerunning = ref(false)
 const loading = ref(true)
 const loadError = ref('')
 const showConfig = ref(false)
@@ -483,6 +492,44 @@ async function onCancel() {
     loadError.value = e instanceof Error ? e.message : String(e)
   } finally {
     cancelling.value = false
+  }
+}
+
+async function onRerun() {
+  if (!run.value || rerunning.value) return
+  if (previewMode.value) return
+  const r = run.value
+  if (r.upload == null || !r.module) {
+    loadError.value = 'Cannot restart: original upload or module missing from this run.'
+    return
+  }
+  rerunning.value = true
+  try {
+    const res = await api('/api/analysis/runs/', {
+      method: 'POST',
+      body: JSON.stringify({
+        module: r.module,
+        upload: r.upload,
+        model_version: r.model_version ?? null,
+        config: r.config,
+        name: r.name ? `${r.name} (retry)` : '',
+      }),
+    })
+    if (!res.ok) {
+      let detail = `HTTP ${res.status}`
+      try {
+        const body = await res.json()
+        detail = body.detail || body.error || JSON.stringify(body)
+      } catch {}
+      loadError.value = `Restart failed: ${detail}`
+      return
+    }
+    const newRun = await res.json()
+    await router.push(`/pollinators/runs/${newRun.id}`)
+  } catch (e) {
+    loadError.value = e instanceof Error ? e.message : String(e)
+  } finally {
+    rerunning.value = false
   }
 }
 
