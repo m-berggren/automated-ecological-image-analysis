@@ -132,7 +132,7 @@
         </button>
       </div>
 
-      <div v-if="config.preprocessing.roi">Roi selected {{ config.preprocessing.roi }}</div>
+      <div v-if="config.preprocessing.roi_bbox">Roi selected {{ config.preprocessing.roi_bbox }}</div>
 
       <!-- Advanced -->
       <button
@@ -557,7 +557,7 @@ async function startDetection() {
         module: 'pollinators',
         upload: uploadId.value,
         name: runName.value,
-        config: config.value,
+        config: fixROIFormat(config.value),
       }),
     })
     if (!res.ok) {
@@ -605,5 +605,23 @@ function closeRoiModal() {
 function onSaveRoi(roi: any) {
   config.value.preprocessing.roi_bbox = roi
   closeRoiModal()
+}
+
+// Changes the format of the config ROI to what the backend expects
+function fixROIFormat(cfg: PipelineConfig) {
+  return {
+    ...cfg,
+    preprocessing: {
+      ...cfg.preprocessing,
+      roi_bbox: cfg.preprocessing.roi_bbox
+        ? [
+            cfg.preprocessing.roi_bbox.x,
+            cfg.preprocessing.roi_bbox.y,
+            cfg.preprocessing.roi_bbox.width,
+            cfg.preprocessing.roi_bbox.height,
+          ]
+        : null,
+    },
+  }
 }
 </script>
