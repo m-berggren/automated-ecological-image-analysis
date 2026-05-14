@@ -204,10 +204,7 @@ for species in SPECIES_LIST:
                     flat_poly = [float(c) for c in poly]
 
                 preds.append(
-                    {
-                        'poly': flat_poly[:8],
-                        'class': 0,
-                    }
+                    {'poly': flat_poly[:8], 'class': 0, 'conf': float(pred.score.value)}
                 )
 
         tp, fp, fn = calculate_tp_fp_fn(preds, gt_boxes, iou_threshold=0.3)
@@ -215,11 +212,10 @@ for species in SPECIES_LIST:
         # Save the preds to a json file for testing the seed size calculations
         export_dir = 'predictions/'
         os.makedirs(export_dir, exist_ok=True)
-        file_path = os.path.join(export_dir, f'{img_name}_preds.json')
+        file_path = os.path.join(export_dir, f'{img_name.split(".")[0]}_preds.json')
 
         with open(file_path, 'w') as f:
             json.dump(preds, f)
-        print(f'Saved seed predictions to {img_name}_preds.json')
 
         # Detailed per-image logging (for debug to make our lives easier, pls don't remove for now)
         num_preds = len(preds)
