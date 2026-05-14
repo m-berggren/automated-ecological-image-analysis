@@ -104,17 +104,20 @@ def train_species_model(species_name, data_yaml_path, epochs=90):
     return os.path.join('runs', 'obb', species_name, 'weights', 'best.pt')
 """
 
+
 # Includes more parameters so that there is an option for incremental training
 def train_species_model(
     species_name,
     data_yaml_path,
     *,
     epochs=90,
-    pretrained_weights_path='yolo26n-obb.pt', # Pretrained checkpoint
-    finetune_from: str | None = None, # For retraining, we should set this parameter to a path to best.pt or last.pt from a previous run. If set, it overrides pretrained_weights_path
-    run_name: str | None = None, # New run folder name under runs/obb/ (use e.g. f"{species_name}_ft1" to avoid overwriting)
-    lr0: float | None = None, # Learning rate for the new run
-    lrf: float | None = None, # Also learning rate for the new run
+    pretrained_weights_path='yolo26n-obb.pt',  # Pretrained checkpoint
+    finetune_from: str
+    | None = None,  # For retraining, we should set this parameter to a path to best.pt or last.pt from a previous run. If set, it overrides pretrained_weights_path
+    run_name: str
+    | None = None,  # New run folder name under runs/obb/ (use e.g. f"{species_name}_ft1" to avoid overwriting)
+    lr0: float | None = None,  # Learning rate for the new run
+    lrf: float | None = None,  # Also learning rate for the new run
 ):
     run_name = run_name or species_name
     weights = finetune_from if finetune_from else pretrained_weights_path
