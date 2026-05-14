@@ -134,6 +134,17 @@
 
       <div v-if="config.preprocessing.roi_bbox">Roi selected {{ config.preprocessing.roi_bbox }}</div>
 
+      <div v-if="noImagesUploaded" class="text-xs text-muted-foreground">
+        Upload images before choosing the manual ROI.
+      </div>
+
+      <div
+        v-else-if="startAtImageOutOfRange"
+        class="text-xs text-red-600"
+      >
+        “Start at image” is outside the uploaded range (max {{ localFiles.length }}).
+      </div>
+
       <!-- Advanced -->
       <button
         class="text-xs text-muted-foreground hover:text-foreground"
@@ -334,6 +345,14 @@ interface ModelVersion {
   version_name: string
   is_active: boolean
 }
+
+const noImagesUploaded = computed(() => localFiles.value.length === 0)
+
+const startAtImageOutOfRange = computed(() => {
+  if (!localFiles.value.length) return false
+  const idx = (config.value.start_at_image || 1) - 1
+  return idx < 0 || idx >= localFiles.value.length
+})
 
 const localFiles = ref<File[]>([])
 const showRoiModal = ref(false)
@@ -624,4 +643,6 @@ function fixROIFormat(cfg: PipelineConfig) {
     },
   }
 }
+
+
 </script>
