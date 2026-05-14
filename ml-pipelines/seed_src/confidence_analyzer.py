@@ -63,6 +63,7 @@ if __name__ == '__main__':
             predictions, risk_threshold=0.20
         )  # +- 10% threshold
 
+        print(f'=== {file_name} ===')
         print(f'Seed count: {results["total_count"]}')
         print(f'Overall confidence: {results["overall_confidence"] * 100:.2f}%')
         print(
