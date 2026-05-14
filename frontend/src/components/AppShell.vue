@@ -43,11 +43,12 @@
               :key="child.to"
               :to="child.to"
               class="flex items-center justify-between px-3 py-1.5 rounded-md text-sm transition-colors"
-              active-class="text-primary font-medium"
               :class="[
-                isChildDisabled(child)
-                  ? 'text-muted-foreground/60 cursor-not-allowed pointer-events-none'
-                  : 'text-muted-foreground hover:text-foreground hover:bg-muted',
+                isChildActive(child)
+                  ? 'nav-active'
+                  : isChildDisabled(child)
+                    ? 'text-muted-foreground/60 cursor-not-allowed pointer-events-none'
+                    : 'text-muted-foreground hover:text-foreground hover:bg-muted',
               ]"
             >
               {{ child.label }}
@@ -136,7 +137,17 @@ const modules: ModuleItem[] = [
       { to: '/seeds/models', label: 'Models', staffOnly: true },
     ],
   },
-  { to: '/pollinators', label: 'Pollinators', icon: Bug },
+  {
+    to: '/pollinators',
+    label: 'Pollinators',
+    icon: Bug,
+    children: [
+      { to: '/pollinators/upload', label: 'Upload' },
+      { to: '/pollinators/runs', label: 'Runs' },
+      { to: '/pollinators/training', label: 'Training' },
+      { to: '/pollinators/models', label: 'Models' },
+    ],
+  },
   { to: '/pollen', label: 'Pollen', icon: Sparkles, paused: true },
   { to: '/flowers', label: 'Flowers', icon: Flower2, paused: true },
 ]
@@ -152,6 +163,9 @@ function isModuleExpanded(item: ModuleItem) {
 }
 function isChildDisabled(child: ChildItem) {
   return !!child.staffOnly && !auth.user?.is_staff
+}
+function isChildActive(child: ChildItem) {
+  return route.path === child.to
 }
 function onParentClick(item: ModuleItem) {
   if (!item.children) return
@@ -174,7 +188,7 @@ async function handleLogout() {
 
 <style scoped>
 .nav-active {
-  background-color: color-mix(in srgb, var(--color-primary) 12%, transparent);
+  background-color: color-mix(in srgb, var(--color-primary) 22%, transparent);
   color: var(--color-primary);
 }
 </style>
