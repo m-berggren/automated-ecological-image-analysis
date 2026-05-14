@@ -104,7 +104,7 @@
 import { computed, reactive } from 'vue'
 import { RouterLink, useRoute, useRouter } from 'vue-router'
 import { useAuthStore } from '@/stores/auth'
-import { Sprout, Microscope, Bug, Flower2, Sparkles, LogOut, ChevronDown } from 'lucide-vue-next'
+import { Sprout, Microscope, Bug, LogOut, ChevronDown } from 'lucide-vue-next'
 
 interface ChildItem {
   to: string
@@ -148,8 +148,6 @@ const modules: ModuleItem[] = [
       { to: '/pollinators/models', label: 'Models' },
     ],
   },
-  { to: '/pollen', label: 'Pollen', icon: Sparkles, paused: true },
-  { to: '/flowers', label: 'Flowers', icon: Flower2, paused: true },
 ]
 
 const expandedOverride = reactive<Record<string, boolean>>({})
