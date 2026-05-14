@@ -1,0 +1,30 @@
+meta {
+  name: List detections
+  type: http
+  seq: 1
+}
+
+get {
+  url: {{baseUrl}}/api/pollinator/runs/{{reviewRunId}}/detections/
+  body: none
+  auth: bearer
+}
+
+auth:bearer {
+  token: {{accessToken}}
+}
+
+script:post-response {
+  if (res.status === 200 && Array.isArray(res.body) && res.body.length) {
+    bru.setEnvVar("detectionId", String(res.body[0].id));
+  }
+}
+
+tests {
+  test("status is 200", function() {
+    expect(res.status).to.equal(200);
+  });
+  test("body is an array", function() {
+    expect(res.body).to.be.an("array");
+  });
+}

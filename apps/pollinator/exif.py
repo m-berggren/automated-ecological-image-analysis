@@ -1,4 +1,10 @@
-"""Image-processing helpers used at upload time."""
+"""Pollinator camera-trap EXIF extraction and image-quality heuristics.
+
+Used at upload time to derive captured_at, weather (sunny/cloudy via the
+Wingscapes shutter-speed heuristic), Laplacian variance for fog detection,
+and auto-exclusion of flash/foggy images. Specific to the camera-trap
+field-research workflow; other modules should not call into this.
+"""
 
 from __future__ import annotations
 
@@ -12,12 +18,10 @@ from PIL import ExifTags, Image
 
 _JSON_SAFE = (str, int, float, bool, type(None))
 
-# EXIF tag IDs — standard values from the EXIF 2.32 specification.
 EXIF_TAG_EXPOSURE_TIME = 33434
 
 
 def _exif_to_dict(img: Image.Image) -> dict[str, Any]:
-    """Convert EXIF data to a JSON-safe dict keyed by tag name."""
     raw = img.getexif()
     if not raw:
         return {}
@@ -29,7 +33,6 @@ def _exif_to_dict(img: Image.Image) -> dict[str, Any]:
 
 
 def _coerce(value: Any) -> Any:
-    """Recursively coerce a value into a JSON-serializable type."""
     if isinstance(value, _JSON_SAFE):
         return value
     if isinstance(value, bytes):
@@ -41,7 +44,6 @@ def _coerce(value: Any) -> Any:
         return [_coerce(v) for v in value]
     if isinstance(value, dict):
         return {str(k): _coerce(v) for k, v in value.items()}
-    # Rational numbers from EXIF (IFDRational)
     if hasattr(value, 'numerator') and hasattr(value, 'denominator'):
         try:
             return float(value)
@@ -51,7 +53,6 @@ def _coerce(value: Any) -> Any:
 
 
 def _parse_exif_datetime(s: str | None) -> datetime.datetime | None:
-    """Parse EXIF date format 'YYYY:MM:DD HH:MM:SS' into a datetime."""
     if not s or not isinstance(s, str):
         return None
     try:
@@ -61,15 +62,11 @@ def _parse_exif_datetime(s: str | None) -> datetime.datetime | None:
 
 
 def _derive_weather(exif_raw: dict, exif: dict) -> str:
-    """Derive sunny/cloudy from EXIF ExposureTime.
-
-    Camera with fixed aperture (e.g. Wingscapes TLCAM PRO f/2.8):
-    fast shutter → bright → sunny, slow shutter → dim → cloudy.
-    """
+    """Camera with fixed aperture (Wingscapes TLCAM PRO f/2.8): fast shutter
+    → bright → sunny, slow shutter → dim → cloudy."""
     threshold = getattr(settings, 'SUNNY_SHUTTER_THRESHOLD', 150)
     exposure = exif_raw.get(EXIF_TAG_EXPOSURE_TIME)
     if exposure is None:
-        # Fallback: try the coerced dict (tag name)
         exposure = exif.get('ExposureTime')
     if exposure is None:
         return 'unknown'
@@ -86,23 +83,17 @@ def _derive_weather(exif_raw: dict, exif: dict) -> str:
 
 
 def _compute_laplacian_variance(img: Image.Image) -> float:
-    """Compute Laplacian variance as a sharpness/fog proxy.
-
-    Low variance = low contrast = fog, heavy cloud, or motion blur.
-    Uses numpy directly on the Pillow grayscale array to avoid
-    requiring OpenCV at upload time.
-    """
     gray = np.array(img.convert('L'), dtype=np.float64)
-    # Laplacian kernel [[0,1,0],[1,-4,1],[0,1,0]]
     from scipy.ndimage import laplace
+
     lap = laplace(gray)
     return float(lap.var())
 
 
 def _compute_laplacian_variance_cv2(img: Image.Image) -> float:
-    """Compute Laplacian variance using OpenCV (preferred if available)."""
     try:
         import cv2
+
         gray = np.array(img.convert('L'))
         return float(cv2.Laplacian(gray, cv2.CV_64F).var())
     except ImportError:
@@ -113,7 +104,6 @@ def _determine_exclusion(
     flash_fired: bool | None,
     laplacian_var: float | None,
 ) -> tuple[bool, str]:
-    """Auto-populate excluded + exclusion_reason from image quality signals."""
     if flash_fired and getattr(settings, 'AUTO_EXCLUDE_FLASH', True):
         return True, 'flash_fired'
     if laplacian_var is not None and getattr(settings, 'AUTO_EXCLUDE_FOGGY', True):
@@ -124,22 +114,14 @@ def _determine_exclusion(
 
 
 def extract_image_metadata(file: Any) -> dict[str, Any]:
-    """Open an image, extract EXIF + dimensions + quality signals.
-
-    Returns a dict with keys:
-        width, height, captured_at (datetime|None),
-        flash_fired (bool|None), exif (dict),
-        weather (str), laplacian_var (float|None),
-        excluded (bool), exclusion_reason (str),
-        shutter_speed (str).
-    """
+    """Returns width, height, captured_at, flash_fired, exif, weather,
+    laplacian_var, shutter_speed, excluded, exclusion_reason."""
     pos = file.tell() if hasattr(file, 'tell') else None
     try:
         img = Image.open(file)
         img.load()
         width, height = img.size
         exif = _exif_to_dict(img)
-        # Raw EXIF for tag-id-based lookups (weather derivation)
         raw_exif = dict(img.getexif()) if img.getexif() else {}
         laplacian_var = _compute_laplacian_variance_cv2(img)
     finally:
@@ -157,7 +139,6 @@ def extract_image_metadata(file: Any) -> dict[str, Any]:
 
     weather = _derive_weather(raw_exif, exif)
 
-    # Format shutter speed for display (e.g. "1/250")
     shutter_speed = ''
     exposure = exif.get('ExposureTime')
     if isinstance(exposure, (tuple, list)) and len(exposure) >= 2:

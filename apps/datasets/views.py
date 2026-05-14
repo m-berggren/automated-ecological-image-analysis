@@ -1,33 +1,58 @@
-from django.shortcuts import get_object_or_404
-from rest_framework import status
+from django.db.models import Count, QuerySet
+from rest_framework import generics, status
 from rest_framework.parsers import FormParser, MultiPartParser
 from rest_framework.permissions import IsAuthenticated
 from rest_framework.response import Response
 from rest_framework.views import APIView
 
-from .models import ImageAsset, Upload
+from .models import ImageAsset, Module, Upload
 from .serializers import (
     ImageAssetSerializer,
     ImageUploadSerializer,
     UploadCreateSerializer,
     UploadSerializer,
-    UploadUpdateSerializer,
 )
-from .services import extract_image_metadata
+
+
+_DEFAULT_META: dict = {
+    'width': None,
+    'height': None,
+    'captured_at': None,
+    'flash_fired': None,
+    'exif': {},
+    'weather': 'unknown',
+    'laplacian_var': None,
+    'shutter_speed': '',
+    'excluded': False,
+    'exclusion_reason': '',
+}
+
+
+def _extract_metadata(module: str, file) -> dict:
+    """Module-aware metadata extraction. Pollinator uploads run the
+    camera-trap EXIF/weather/fog pipeline; other modules get defaults
+    until they grow their own extractor."""
+    if module == Module.POLLINATORS:
+        from apps.pollinator.exif import extract_image_metadata
+
+        try:
+            return extract_image_metadata(file)
+        except Exception:
+            return dict(_DEFAULT_META)
+    return dict(_DEFAULT_META)
 
 
 class ImageUploadView(APIView):
-    """POST /api/datasets/images/ — upload one image (multipart).
+    """POST /api/datasets/images/; upload one image (multipart).
 
     Body fields (form-data):
-        file    — the image file (required)
-        module  — one of seeds/pollinators/pollen/flowers (required)
-        purpose — 'training' or 'inference' (default: inference)
-        upload  — optional Upload id to attach the image to
+        file    : the image file (required)
+        module  : one of seeds/pollinators/pollen/flowers (required)
+        purpose : 'training' or 'inference' (default: inference)
+        upload  : optional Upload id; the resulting ImageAsset is linked back
 
-    Automatically extracts EXIF metadata, derives weather from shutter
-    speed, computes image sharpness (Laplacian variance), and flags
-    flash/foggy images as excluded.
+    Per-module post-upload processing (EXIF, weather, exclusion flags) is
+    dispatched in _extract_metadata.
     """
 
     permission_classes = [IsAuthenticated]
@@ -38,19 +63,12 @@ class ImageUploadView(APIView):
         upload.is_valid(raise_exception=True)
 
         file = upload.validated_data['file']
+        module = upload.validated_data['module']
 
-        try:
-            meta = extract_image_metadata(file)
-        except Exception:
-            meta = {
-                'width': None, 'height': None,
-                'captured_at': None, 'flash_fired': None, 'exif': {},
-                'weather': 'unknown', 'laplacian_var': None,
-                'shutter_speed': '', 'excluded': False, 'exclusion_reason': '',
-            }
+        meta = _extract_metadata(module, file)
 
         image = ImageAsset.objects.create(
-            module=upload.validated_data['module'],
+            module=module,
             purpose=upload.validated_data['purpose'],
             file=file,
             upload=upload.validated_data.get('upload'),
@@ -75,49 +93,35 @@ class ImageUploadView(APIView):
         )
 
 
-class UploadListCreateView(APIView):
-    """GET/POST /api/datasets/uploads/ — list or create draft uploads."""
+class UploadListCreateView(generics.ListCreateAPIView):
+    """GET  /api/datasets/uploads/?module=<module>  list upload batches (newest first).
+    POST /api/datasets/uploads/                    create a new batch (body: {name, module}).
 
-    permission_classes = [IsAuthenticated]
+    image_count is annotated in the queryset for list (no N+1) and computed
+    fresh for the POST response.
+    """
 
-    def get(self, request) -> Response:
-        qs = Upload.objects.all().order_by('-created_at')
-        module = request.query_params.get('module')
-        upload_status = request.query_params.get('status')
+    pagination_class = None
+
+    def get_serializer_class(self):
+        if self.request.method == 'POST':
+            return UploadCreateSerializer
+        return UploadSerializer
+
+    def get_queryset(self) -> QuerySet[Upload]:
+        qs = Upload.objects.annotate(
+            image_count_annotated=Count('images'),
+        ).order_by('-created_at')
+        module = self.request.query_params.get('module')
         if module:
             qs = qs.filter(module=module)
-        if upload_status:
-            qs = qs.filter(status=upload_status)
-        return Response(UploadSerializer(qs, many=True).data)
+        return qs
 
-    def post(self, request) -> Response:
-        ser = UploadCreateSerializer(data=request.data)
-        ser.is_valid(raise_exception=True)
-        upload = Upload.objects.create(
-            module=ser.validated_data['module'],
-            name=ser.validated_data.get('name', ''),
-            created_by=request.user,
-        )
+    def create(self, request, *args, **kwargs) -> Response:
+        write = self.get_serializer(data=request.data)
+        write.is_valid(raise_exception=True)
+        upload = write.save(uploaded_by=request.user)
         return Response(
             UploadSerializer(upload).data,
             status=status.HTTP_201_CREATED,
         )
-
-
-class UploadDetailView(APIView):
-    """GET/PATCH /api/datasets/uploads/<id>/ — read or update an upload."""
-
-    permission_classes = [IsAuthenticated]
-
-    def get(self, request, pk: int) -> Response:
-        upload = get_object_or_404(Upload, pk=pk)
-        return Response(UploadSerializer(upload).data)
-
-    def patch(self, request, pk: int) -> Response:
-        upload = get_object_or_404(Upload, pk=pk)
-        ser = UploadUpdateSerializer(data=request.data, partial=True)
-        ser.is_valid(raise_exception=True)
-        for field, value in ser.validated_data.items():
-            setattr(upload, field, value)
-        upload.save()
-        return Response(UploadSerializer(upload).data)

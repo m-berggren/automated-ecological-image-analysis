@@ -1,6 +1,5 @@
 import { createRouter, createWebHistory } from 'vue-router'
 import AppShell from '@/components/AppShell.vue'
-
 import SeedsUpload from '@/pages/SeedsUpload.vue'
 import SeedsRuns from '@/pages/SeedsRuns.vue'
 import SeedsDetect from '@/pages/SeedsDetect.vue'
@@ -8,7 +7,6 @@ import SeedsReview from '@/pages/SeedsReview.vue'
 import SeedsModels from '@/pages/SeedsModels.vue'
 import SeedsTraining from '@/pages/SeedsTraining.vue'
 import SeedsExport from '@/pages/SeedsExport.vue'
-
 import PollinatorsUpload from '@/pages/PollinatorsUpload.vue'
 import PollinatorsRuns from '@/pages/PollinatorsRuns.vue'
 import PollinatorsDetect from '@/pages/PollinatorsDetect.vue'

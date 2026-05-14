@@ -32,29 +32,30 @@ class ExclusionReason(models.TextChoices):
 
 
 class UploadStatus(models.TextChoices):
-    DRAFT = 'draft', 'Draft (uploading)'
+    """An upload starts as DRAFT while files are being added; the first
+    inference run that consumes it flips it to READY."""
+
+    DRAFT = 'draft', 'Draft'
     READY = 'ready', 'Ready'
-    DISCARDED = 'discarded', 'Discarded'
 
 
 class Upload(models.Model):
-    """A user-supplied image set for one module.
+    """A batch of images uploaded together for a single inference run.
 
-    Created in DRAFT when the user opens the Upload page and starts
-    attaching files. Transitions to READY when the first InferenceRun
-    is launched against it. Multiple runs can reference the same
-    Upload (re-run with different configs without re-uploading).
+    The frontend creates one Upload row (status=DRAFT), then posts each
+    file separately to /api/datasets/images/ with `upload=<id>` in the
+    form data. Status flips to READY when an InferenceRun consumes it.
     """
 
-    module = models.CharField(max_length=20, choices=Module.choices)
     name = models.CharField(max_length=200, blank=True)
+    module = models.CharField(max_length=20, choices=Module.choices)
     status = models.CharField(
-        max_length=20,
+        max_length=10,
         choices=UploadStatus.choices,
         default=UploadStatus.DRAFT,
     )
 
-    created_by = models.ForeignKey(
+    uploaded_by = models.ForeignKey(
         settings.AUTH_USER_MODEL,
         on_delete=models.SET_NULL,
         null=True,
@@ -62,21 +63,18 @@ class Upload(models.Model):
         related_name='uploads',
     )
     created_at = models.DateTimeField(auto_now_add=True)
-    notes = models.TextField(blank=True)
 
     class Meta:
         indexes = [
+            models.Index(fields=['module', '-created_at']),
             models.Index(fields=['module', 'status']),
-            models.Index(fields=['created_at']),
         ]
 
     def __str__(self) -> str:
-        return f'Upload<{self.module} #{self.pk} {self.name or "(unnamed)"}>'
+        return f'{self.module}: {self.name or f"Upload #{self.pk}"}'
 
 
 def image_upload_path(instance: 'ImageAsset', filename: str) -> str:
-    if instance.upload_id:
-        return f'images/{instance.module}/upload-{instance.upload_id}/{filename}'
     return f'images/{instance.module}/{filename}'
 
 
@@ -123,10 +121,6 @@ class ImageAsset(models.Model):
         blank=True,
     )
 
-    total_open_flowers = models.IntegerField(null=True, blank=True)
-    total_pollinators = models.IntegerField(null=True, blank=True)
-    pollinator_types_present = models.JSONField(default=list, blank=True)
-
     metadata = models.JSONField(default=dict, blank=True)
 
     class Meta:
@@ -134,17 +128,10 @@ class ImageAsset(models.Model):
             models.Index(fields=['module', 'purpose']),
             models.Index(fields=['module', 'excluded']),
             models.Index(fields=['captured_at']),
-            models.Index(fields=['upload']),
         ]
 
     def __str__(self) -> str:
         return f'{self.module}/{self.file.name}'
-
-
-class AnnotationSource(models.TextChoices):
-    CVAT_IMPORT = 'cvat_import', 'CVAT import'
-    PROMOTED = 'promoted_from_detection', 'Promoted from detection'
-    MANUAL = 'manual', 'Manual'
 
 
 class Annotation(models.Model):
@@ -164,19 +151,6 @@ class Annotation(models.Model):
     class_label = models.CharField(max_length=50)
     bbox = models.JSONField(help_text='{x, y, w, h, rotation}')
 
-    source = models.CharField(
-        max_length=30,
-        choices=AnnotationSource.choices,
-        default=AnnotationSource.MANUAL,
-    )
-    promoted_from = models.ForeignKey(
-        'analysis.Detection',
-        on_delete=models.SET_NULL,
-        null=True,
-        blank=True,
-        related_name='promoted_annotations',
-    )
-
     created_by = models.ForeignKey(
         settings.AUTH_USER_MODEL,
         on_delete=models.SET_NULL,
@@ -193,48 +167,3 @@ class Annotation(models.Model):
 
     def __str__(self) -> str:
         return f'{self.image_id}:{self.class_label}'
-
-
-class FlowerMarker(models.Model):
-    """Per-marker observations on pollinator field images.
-
-    A field image typically has one or more colored marker clips placed
-    on focal flowers. Researchers want to know, per marker:
-      - how many open vs closed flowers are on it
-      - whether a pollinator is visiting (and which type)
-    """
-
-    image = models.ForeignKey(
-        ImageAsset,
-        on_delete=models.CASCADE,
-        related_name='markers',
-    )
-    color = models.CharField(max_length=20, help_text='e.g. "green"')
-    position = models.JSONField(help_text='{x, y} or {x, y, w, h}')
-
-    open_flowers = models.IntegerField(null=True, blank=True)
-    closed_flowers = models.IntegerField(null=True, blank=True)
-    pollinator_visiting = models.BooleanField(null=True, blank=True)
-    visiting_types = models.JSONField(
-        default=list,
-        blank=True,
-        help_text="e.g. ['bumblebee', 'fly']",
-    )
-
-    notes = models.TextField(blank=True)
-    reviewed_by = models.ForeignKey(
-        settings.AUTH_USER_MODEL,
-        on_delete=models.SET_NULL,
-        null=True,
-        blank=True,
-        related_name='reviewed_markers',
-    )
-    reviewed_at = models.DateTimeField(null=True, blank=True)
-
-    class Meta:
-        indexes = [
-            models.Index(fields=['image', 'color']),
-        ]
-
-    def __str__(self) -> str:
-        return f'{self.image_id}:{self.color}'

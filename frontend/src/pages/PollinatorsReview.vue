@@ -5,7 +5,30 @@
   <div v-if="loading" class="flex-1 p-8 text-sm text-muted-foreground">Loading…</div>
   <div v-else-if="loadError" class="flex-1 p-8 text-sm text-red-600">{{ loadError }}</div>
 
-  <div v-else class="flex-1 flex flex-col-reverse lg:flex-row min-h-0">
+  <div v-else class="flex-1 flex flex-col min-h-0">
+    <div
+      v-if="failedSaves.size > 0"
+      class="border-l-4 border-red-500 bg-red-50 px-4 py-2 text-sm text-red-800 flex items-center gap-3 shrink-0"
+    >
+      <span class="flex-1">
+        ⚠ {{ failedSaves.size }} review{{ failedSaves.size === 1 ? '' : 's' }} failed to save
+      </span>
+      <button
+        class="px-2 py-1 rounded bg-red-600 text-white hover:bg-red-700 text-xs font-medium"
+        @click="retryFailedSaves"
+        :disabled="retrying"
+      >
+        {{ retrying ? 'Retrying…' : 'Retry all' }}
+      </button>
+      <button
+        class="px-2 py-1 rounded border border-red-300 text-red-700 hover:bg-red-100 text-xs"
+        @click="dismissFailedSaves"
+        :disabled="retrying"
+      >
+        Dismiss
+      </button>
+    </div>
+    <div class="flex-1 flex flex-col-reverse lg:flex-row min-h-0">
     <!-- Left: filters + grouped grid -->
     <section
       class="w-full lg:w-[480px] shrink-0 border-t lg:border-t-0 lg:border-r border-border flex flex-col bg-surface max-h-[55vh] lg:max-h-none"
@@ -18,18 +41,19 @@
             class="px-2 py-1 rounded border border-border bg-background"
           >
             <option value="unreviewed">Unreviewed</option>
-            <option value="all">All</option>
+            <option value="unsure">Unsure</option>
             <option value="reviewed">Reviewed</option>
+            <option value="all">All</option>
           </select>
           <label class="ml-auto flex items-center gap-1 text-muted-foreground">
-            <input v-model="disagreementsOnly" type="checkbox" />
-            Disagreements only
+            <input v-model="needsAttentionOnly" type="checkbox" />
+            Needs attention
           </label>
         </div>
         <div class="text-xs text-muted-foreground flex items-center justify-between">
           <span>
-            {{ filteredDetections.length }} of {{ detections.length }} detections · sorted by
-            ascending InsectNet confidence
+            {{ filteredDetections.length }} of {{ detections.length }} detections ·
+            sorted by ascending InsectNet confidence
           </span>
           <button
             class="text-primary hover:underline"
@@ -53,7 +77,10 @@
         >
           Confirm
         </button>
-        <button class="px-2 py-1 rounded border border-border hover:bg-muted" @click="bulkReject">
+        <button
+          class="px-2 py-1 rounded border border-border hover:bg-muted"
+          @click="bulkReject"
+        >
           Reject
         </button>
         <select
@@ -66,16 +93,17 @@
             {{ classLabel(cls) }}
           </option>
         </select>
-        <button class="ml-auto text-muted-foreground hover:text-foreground" @click="clearBulk">
+        <button
+          class="ml-auto text-muted-foreground hover:text-foreground"
+          @click="clearBulk"
+        >
           Clear
         </button>
       </div>
 
       <div class="flex-1 overflow-auto">
         <div v-for="group in groupedDetections" :key="group.label" class="border-b border-border">
-          <header
-            class="px-4 py-2 text-xs font-semibold uppercase tracking-wide text-muted-foreground bg-surface/50 sticky top-0"
-          >
+          <header class="px-4 py-2 text-xs font-semibold uppercase tracking-wide text-muted-foreground bg-surface/50 sticky top-0">
             {{ group.label }} <span class="font-normal">({{ group.detections.length }})</span>
           </header>
           <div class="grid grid-cols-5 gap-1 p-2">
@@ -84,9 +112,7 @@
               :key="d.id"
               class="rounded-md overflow-hidden border-2 transition-all"
               :class="[
-                selectedId === d.id
-                  ? 'border-primary ring-2 ring-primary'
-                  : 'border-transparent hover:border-border',
+                selectedId === d.id ? 'border-primary ring-2 ring-primary' : 'border-transparent hover:border-border',
                 reviewedFade(d) ? 'opacity-50' : '',
               ]"
             >
@@ -95,33 +121,38 @@
                 role="button"
                 tabindex="0"
                 class="relative aspect-square cursor-pointer focus:outline-none"
-                :style="{ backgroundColor: classBgFor(d.yolo_class) }"
+                :style="{ backgroundColor: classBgFor(primaryClass(d)) }"
                 @click="selectedId = d.id"
                 @keydown.enter.prevent="selectedId = d.id"
               >
+                <img
+                  v-if="d.crop_url"
+                  :src="d.crop_url"
+                  :alt="`Detection ${d.id}`"
+                  loading="lazy"
+                  class="absolute inset-0 w-full h-full object-contain"
+                />
                 <div
+                  v-else
                   class="absolute inset-0 flex items-center justify-center text-2xl font-bold opacity-30"
                 >
-                  {{ classGlyph(d.yolo_class) }}
+                  {{ classGlyph(primaryClass(d)) }}
                 </div>
                 <span
                   class="absolute top-1 left-1 w-2 h-2 rounded-full"
                   :class="statusDotClass(d.reviewer_status)"
                 />
                 <span
-                  v-if="hasDisagreement(d)"
+                  v-if="needsAttention(d)"
                   class="absolute top-1 right-1 text-amber-600 text-xs leading-none"
-                  title="YOLO and InsectNet disagree"
-                  >⚠</span
-                >
-                <span
-                  class="absolute bottom-2 left-1 text-[9px] text-muted-foreground/70 font-mono"
-                >
+                  :title="hasDisagreement(d) ? 'YOLO and InsectNet disagree' : 'Low confidence'"
+                >⚠</span>
+                <span class="absolute bottom-2 left-1 text-[9px] text-muted-foreground/70 font-mono">
                   {{ d.source === 'preprocessing' ? 'P' : d.source === 'both' ? 'YP' : 'Y' }}
                 </span>
                 <div
                   class="absolute bottom-0 left-0 right-0 h-1.5"
-                  :style="{ backgroundColor: classColor(d.yolo_class) }"
+                  :style="{ backgroundColor: classColor(primaryClass(d)) }"
                 />
               </div>
               <div
@@ -129,11 +160,9 @@
                 :aria-checked="bulkIds.has(d.id)"
                 tabindex="0"
                 class="h-5 flex items-center justify-center text-xs cursor-pointer transition-colors"
-                :class="
-                  bulkIds.has(d.id)
-                    ? 'bg-primary text-primary-foreground'
-                    : 'bg-surface text-muted-foreground hover:bg-muted'
-                "
+                :class="bulkIds.has(d.id)
+                  ? 'bg-primary text-primary-foreground'
+                  : 'bg-surface text-muted-foreground hover:bg-muted'"
                 @click="toggleBulk(d.id)"
                 @keydown.space.prevent="toggleBulk(d.id)"
               >
@@ -163,34 +192,56 @@
           <span
             class="ml-auto text-xs px-2 py-0.5 rounded-full shrink-0"
             :class="statusBadgeClass(selected.reviewer_status)"
-            >{{ statusLabel(selected.reviewer_status) }}</span
-          >
+          >{{ statusLabel(selected.reviewer_status) }}</span>
         </header>
 
         <div class="flex-1 overflow-auto">
-          <!-- Crop preview, edge-to-edge -->
+          <!-- Source image with bbox overlay + crop thumbnail (PiP). -->
           <div
-            class="aspect-video flex items-center justify-center text-7xl font-bold relative"
-            :style="{ backgroundColor: classBgFor(selected.yolo_class) }"
+            class="aspect-video relative overflow-hidden"
+            :style="{ backgroundColor: classBgFor(primaryClass(selected)) }"
           >
             <div
-              class="absolute top-0 left-0 right-0 h-1.5"
-              :style="{ backgroundColor: classColor(selected.yolo_class) }"
+              class="absolute top-0 left-0 right-0 h-1.5 z-10"
+              :style="{ backgroundColor: classColor(primaryClass(selected)) }"
             />
-            <span class="opacity-30">{{ classGlyph(selected.yolo_class) }}</span>
+            <svg
+              v-if="selected.source_image_url && sourceImage.w"
+              :viewBox="`0 0 ${sourceImage.w} ${sourceImage.h}`"
+              preserveAspectRatio="xMidYMid meet"
+              class="absolute inset-0 w-full h-full"
+            >
+              <image
+                :href="selected.source_image_url"
+                :width="sourceImage.w"
+                :height="sourceImage.h"
+              />
+              <rect
+                v-if="selected.bbox"
+                :x="selected.bbox.x1"
+                :y="selected.bbox.y1"
+                :width="selected.bbox.w"
+                :height="selected.bbox.h"
+                fill="none"
+                :stroke="classColor(primaryClass(selected))"
+                :stroke-width="bboxStrokeWidth"
+              />
+            </svg>
+            <span
+              v-else
+              class="absolute inset-0 flex items-center justify-center text-7xl font-bold opacity-30"
+            >{{ classGlyph(primaryClass(selected)) }}</span>
           </div>
 
           <!-- Predictions + Label: stacked below xl, side-by-side at xl+ (Label left, Predictions right) -->
           <div class="grid grid-cols-1 xl:grid-cols-2 border-b border-border">
             <!-- Predictions (compact, two-line). Order swap at xl+ via order-2. -->
             <div class="px-5 py-4 border-b border-border xl:border-b-0 xl:order-2">
-              <div
-                class="text-[11px] font-semibold uppercase tracking-wider text-muted-foreground mb-2"
-              >
+              <div class="text-[11px] font-semibold uppercase tracking-wider text-muted-foreground mb-2">
                 Predictions
               </div>
               <div class="space-y-1.5 text-sm">
-                <div class="flex items-center gap-2">
+                <div v-if="selected.yolo_class != null" class="flex items-center gap-2">
                   <span class="text-muted-foreground w-20">YOLO</span>
                   <span
                     class="w-2 h-2 rounded-full shrink-0"
@@ -198,10 +249,10 @@
                   />
                   <span class="font-medium flex-1">{{ classLabel(selected.yolo_class) }}</span>
                   <span class="font-mono text-xs text-muted-foreground">
-                    {{ selected.yolo_confidence.toFixed(2) }}
+                    {{ (selected.yolo_confidence ?? 0).toFixed(2) }}
                   </span>
                 </div>
-                <div class="flex items-center gap-2">
+                <div v-if="selected.insectnet_class != null" class="flex items-center gap-2">
                   <span class="text-muted-foreground w-20">InsectNet</span>
                   <span
                     class="w-2 h-2 rounded-full shrink-0"
@@ -209,20 +260,24 @@
                   />
                   <span class="font-medium flex-1">{{ classLabel(selected.insectnet_class) }}</span>
                   <span class="font-mono text-xs text-muted-foreground">
-                    {{ selected.insectnet_confidence.toFixed(2) }}
+                    {{ (selected.insectnet_confidence ?? 0).toFixed(2) }}
                   </span>
                 </div>
                 <div v-if="hasDisagreement(selected)" class="text-xs text-amber-700 pt-1">
                   ⚠ Models disagree
+                </div>
+                <div
+                  v-else-if="isLowConfidence(selected)"
+                  class="text-xs text-amber-700 pt-1"
+                >
+                  ⚠ Low confidence
                 </div>
               </div>
             </div>
 
             <!-- Label (one row per class with checkbox at end). Visually first at xl+ via order-1. -->
             <div class="px-5 py-4 xl:order-1 xl:border-r border-border">
-              <div
-                class="text-[11px] font-semibold uppercase tracking-wider text-muted-foreground mb-2"
-              >
+              <div class="text-[11px] font-semibold uppercase tracking-wider text-muted-foreground mb-2">
                 Label
               </div>
               <div>
@@ -249,11 +304,9 @@
         </div>
 
         <!-- Bottom action bar -->
-        <footer
-          class="border-t border-border bg-surface px-5 py-3 flex items-center justify-between"
-        >
+        <footer class="border-t border-border bg-surface px-5 py-3 flex items-center justify-between">
           <span class="text-[11px] text-muted-foreground font-mono hidden md:block">
-            1-4 confirm · x reject · ⏎ suggested · ↑↓ navigate
+            1-4 confirm · x reject · u unsure · ⏎ suggested · ←→↑↓ navigate
           </span>
           <div class="flex gap-2 ml-auto">
             <button
@@ -263,15 +316,23 @@
               Reject
             </button>
             <button
+              class="px-3 py-1.5 rounded-md text-sm font-medium border border-amber-300 text-amber-700 hover:bg-amber-50"
+              @click="markUnsure"
+            >
+              Unsure
+            </button>
+            <button
               class="px-3 py-1.5 rounded-md text-sm font-medium bg-primary text-primary-foreground hover:bg-primary/90"
               @click="confirmAs(suggestedClass(selected))"
             >
-              Confirm as {{ classLabel(suggestedClass(selected)) }}
+              {{ hasDisagreement(selected) ? 'Use suggested:' : 'Confirm as' }}
+              {{ classLabel(suggestedClass(selected)) }}
             </button>
           </div>
         </footer>
       </template>
     </section>
+    </div>
   </div>
 </template>
 
@@ -283,19 +344,36 @@ import PollinatorsStepper from '@/components/PollinatorsStepper.vue'
 import { api } from '@/api'
 
 type ClassName = 'fly' | 'bumblebee' | 'butterfly' | 'other'
-type ReviewerStatus = 'unreviewed' | 'confirmed' | 'corrected' | 'rejected'
+type ReviewerStatus = 'unreviewed' | 'confirmed' | 'corrected' | 'rejected' | 'unsure'
+type StatusFilter = 'unreviewed' | 'unsure' | 'reviewed' | 'all'
 type Source = 'yolo' | 'preprocessing' | 'both'
+
+const LOW_CONFIDENCE_THRESHOLD = 0.6
+
+interface BBox {
+  x1: number
+  y1: number
+  x2: number
+  y2: number
+  w: number
+  h: number
+}
 
 interface Detection {
   id: number
-  yolo_class: ClassName
-  yolo_confidence: number
-  insectnet_class: ClassName
-  insectnet_confidence: number
+  // YOLO-only detections have null insectnet_*, preprocessing-only have null
+  // yolo_*. Only source='both' detections populate both branches.
+  yolo_class: ClassName | null
+  yolo_confidence: number | null
+  insectnet_class: ClassName | null
+  insectnet_confidence: number | null
   source: Source
   reviewer_status: ReviewerStatus
   reviewer_label: ClassName | null
   source_image_filename: string
+  bbox: BBox | null
+  source_image_url: string | null
+  crop_url: string | null
 }
 
 interface ReviewBundle {
@@ -323,43 +401,28 @@ const loadError = ref('')
 const run = ref<ReviewBundle['run'] | null>(null)
 const detections = ref<Detection[]>([])
 const selectedId = ref<number | null>(null)
-const statusFilter = ref<'unreviewed' | 'all' | 'reviewed'>('unreviewed')
-const disagreementsOnly = ref(false)
+const statusFilter = ref<StatusFilter>('unreviewed')
+const needsAttentionOnly = ref(false)
 const bulkIds = ref<Set<number>>(new Set())
 const bulkCorrectClass = ref<'' | ClassName>('')
 
-const previewMode = computed<string | null>(() => {
-  const value = route.query.preview
-  return typeof value === 'string' ? value : null
-})
-
-onMounted(async () => {
-  if (previewMode.value) {
-    const bundle = await loadPreview(previewMode.value)
-    if (bundle) {
-      run.value = bundle.run
-      detections.value = bundle.detections
-      loading.value = false
-      return
-    }
-  }
-  await loadFromApi()
-})
-
-async function loadPreview(_mode: string): Promise<ReviewBundle | null> {
-  if (!import.meta.env.DEV) return null
-  const { default: mocks } = await import('@/mocks/pollinator-detections.json')
-  const bundle = (mocks as Record<string, ReviewBundle | undefined>).default
-  if (!bundle) return null
-  return JSON.parse(JSON.stringify(bundle))
+interface FailedEntry {
+  status: ReviewerStatus
+  label: ClassName | null
+  prevStatus: ReviewerStatus
+  prevLabel: ClassName | null
 }
+const failedSaves = ref<Map<number, FailedEntry>>(new Map())
+const retrying = ref(false)
+
+onMounted(loadFromApi)
 
 async function loadFromApi() {
   const id = route.params.id as string
   try {
     const [runRes, detRes] = await Promise.all([
       api(`/api/analysis/runs/${id}/`),
-      api(`/api/analysis/runs/${id}/detections/`),
+      api(`/api/pollinator/runs/${id}/detections/`),
     ])
     if (!runRes.ok) {
       loadError.value = `Run: HTTP ${runRes.status}`
@@ -386,19 +449,27 @@ const filteredDetections = computed(() => {
   let list = detections.value
   if (statusFilter.value === 'unreviewed') {
     list = list.filter((d) => d.reviewer_status === 'unreviewed')
+  } else if (statusFilter.value === 'unsure') {
+    list = list.filter((d) => d.reviewer_status === 'unsure')
   } else if (statusFilter.value === 'reviewed') {
-    list = list.filter((d) => d.reviewer_status !== 'unreviewed')
+    list = list.filter(
+      (d) =>
+        d.reviewer_status === 'confirmed' ||
+        d.reviewer_status === 'corrected' ||
+        d.reviewer_status === 'rejected',
+    )
   }
-  if (disagreementsOnly.value) {
-    list = list.filter((d) => hasDisagreement(d))
+  if (needsAttentionOnly.value) {
+    list = list.filter((d) => needsAttention(d))
   }
-  return [...list].sort((a, b) => a.insectnet_confidence - b.insectnet_confidence)
+  return [...list].sort((a, b) => maxConfidence(a) - maxConfidence(b))
 })
 
 const groupedDetections = computed(() => {
   const groups = new Map<ClassName, Detection[]>()
   for (const d of filteredDetections.value) {
-    const cls = d.yolo_class
+    const cls = primaryClass(d)
+    if (cls == null) continue
     if (!groups.has(cls)) groups.set(cls, [])
     groups.get(cls)!.push(d)
   }
@@ -408,19 +479,23 @@ const groupedDetections = computed(() => {
   }))
 })
 
-const selected = computed(() => detections.value.find((d) => d.id === selectedId.value) ?? null)
-
-watch(
-  filteredDetections,
-  (list) => {
-    if (selectedId.value && !list.find((d) => d.id === selectedId.value)) {
-      selectedId.value = list[0]?.id ?? null
-    } else if (!selectedId.value && list.length) {
-      selectedId.value = list[0].id
-    }
-  },
-  { immediate: true },
+// Flattened in the same order the grid renders, so keyboard navigation
+// matches what the reviewer sees rather than the raw confidence sort.
+const flatVisible = computed(() =>
+  groupedDetections.value.flatMap((g) => g.detections),
 )
+
+const selected = computed(() =>
+  detections.value.find((d) => d.id === selectedId.value) ?? null,
+)
+
+watch(filteredDetections, (list) => {
+  if (selectedId.value && !list.find((d) => d.id === selectedId.value)) {
+    selectedId.value = list[0]?.id ?? null
+  } else if (!selectedId.value && list.length) {
+    selectedId.value = list[0].id
+  }
+}, { immediate: true })
 
 watch(selectedId, async (id) => {
   if (id == null) return
@@ -429,68 +504,190 @@ watch(selectedId, async (id) => {
   el?.scrollIntoView({ block: 'nearest', behavior: 'smooth' })
 })
 
-function classColor(cls: string): string {
+// Preloaded natural dimensions of the currently-selected source image.
+// Needed so the SVG viewBox can match the bbox coords, which are in raw
+// source-image pixels. Reset on URL change so a stale size never lingers.
+const sourceImage = ref<{ w: number; h: number; url: string | null }>({
+  w: 0,
+  h: 0,
+  url: null,
+})
+
+watch(
+  () => selected.value?.source_image_url ?? null,
+  (url) => {
+    sourceImage.value = { w: 0, h: 0, url }
+    if (!url) return
+    const img = new Image()
+    img.onload = () => {
+      if (sourceImage.value.url === url) {
+        sourceImage.value = {
+          w: img.naturalWidth,
+          h: img.naturalHeight,
+          url,
+        }
+      }
+    }
+    img.src = url
+  },
+  { immediate: true },
+)
+
+// SVG strokes scale with the viewBox, so size the bbox outline relative to
+// the source image rather than the screen. ~0.4% of the longest side reads
+// as a 4px line on a 1000px image.
+const bboxStrokeWidth = computed(() => {
+  const longest = Math.max(sourceImage.value.w, sourceImage.value.h)
+  return Math.max(2, longest * 0.004)
+})
+
+function classColor(cls: string | null): string {
+  if (!cls) return '#9aa3ab'
   return CLASS_COLORS[cls as ClassName] ?? '#9aa3ab'
 }
-function classBgFor(cls: string): string {
+function classBgFor(cls: string | null): string {
   const hex = classColor(cls)
   return hex + '14'
 }
-function classGlyph(cls: string): string {
+function classGlyph(cls: string | null): string {
+  if (!cls) return '?'
   return CLASS_GLYPHS[cls as ClassName] ?? '?'
 }
 function classLabel(cls: string | null): string {
   if (!cls) return '—'
   return cls[0].toUpperCase() + cls.slice(1)
 }
+// Class shown on the grid card and used for grouping/coloring. Falls back
+// to whichever branch produced the detection when only one is populated.
+function primaryClass(d: Detection): ClassName | null {
+  return d.yolo_class ?? d.insectnet_class ?? null
+}
+// Highest of the populated confidences. 0 when both are missing (shouldn't
+// happen with valid data, defensive default).
+function maxConfidence(d: Detection): number {
+  return Math.max(d.yolo_confidence ?? 0, d.insectnet_confidence ?? 0)
+}
 function hasDisagreement(d: Detection): boolean {
-  return d.yolo_class !== d.insectnet_class
+  // Disagreement only meaningful when both branches contributed a class.
+  return (
+    d.yolo_class != null &&
+    d.insectnet_class != null &&
+    d.yolo_class !== d.insectnet_class
+  )
+}
+function isLowConfidence(d: Detection): boolean {
+  return maxConfidence(d) < LOW_CONFIDENCE_THRESHOLD
+}
+function needsAttention(d: Detection): boolean {
+  return hasDisagreement(d) || isLowConfidence(d)
 }
 function reviewedFade(d: Detection): boolean {
-  return d.reviewer_status !== 'unreviewed'
+  return (
+    d.reviewer_status === 'confirmed' ||
+    d.reviewer_status === 'corrected' ||
+    d.reviewer_status === 'rejected'
+  )
 }
 function statusDotClass(s: ReviewerStatus): string {
   switch (s) {
-    case 'confirmed':
-      return 'bg-green-500'
-    case 'corrected':
-      return 'bg-blue-500'
-    case 'rejected':
-      return 'bg-red-500'
-    default:
-      return 'bg-muted-foreground/40'
+    case 'confirmed': return 'bg-green-500'
+    case 'corrected': return 'bg-blue-500'
+    case 'rejected': return 'bg-red-500'
+    case 'unsure': return 'bg-amber-500'
+    default: return 'bg-muted-foreground/40'
   }
 }
 function statusBadgeClass(s: ReviewerStatus): string {
   switch (s) {
-    case 'confirmed':
-      return 'bg-green-100 text-green-700'
-    case 'corrected':
-      return 'bg-blue-100 text-blue-700'
-    case 'rejected':
-      return 'bg-red-100 text-red-700'
-    default:
-      return 'bg-muted text-muted-foreground'
+    case 'confirmed': return 'bg-green-100 text-green-700'
+    case 'corrected': return 'bg-blue-100 text-blue-700'
+    case 'rejected': return 'bg-red-100 text-red-700'
+    case 'unsure': return 'bg-amber-100 text-amber-700'
+    default: return 'bg-muted text-muted-foreground'
   }
 }
 function statusLabel(s: ReviewerStatus): string {
   return s[0].toUpperCase() + s.slice(1)
 }
-function suggestedClass(d: Detection): ClassName {
-  return d.insectnet_confidence >= d.yolo_confidence ? d.insectnet_class : d.yolo_class
+function suggestedClass(d: Detection): ClassName | null {
+  if (d.yolo_class == null) return d.insectnet_class
+  if (d.insectnet_class == null) return d.yolo_class
+  return (d.insectnet_confidence ?? 0) >= (d.yolo_confidence ?? 0)
+    ? d.insectnet_class
+    : d.yolo_class
 }
 
 function effectiveLabel(d: Detection): ClassName | null {
   if (d.reviewer_label) return d.reviewer_label
-  if (d.yolo_class === d.insectnet_class) return d.yolo_class
+  // Consensus only when both branches contributed and agree.
+  if (d.yolo_class != null && d.yolo_class === d.insectnet_class) return d.yolo_class
   return null
 }
 
-function applyAction(status: ReviewerStatus, label: ClassName | null) {
+async function patchDetection(
+  id: number,
+  status: ReviewerStatus,
+  label: ClassName | null,
+): Promise<boolean> {
+  try {
+    const res = await api(`/api/pollinator/detections/${id}/`, {
+      method: 'PATCH',
+      body: JSON.stringify({
+        reviewer_status: status,
+        reviewer_label: label ?? '',
+      }),
+    })
+    return res.ok
+  } catch {
+    return false
+  }
+}
+
+async function postBulkReview(
+  ids: number[],
+  status: ReviewerStatus,
+  label: ClassName | null,
+): Promise<boolean> {
+  try {
+    const res = await api('/api/analysis/detections/bulk/', {
+      method: 'POST',
+      body: JSON.stringify({
+        ids,
+        reviewer_status: status,
+        reviewer_label: label ?? '',
+      }),
+    })
+    return res.ok
+  } catch {
+    return false
+  }
+}
+
+function clearFailedSave(id: number) {
+  if (!failedSaves.value.has(id)) return
+  failedSaves.value.delete(id)
+  failedSaves.value = new Map(failedSaves.value)
+}
+
+async function applyAction(status: ReviewerStatus, label: ClassName | null) {
   if (!selected.value) return
-  selected.value.reviewer_status = status
-  selected.value.reviewer_label = label
+  const d = selected.value
+  // If a previous save for this detection already failed, keep its original
+  // prev so Dismiss reverts all the way back, not to the last optimistic state.
+  const existing = failedSaves.value.get(d.id)
+  const prevStatus = existing ? existing.prevStatus : d.reviewer_status
+  const prevLabel = existing ? existing.prevLabel : d.reviewer_label
+  d.reviewer_status = status
+  d.reviewer_label = label
   advanceToNext()
+
+  const ok = await patchDetection(d.id, status, label)
+  if (!ok) {
+    failedSaves.value.set(d.id, { status, label, prevStatus, prevLabel })
+    failedSaves.value = new Map(failedSaves.value)
+  } else {
+    clearFailedSave(d.id)
+  }
 }
 
 function toggleBulk(id: number) {
@@ -509,24 +706,93 @@ function selectAllVisible() {
   bulkIds.value = new Set(filteredDetections.value.map((d) => d.id))
 }
 
-function applyToBulk(status: ReviewerStatus, label: ClassName | null) {
+async function applyToBulk(status: ReviewerStatus, label: ClassName | null) {
+  const ids = [...bulkIds.value]
+  // For each id, the prev to revert to is its original state before any
+  // failed save in this session, falling back to the current state.
+  const snapshot = new Map<
+    number,
+    { status: ReviewerStatus; label: ClassName | null }
+  >()
   for (const d of detections.value) {
     if (bulkIds.value.has(d.id)) {
+      const existing = failedSaves.value.get(d.id)
+      snapshot.set(d.id, {
+        status: existing ? existing.prevStatus : d.reviewer_status,
+        label: existing ? existing.prevLabel : d.reviewer_label,
+      })
       d.reviewer_status = status
       d.reviewer_label = label
     }
   }
   clearBulk()
+
+  const ok = await postBulkReview(ids, status, label)
+  if (!ok) {
+    for (const id of ids) {
+      const prev = snapshot.get(id)!
+      failedSaves.value.set(id, {
+        status,
+        label,
+        prevStatus: prev.status,
+        prevLabel: prev.label,
+      })
+    }
+    failedSaves.value = new Map(failedSaves.value)
+  } else {
+    let changed = false
+    for (const id of ids) {
+      if (failedSaves.value.delete(id)) changed = true
+    }
+    if (changed) failedSaves.value = new Map(failedSaves.value)
+  }
 }
 
-function bulkConfirm() {
-  for (const d of detections.value) {
-    if (bulkIds.value.has(d.id)) {
-      d.reviewer_status = 'confirmed'
-      d.reviewer_label = d.yolo_class
+async function retryFailedSaves() {
+  if (retrying.value || failedSaves.value.size === 0) return
+  retrying.value = true
+  try {
+    // Group by intended (status, label) so we can retry as bulk requests.
+    const groups = new Map<
+      string,
+      { status: ReviewerStatus; label: ClassName | null; ids: number[] }
+    >()
+    for (const [id, entry] of failedSaves.value) {
+      const key = `${entry.status}::${entry.label ?? ''}`
+      if (!groups.has(key)) {
+        groups.set(key, { status: entry.status, label: entry.label, ids: [] })
+      }
+      groups.get(key)!.ids.push(id)
+    }
+    let changed = false
+    for (const { status, label, ids } of groups.values()) {
+      const ok = await postBulkReview(ids, status, label)
+      if (ok) {
+        for (const id of ids) failedSaves.value.delete(id)
+        changed = true
+      }
+    }
+    if (changed) failedSaves.value = new Map(failedSaves.value)
+  } finally {
+    retrying.value = false
+  }
+}
+
+function dismissFailedSaves() {
+  for (const [id, entry] of failedSaves.value) {
+    const d = detections.value.find((x) => x.id === id)
+    if (d) {
+      d.reviewer_status = entry.prevStatus
+      d.reviewer_label = entry.prevLabel
     }
   }
-  clearBulk()
+  failedSaves.value = new Map()
+}
+
+// 'confirmed' status forces reviewer_label='' server-side (only 'corrected'
+// keeps the label), so we don't seed yolo_class locally.
+function bulkConfirm() {
+  applyToBulk('confirmed', null)
 }
 
 function bulkReject() {
@@ -538,8 +804,15 @@ function onBulkCorrectChange() {
   applyToBulk('corrected', bulkCorrectClass.value)
 }
 
-function confirmAs(cls: ClassName) {
-  applyAction('confirmed', cls)
+// Confirmed only when both models agreed and the user picked that class.
+// When models disagree there's no single prediction to confirm, so any pick
+// is a correction (and the label is preserved server-side).
+function confirmAs(cls: ClassName | null) {
+  if (!selected.value || cls == null) return
+  const d = selected.value
+  const consensus = d.yolo_class != null && d.yolo_class === d.insectnet_class ? d.yolo_class : null
+  if (consensus === cls) applyAction('confirmed', null)
+  else applyAction('corrected', cls)
 }
 function correctTo(cls: ClassName) {
   applyAction('corrected', cls)
@@ -547,9 +820,12 @@ function correctTo(cls: ClassName) {
 function reject() {
   applyAction('rejected', null)
 }
+function markUnsure() {
+  applyAction('unsure', null)
+}
 
 function advanceToNext() {
-  const list = filteredDetections.value
+  const list = flatVisible.value
   const idx = list.findIndex((d) => d.id === selectedId.value)
   if (idx >= 0 && idx + 1 < list.length) {
     selectedId.value = list[idx + 1].id
@@ -557,7 +833,7 @@ function advanceToNext() {
 }
 
 function navigate(delta: number) {
-  const list = filteredDetections.value
+  const list = flatVisible.value
   const idx = list.findIndex((d) => d.id === selectedId.value)
   if (idx < 0) return
   const next = list[Math.max(0, Math.min(list.length - 1, idx + delta))]
@@ -566,48 +842,27 @@ function navigate(delta: number) {
 
 function onKeydown(e: KeyboardEvent) {
   if (!selected.value) return
-  if (
-    e.target instanceof HTMLElement &&
-    ['INPUT', 'SELECT', 'TEXTAREA'].includes(e.target.tagName)
-  ) {
+  if (e.target instanceof HTMLElement && ['INPUT', 'SELECT', 'TEXTAREA'].includes(e.target.tagName)) {
     return
   }
   switch (e.key) {
-    case '1':
-      confirmAs('fly')
-      e.preventDefault()
-      break
-    case '2':
-      confirmAs('bumblebee')
-      e.preventDefault()
-      break
-    case '3':
-      confirmAs('butterfly')
-      e.preventDefault()
-      break
-    case '4':
-      confirmAs('other')
-      e.preventDefault()
-      break
+    case '1': confirmAs('fly'); e.preventDefault(); break
+    case '2': confirmAs('bumblebee'); e.preventDefault(); break
+    case '3': confirmAs('butterfly'); e.preventDefault(); break
+    case '4': confirmAs('other'); e.preventDefault(); break
     case 'x':
-    case 'X':
-      reject()
-      e.preventDefault()
-      break
-    case 'Enter':
-      confirmAs(suggestedClass(selected.value))
-      e.preventDefault()
-      break
+    case 'X': reject(); e.preventDefault(); break
+    case 'u':
+    case 'U': markUnsure(); e.preventDefault(); break
+    case 'Enter': confirmAs(suggestedClass(selected.value)); e.preventDefault(); break
     case 'ArrowDown':
+    case 'ArrowRight':
     case 'j':
-      navigate(1)
-      e.preventDefault()
-      break
+    case 'l': navigate(1); e.preventDefault(); break
     case 'ArrowUp':
+    case 'ArrowLeft':
     case 'k':
-      navigate(-1)
-      e.preventDefault()
-      break
+    case 'h': navigate(-1); e.preventDefault(); break
   }
 }
 

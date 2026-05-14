@@ -1,0 +1,27 @@
+meta {
+  name: Training pool
+  type: http
+  seq: 4
+}
+
+get {
+  url: {{baseUrl}}/api/pollinator/training/pool/?track=detector
+  body: none
+  auth: bearer
+}
+
+auth:bearer {
+  token: {{accessToken}}
+}
+
+tests {
+  test("status is 200", function() {
+    expect(res.status).to.equal(200);
+  });
+  test("returns per-track counts", function() {
+    expect(res.body.track).to.equal("detector");
+    expect(res.body.available).to.be.a("number");
+    expect(res.body.consumed).to.be.a("number");
+    expect(res.body.by_class).to.be.an("object");
+  });
+}

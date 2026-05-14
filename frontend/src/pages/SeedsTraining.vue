@@ -14,7 +14,7 @@
         <header class="px-5 py-4 bg-primary/[0.22] border-b border-border">
           <h2 class="font-bold text-lg tracking-tight">New training job</h2>
           <p class="text-xs text-muted-foreground mt-0.5">
-            Select a seed species and start training. Training runs on CPU — expect long jobs.
+            Select a seed species and start training. Training that runs on CPU may take a long time.
           </p>
         </header>
 
