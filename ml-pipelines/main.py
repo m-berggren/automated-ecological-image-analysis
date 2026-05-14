@@ -1,3 +1,4 @@
+import json
 import os
 from collections import defaultdict
 import csv
@@ -36,7 +37,10 @@ FINETUNE_LRF = 0.01  # example learning rate, same note as LR0
 FINETUNE_EPOCHS = 45  # example, user should definitely be able to specify this (probably will be set to less than a full fresh run)
 
 SPECIES_LIST = [
-    'peh'
+    'cat',
+    'peh',
+    'phyca',
+    'vau',
 ]  # Removed the rest of the species temporarily so I can test incremental training on PEH where we had new images
 # The above is potentially a clunky solution
 
@@ -208,6 +212,15 @@ for species in SPECIES_LIST:
                 )
 
         tp, fp, fn = calculate_tp_fp_fn(preds, gt_boxes, iou_threshold=0.3)
+
+        # Save the preds to a json file for testing the seed size calculations
+        export_dir = 'predictions/'
+        os.makedirs(export_dir, exist_ok=True)
+        file_path = os.path.join(export_dir, f'{img_name}_preds.json')
+
+        with open(file_path, 'w') as f:
+            json.dump(preds, f)
+        print(f'Saved seed predictions to {img_name}_preds.json')
 
         # Detailed per-image logging (for debug to make our lives easier, pls don't remove for now)
         num_preds = len(preds)
