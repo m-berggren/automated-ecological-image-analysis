@@ -16,7 +16,7 @@
             @click="item.children ? onParentClick(item) : null"
             class="w-full flex items-center justify-between gap-3 px-3 py-2 rounded-lg text-sm font-medium transition-colors text-left"
             :class="[
-              isModuleActive(item) ? 'nav-active' : 'hover:bg-muted',
+              isModuleActive(item) && !item.children ? 'nav-active' : 'hover:bg-muted',
               item.paused ? 'text-muted-foreground' : '',
             ]"
           >
@@ -167,13 +167,17 @@ function isChildActive(child: ChildItem) {
 }
 function onParentClick(item: ModuleItem) {
   if (!item.children) return
-  if (isModuleActive(item)) {
-    expandedOverride[item.to] = !isModuleExpanded(item)
+  const wasExpanded = isModuleExpanded(item)
+  for (const m of modules) {
+    if (m.children && m.to !== item.to) expandedOverride[m.to] = false
+  }
+  if (wasExpanded) {
+    expandedOverride[item.to] = false
     return
   }
-  const first = item.children.find((c) => !isChildDisabled(c))
-  if (first) router.push(first.to)
   expandedOverride[item.to] = true
+  const first = item.children.find((c) => !isChildDisabled(c))
+  if (first && route.path !== first.to) router.push(first.to)
 }
 
 const initial = computed(() => (auth.user?.username ?? '?').charAt(0).toUpperCase())
