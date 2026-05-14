@@ -28,7 +28,7 @@ FINETUNE_WEIGHTS = {  # Per-species checkpoint to fine-tune from (best.pt or las
     'vau': os.path.abspath(os.path.join('runs', 'obb', 'vau', 'weights', 'best.pt')),
 }
 FINETUNE_RUN_SUFFIX = (
-    '_ft1'  # Suffix for the new run directory. A bit clunky now so will update later
+    ''  # Suffix for the new run directory. A bit clunky now so will update later
 )
 # Optional: lower LR for fine-tuning (set to None to use Ultralytics defaults)
 FINETUNE_LR0 = 0.001  # example learning rate, potentially the user should be able to specify/tune this tune (or set to None to use Ultralytics defaults)
