@@ -18,6 +18,8 @@ from seed_src.utils.metrics import (
 # -------------------------
 # SETTINGS
 # -------------------------
+BASE_PATH = '../data/seed'
+
 PREPARE_LABELS = True  # Set to True to run the label update on newly added label files
 RETRAIN = False  # Set to True to train a new model from scratch, False to use existing weights
 TRAINING_MODE = 'finetune'  # Set to 'fresh' to train from scratch, set to 'finetune' for incremental training
@@ -36,21 +38,20 @@ FINETUNE_LRF = 0.01
 FINETUNE_EPOCHS = 45  # User should be able to specify this
 
 SPECIES_LIST = [
-    'cat',
-    'peh',
-    'phyca',
-    'vau',
+    d.replace('_model', '')
+    for d in os.listdir(BASE_PATH)
+    if os.path.isdir(os.path.join(BASE_PATH, d)) and d.endswith('_model')
 ]
-# Fixing this in the next step to update dynamically so that we can accept new seed species too
+# Dynamic updates based on what is found in the base directory (looking files ending in '_model')
 
 CONFIG_MAP = {
-    s: f'../data/seed/{s}_model/{s}.yaml' for s in SPECIES_LIST
+    s: os.path.join(BASE_PATH, f'{s}_model', f'{s}.yaml') for s in SPECIES_LIST
 }  # Map species to their specific yaml files
 
 # -------------------------
 # LABEL PREPARATION
 # -------------------------
-SPECIES_IDS = {'cat': 0, 'peh': 0, 'phyca': 0, 'vau': 0}
+SPECIES_IDS = {s: 0 for s in SPECIES_LIST}
 SPLITS = ['train', 'val']
 BASE_PATH = '../data/seed'
 
@@ -84,8 +85,10 @@ for species in SPECIES_LIST:
         run_name = get_next_run_name(species)
         print(f'Training started on {species}...')
         if TRAINING_MODE == 'finetune':
-            ckpt = FINETUNE_WEIGHTS[species]
-            if not os.path.isfile(ckpt):
+            ckpt = FINETUNE_WEIGHTS.get(species)
+            if ckpt and os.path.isfile(ckpt):
+                pass  # If species-specific weights exist, proceed with the incremental training as intended
+            else:
                 raise FileNotFoundError(f'Fine-tune checkpoint missing: {ckpt}')
             out_pt = train_species_model(
                 species,
