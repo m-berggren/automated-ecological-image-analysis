@@ -126,6 +126,15 @@ class PollinatorRunExportCSVView(APIView):
             module=Module.POLLINATORS,
         )
 
+        mode = request.query_params.get("mode") or "per_image"
+
+        if mode == "per_detection":
+            return self._export_per_detection(run)
+
+        return self._export_per_image(run)
+
+
+    def _export_per_image(self, run):
         # Pre-aggregate validated detections by image_id so we can emit one
         # streamed row per image without a per-image DB hit.
         counts_by_image: dict[int, dict[str, int]] = {}
@@ -168,6 +177,77 @@ class PollinatorRunExportCSVView(APIView):
         filename = f'run-{run.pk}-images.csv'
         response = StreamingHttpResponse(rows(), content_type='text/csv')
         response['Content-Disposition'] = f'attachment; filename="{filename}"'
+        return response
+
+    def _export_per_detection(self, run):
+        detections = (
+            Detection.objects.filter(
+                inference_run=run,
+                status=DetectionStatus.ACCEPTED,
+                excluded_from_export=False,
+            )
+            .select_related("image", "pollinator_detection")
+            .order_by("image__captured_at", "image_id", "id")
+            .iterator(chunk_size=500)
+        )
+
+        fields = [
+            # Image Specific
+            "session",
+            "image_name",
+            "camera_name",
+            "datetime",
+            "weather",
+            # Detection specific
+            "detection_id",
+            "final_class",
+            "yolo_class",
+            "yolo_confidence",
+            "insectnet_class",
+            "insectnet_confidence",
+            "binary_confidence",
+            "final_confidence",
+        ]
+
+        session = run.name or f"Run #{run.pk}"
+        writer = csv.writer(_Echo())
+
+        def rows():
+            yield writer.writerow(fields)
+
+            for d in detections:
+                pd = getattr(d, "pollinator_detection", None)
+                img = d.image
+
+                final_class = (
+                    d.reviewer_label
+                    or d.predicted_class
+                    or (pd.yolo_class if pd else None)
+                    or (pd.insectnet_class if pd else None)
+                )
+
+
+                yield writer.writerow([
+                    # image
+                    session,
+                    Path(img.file.name).name if img and img.file else '',
+                    _camera_name(img) if img else '',
+                    img.captured_at.isoformat() if img and img.captured_at else '',
+                    img.weather or '' if img else '',
+                    # detection
+                    d.id,
+                    final_class,
+                    pd.yolo_class if pd else None,
+                    pd.yolo_confidence if pd else None,
+                    pd.insectnet_class if pd else None,
+                    pd.insectnet_confidence if pd else None,
+                    pd.binary_confidence if pd else None,
+                    d.confidence,
+                ])
+
+        filename = f"run-{run.pk}-detections.csv"
+        response = StreamingHttpResponse(rows(), content_type="text/csv")
+        response["Content-Disposition"] = f'attachment; filename="{filename}"'
         return response
 
 
