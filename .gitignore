@@ -40,6 +40,9 @@ tests/integration/bruno/fixtures/
 # Vue build output
 static/vue/
 
+# Image uploads
+media/
+
 # Environment variables
 .env
 
@@ -50,4 +53,5 @@ static/vue/
 
 *.pth
 
-media/
+# Pycharm
+.idea/
