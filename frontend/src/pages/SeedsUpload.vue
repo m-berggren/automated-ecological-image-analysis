@@ -42,82 +42,71 @@
       </div>
 
       <!-- Model selector -->
-<div class="space-y-2">
-  <div
-    class="text-[11px] font-semibold uppercase tracking-wider text-muted-foreground mb-3"
-  >
-    Choose model version
-  </div>
+      <div class="space-y-2">
+        <div class="text-[11px] font-semibold uppercase tracking-wider text-muted-foreground mb-3">
+          Choose model version
+        </div>
 
-  <!-- Empty state -->
-  <div
-    v-if="!activeModelVersions.length"
-    class="rounded-lg border border-border bg-muted/20 p-4 text-sm"
-  >
-    <span class="text-muted-foreground">
-      No active models yet.
-    </span>
+        <!-- Empty state -->
+        <div
+          v-if="!activeModelVersions.length"
+          class="rounded-lg border border-border bg-muted/20 p-4 text-sm"
+        >
+          <span class="text-muted-foreground"> No active models yet. </span>
 
-    <RouterLink
-      to="/seeds/training"
-      class="ml-1 text-primary hover:underline font-medium"
-    >
-      Go to the training page
-    </RouterLink>
+          <RouterLink to="/seeds/training" class="ml-1 text-primary hover:underline font-medium">
+            Go to the training page
+          </RouterLink>
 
-    <span class="text-muted-foreground">
-      to create one.
-    </span>
-  </div>
+          <span class="text-muted-foreground"> to create one. </span>
+        </div>
 
-  <!-- Cards -->
-  <div v-else class="space-y-2">
-    <label
-      v-for="model in activeModelVersions"
-      :key="model.id"
-      class="flex items-start gap-3 p-3 rounded-lg border cursor-pointer transition-colors"
-      :class="
-        config.model_version_id === model.id
-          ? 'border-primary bg-primary/5'
-          : 'border-border hover:border-primary/40'
-      "
-    >
-      <input
-        type="radio"
-        name="model-version"
-        class="mt-0.5"
-        :checked="config.model_version_id === model.id"
-        @change="config.model_version_id = model.id"
-      />
-
-      <div class="flex-1 min-w-0">
-
-        <!-- Top row -->
-        <div class="flex items-baseline gap-2 flex-wrap">
-          <span class="font-medium text-sm">
-            {{ model.version_name }}
-          </span>
-
-          <span class="text-xs text-muted-foreground italic">
-            {{ model.kind }}
-          </span>
-
-          <span
-            class="text-xs px-2 py-0.5 rounded-full bg-green-300 text-green-900 font-medium"
+        <!-- Cards -->
+        <div v-else class="space-y-2">
+          <label
+            v-for="model in activeModelVersions"
+            :key="model.id"
+            class="flex items-start gap-3 p-3 rounded-lg border cursor-pointer transition-colors"
+            :class="
+              config.model_version_id === model.id
+                ? 'border-primary bg-primary/5'
+                : 'border-border hover:border-primary/40'
+            "
           >
-            Active
-          </span>
-        </div>
+            <input
+              type="radio"
+              name="model-version"
+              class="mt-0.5"
+              :checked="config.model_version_id === model.id"
+              @change="config.model_version_id = model.id"
+            />
 
-        <!-- Subtitle -->
-        <div class="text-xs text-muted-foreground mt-1">
-          Seed detection model ready for inference
-        </div>
+            <div class="flex-1 min-w-0">
+              <!-- Top row -->
+              <div class="flex items-baseline gap-2 flex-wrap">
+                <span class="font-medium text-sm">
+                  {{ model.version_name }}
+                </span>
 
+                <span class="text-xs text-muted-foreground italic">
+                  {{ model.kind }}
+                </span>
+
+                <span
+                  class="text-xs px-2 py-0.5 rounded-full bg-green-300 text-green-900 font-medium"
+                >
+                  Active
+                </span>
+              </div>
+
+              <!-- Subtitle -->
+              <div class="text-xs text-muted-foreground mt-1">
+                Seed detection model ready for inference
+              </div>
+            </div>
+          </label>
+        </div>
       </div>
-    </label>
-  </div>
-</div>
 
       <!-- Advanced settings -->
       <div class="flex flex-wrap items-center gap-x-6 gap-y-3 pt-2 border-t border-border">
@@ -302,9 +291,7 @@ const config = ref<PipelineConfig>({
 })
 
 const activeModelVersions = computed(() => {
-  return modelVersions.value.filter(
-    (m) => m.module === 'seeds' && m.is_active,
-  )
+  return modelVersions.value.filter((m) => m.module === 'seeds' && m.is_active)
 })
 
 const doneCount = computed(() => {
@@ -442,8 +429,8 @@ async function startDetection() {
   }
 
   if (!config.value.model_version_id) {
-  error.value = 'Select a model version.'
-  return
+    error.value = 'Select a model version.'
+    return
   }
 
   starting.value = true

@@ -68,7 +68,9 @@
 
           <!-- SCRATCH: seed type picker -->
           <template v-if="trainingMode === 'scratch'">
-            <div class="grid grid-cols-4 gap-3 pt-1 max-h-[10rem] overflow-y-auto">
+            <div
+              class="grid grid-cols-2 min-[860px]:grid-cols-4 gap-3 min-[860px]:gap-4 pt-1 max-h-[10rem] overflow-y-auto"
+            >
               <div v-for="seed in seedTypes" :key="seed.id" class="relative shrink-0 pt-2 pr-2">
                 <button
                   v-if="seed.isCustom"
@@ -80,7 +82,7 @@
                 <button
                   @click="selectedSeed = seed.id"
                   :class="[
-                    'group w-36 flex items-center px-3 py-2 rounded-lg border-2 text-left transition-all overflow-hidden',
+                    'group w-full flex items-center px-3 py-2 rounded-lg border-2 text-left transition-all overflow-hidden',
                     selectedSeed === seed.id
                       ? 'border-primary bg-primary/5'
                       : 'border-border bg-background hover:border-primary/40',
