@@ -25,29 +25,47 @@
       >
         loading {{ loadProgress.loaded }}/{{ loadProgress.total }}…
       </span>
-      <div class="ml-auto flex items-center gap-2">
-        <button
-          class="px-3 py-1.5 rounded-md text-sm font-medium border border-border hover:bg-muted disabled:opacity-50"
-          :disabled="downloading !== null || !run"
-          @click="downloadExport('csv')"
-        >
-          {{ downloading === 'csv' ? 'Downloading…' : 'CSV' }}
-        </button>
-        <button
-          class="px-3 py-1.5 rounded-md text-sm font-medium border border-border hover:bg-muted disabled:opacity-50"
-          :disabled="downloading !== null || !run"
-          @click="downloadExport('crops')"
-        >
-          {{ downloading === 'crops' ? 'Downloading…' : 'Crops (zip)' }}
-        </button>
-        <button
-          class="px-3 py-1.5 rounded-md text-sm font-medium border border-border hover:bg-muted disabled:opacity-50"
-          :disabled="downloading !== null || !run"
-          @click="downloadExport('annotated')"
-        >
-          {{ downloading === 'annotated' ? 'Downloading…' : 'Annotated images (zip)' }}
-        </button>
-      </div>
+<div class="ml-auto">
+  <div class="border border-border rounded-lg bg-background shadow-sm p-3 space-y-3">
+
+    <!-- Header -->
+    <div class="text-xs font-semibold text-muted-foreground uppercase tracking-wide">
+      Export as
+    </div>
+
+    <!-- Actions -->
+    <div class="flex gap-2">
+
+      <!-- CSV -->
+      <button
+        class="px-3 py-1.5 rounded-md text-sm font-medium border border-border hover:bg-muted disabled:opacity-50"
+        :disabled="downloading !== null || !run"
+        @click="showCsvModal = true"
+      >
+        {{ downloading === 'csv' ? 'Downloading…' : 'CSV' }}
+      </button>
+
+      <!-- Crops ZIP -->
+      <button
+        class="px-3 py-1.5 rounded-md text-sm font-medium border border-border hover:bg-muted disabled:opacity-50"
+        :disabled="downloading !== null || !run"
+        @click="downloadExport('crops')"
+      >
+        {{ downloading === 'crops' ? 'Downloading…' : 'Crops (zip)' }}
+      </button>
+
+      <!-- Annotated ZIP -->
+      <button
+        class="px-3 py-1.5 rounded-md text-sm font-medium border border-border hover:bg-muted disabled:opacity-50"
+        :disabled="downloading !== null || !run"
+        @click="downloadExport('annotated')"
+      >
+        {{ downloading === 'annotated' ? 'Downloading…' : 'Annotated images (zip)' }}
+      </button>
+
+    </div>
+  </div>
+</div>
     </header>
 
     <div v-if="!imageCards.length" class="flex-1 p-12 text-center text-sm text-muted-foreground">
@@ -147,6 +165,50 @@
         </div>
       </section>
     </div>
+    <div
+  v-if="showCsvModal"
+  class="fixed inset-0 bg-black/50 flex items-center justify-center z-50"
+>
+  <div class="bg-white rounded-lg shadow-lg p-6 w-full max-w-md">
+    <h2 class="text-lg font-semibold mb-4">CSV Export Options</h2>
+
+    <div class="space-y-3">
+      <label class="flex items-center gap-2 cursor-pointer">
+        <input
+          type="radio"
+          value="per_detection"
+          v-model="csvMode"
+        />
+        <span>Row per detection</span>
+      </label>
+
+      <label class="flex items-center gap-2 cursor-pointer">
+        <input
+          type="radio"
+          value="per_image"
+          v-model="csvMode"
+        />
+        <span>Row per image</span>
+      </label>
+    </div>
+
+    <div class="mt-6 flex justify-end gap-2">
+      <button
+        class="px-3 py-1.5 border rounded-md"
+        @click="showCsvModal = false"
+      >
+        Cancel
+      </button>
+
+      <button
+        class="px-3 py-1.5 bg-primary text-white rounded-md"
+        @click="confirmCsvDownload"
+      >
+        Download
+      </button>
+    </div>
+  </div>
+</div>
   </div>
 </template>
 
@@ -201,6 +263,14 @@ const CLASS_COLORS: Record<ClassName, string> = {
   bumblebee: '#e6a946',
   butterfly: '#c87bba',
   other: '#9aa3ab',
+}
+
+const showCsvModal = ref(false)
+const csvMode = ref<'per_image' | 'per_detection'>('per_detection')
+
+function confirmCsvDownload() {
+  showCsvModal.value = false
+  downloadExport('csv', csvMode.value)
 }
 
 const route = useRoute()
@@ -388,12 +458,12 @@ async function toggleExclude(d: Detection) {
   }
 }
 
-async function downloadExport(kind: DownloadKind) {
+async function downloadExport(kind: DownloadKind, mode?: 'per_image' | 'per_detection') {
   if (!run.value || downloading.value !== null) return
   downloading.value = kind
   try {
     const path = {
-      csv: `/api/pollinator/runs/${run.value.id}/export.csv`,
+      csv: `/api/pollinator/runs/${run.value.id}/export.csv?mode=${mode ?? 'per_detection'}`,
       crops: `/api/pollinator/runs/${run.value.id}/export-crops.zip`,
       annotated: `/api/pollinator/runs/${run.value.id}/export-annotated.zip`,
     }[kind]
