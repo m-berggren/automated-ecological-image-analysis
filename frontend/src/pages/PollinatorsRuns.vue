@@ -1,19 +1,17 @@
 <template>
-  <PageHeader title="Runs" subtitle="Inference runs over uploaded seed images" />
+  <PageHeader title="Runs" subtitle="Inference runs over uploaded camera-trap folders" />
 
   <div class="flex-1 flex flex-col min-h-0">
-    <!-- Filter bar -->
+    <!-- Filter / counts bar -->
     <div class="px-8 py-3 border-b border-border bg-surface flex items-center gap-3 flex-wrap">
       <div class="flex gap-1 text-xs">
         <button
           v-for="opt in FILTER_OPTIONS"
           :key="opt.value"
           class="px-3 py-1.5 rounded-md font-medium transition-colors"
-          :class="
-            statusFilter === opt.value
-              ? 'bg-primary text-primary-foreground'
-              : 'text-muted-foreground hover:bg-muted'
-          "
+          :class="statusFilter === opt.value
+            ? 'bg-primary text-primary-foreground'
+            : 'text-muted-foreground hover:bg-muted'"
           @click="statusFilter = opt.value"
         >
           {{ opt.label }}
@@ -21,12 +19,12 @@
         </button>
       </div>
       <span class="text-xs text-muted-foreground ml-auto">
-        {{ filteredRuns.length }} {{ filteredRuns.length === 1 ? 'run' : 'runs' }} across
-        {{ groupedByUpload.length }}
+        {{ filteredRuns.length }} {{ filteredRuns.length === 1 ? 'run' : 'runs' }}
+        across {{ groupedByUpload.length }}
         {{ groupedByUpload.length === 1 ? 'upload' : 'uploads' }}
       </span>
       <RouterLink
-        to="/seeds/upload"
+        to="/pollinators/upload"
         class="px-3 py-1.5 rounded-md text-sm font-medium bg-primary text-primary-foreground hover:bg-primary/90"
       >
         New run
@@ -37,11 +35,13 @@
     <div class="flex-1 overflow-auto">
       <div v-if="loading" class="p-8 text-sm text-muted-foreground">Loading…</div>
       <div v-else-if="loadError" class="p-8 text-sm text-red-600">{{ loadError }}</div>
-      <div v-else-if="!filteredRuns.length" class="p-12 text-center text-sm text-muted-foreground">
+      <div
+        v-else-if="!filteredRuns.length"
+        class="p-12 text-center text-sm text-muted-foreground"
+      >
         No runs match this filter. Start one from the
-        <RouterLink to="/seeds/upload" class="text-primary hover:underline">
-          Upload page </RouterLink
-        >.
+        <RouterLink to="/pollinators/upload" class="text-primary hover:underline">
+          Upload page</RouterLink>.
       </div>
 
       <div v-else class="p-6 space-y-4">
@@ -50,14 +50,9 @@
           :key="group.upload?.id ?? 'orphan'"
           class="rounded-xl border border-border bg-card overflow-hidden shadow-md"
         >
-          <header
-            class="px-5 py-4 bg-primary/[0.22] border-b border-border flex items-baseline gap-3"
-          >
+          <header class="px-5 py-4 bg-primary/[0.22] border-b border-border flex items-baseline gap-3">
             <h2 class="font-bold text-lg tracking-tight">
-              {{
-                group.upload?.name ||
-                (group.upload ? `Upload #${group.upload.id}` : 'Unattached runs')
-              }}
+              {{ group.upload?.name || (group.upload ? `Upload #${group.upload.id}` : 'Unattached runs') }}
             </h2>
             <span v-if="group.upload" class="text-xs text-muted-foreground">
               {{ group.upload.image_count.toLocaleString() }} images
@@ -75,44 +70,47 @@
             >
               <div class="flex items-center gap-4">
                 <div class="flex-1 min-w-0">
-                  <div class="flex items-baseline gap-2 flex-wrap">
+                  <div class="flex items-baseline gap-2">
                     <span class="font-medium text-sm truncate">
                       {{ run.name || `Run #${run.id}` }}
-                    </span>
-                    <!-- Seed type badge -->
-                    <span
-                      v-if="run.config?.selected_seed"
-                      class="text-xs px-2 py-0.5 rounded-full bg-eco-mint text-eco-forest font-medium shrink-0"
-                    >
-                      {{ run.config.selected_seed }}
                     </span>
                     <span class="text-xs text-muted-foreground shrink-0">
                       created {{ formatDate(run.created_at) }}
                     </span>
                   </div>
-
-                  <!-- Notes -->
-                  <p
-                    v-if="run.config?.notes"
-                    class="text-xs text-muted-foreground mt-0.5 italic truncate"
-                  >
-                    {{ run.config.notes }}
-                  </p>
-
                   <div class="text-xs text-muted-foreground mt-0.5">
-                    <template
-                      v-if="run.status === 'completed' && run.completed_at && run.started_at"
-                    >
+                    <template v-if="run.status === 'completed' && run.completed_at && run.started_at">
                       took {{ humanDuration(durationSeconds(run)) }} ·
                     </template>
-                    <template v-else-if="run.status === 'failed'"> failed · </template>
+                    <template v-else-if="run.status === 'failed'">
+                      failed
+                      <span v-if="run.error_message"> — {{ run.error_message }}</span> ·
+                    </template>
                     <span v-if="run.detection_count > 0">
-                      {{ run.detection_count.toLocaleString() }} seeds detected
+                      {{ run.detection_count.toLocaleString() }} detections
                     </span>
-                    <span v-else-if="run.status === 'completed'">no seeds detected</span>
+                    <span v-else-if="run.status === 'completed'">no detections</span>
                   </div>
 
-                  <!-- Progress bar for running -->
+                  <!-- Class breakdown for runs with detections -->
+                  <div
+                    v-if="hasClassBreakdown(run)"
+                    class="text-xs text-muted-foreground mt-1 flex items-center gap-3 flex-wrap"
+                  >
+                    <span
+                      v-for="row in classRows(run)"
+                      :key="row.label"
+                      class="inline-flex items-center gap-1"
+                    >
+                      <span
+                        class="w-1.5 h-1.5 rounded-full"
+                        :style="{ backgroundColor: row.color }"
+                      />
+                      {{ row.count.toLocaleString() }} {{ row.label.toLowerCase() }}
+                    </span>
+                  </div>
+
+                  <!-- Inline progress for running -->
                   <div v-if="run.status === 'running'" class="mt-2 max-w-md">
                     <div class="h-1.5 rounded-full bg-muted overflow-hidden">
                       <div
@@ -135,7 +133,9 @@
                   {{ run.status }}
                 </span>
                 <RouterLink
-                  :to="`/seeds/runs/${run.id}/detect`"
+                  :to="run.status === 'completed'
+                    ? `/pollinators/runs/${run.id}/review`
+                    : `/pollinators/runs/${run.id}/detect`"
                   class="text-xs px-2 py-1 rounded border border-border hover:bg-muted shrink-0"
                 >
                   {{ run.status === 'completed' ? 'Review' : 'Open' }}
@@ -170,17 +170,14 @@ interface Run {
   image_count: number
   processed_image_count?: number
   detection_count: number
-  config?: {
-    selected_seed?: string
-    notes?: string
-    enable_viability?: boolean
-  }
+  failed_image_count?: number
+  detections_by_class?: Record<string, number>
   created_at: string
   started_at: string | null
   completed_at: string | null
+  error_message?: string
 }
 
-// Mock preview
 interface UploadMock {
   id: number
   name: string
@@ -197,7 +194,12 @@ interface ListBundle {
   runs: Run[]
 }
 
-type StatusFilter = 'all' | 'active' | 'completed' | 'failed'
+const CLASS_COLORS: Record<string, string> = {
+  fly: '#6b9bd2',
+  bumblebee: '#e6a946',
+  butterfly: '#c87bba',
+  other: '#9aa3ab',
+}
 
 const FILTER_OPTIONS_BASE: Array<{ value: StatusFilter; label: string }> = [
   { value: 'all', label: 'All' },
@@ -206,12 +208,19 @@ const FILTER_OPTIONS_BASE: Array<{ value: StatusFilter; label: string }> = [
   { value: 'failed', label: 'Failed' },
 ]
 
+type StatusFilter = 'all' | 'active' | 'completed' | 'failed'
+
 const route = useRoute()
 const loading = ref(true)
 const loadError = ref('')
 const uploads = ref<Upload[]>([])
 const runs = ref<Run[]>([])
 const statusFilter = ref<StatusFilter>('all')
+
+const previewMode = computed<string | null>(() => {
+  const value = route.query.preview
+  return typeof value === 'string' ? value : null
+})
 
 onMounted(async () => {
   if (previewMode.value) {
@@ -226,14 +235,9 @@ onMounted(async () => {
   await loadFromApi()
 })
 
-const previewMode = computed<string | null>(() => {
-  const value = route.query.preview
-  return typeof value === 'string' ? value : null
-})
-
 async function loadPreview(_mode: string): Promise<ListBundle | null> {
   if (!import.meta.env.DEV) return null
-  const { default: mocks } = await import('@/mocks/seed-runs-list.json')
+  const { default: mocks } = await import('@/mocks/pollinator-runs-list.json')
   const raw = (mocks as Record<string, { uploads: UploadMock[]; runs: RunMock[] } | undefined>)
     .default
   if (!raw) return null
@@ -263,8 +267,8 @@ function resolveBundle(raw: { uploads: UploadMock[]; runs: RunMock[] }): ListBun
 async function loadFromApi() {
   try {
     const [runsRes, uploadsRes] = await Promise.all([
-      api('/api/analysis/runs/?module=seeds'),
-      api('/api/datasets/uploads/?module=seeds'),
+      api('/api/analysis/runs/?module=pollinators'),
+      api('/api/datasets/uploads/?module=pollinators'),
     ])
     if (!runsRes.ok) {
       loadError.value = `Runs: HTTP ${runsRes.status}`
@@ -297,19 +301,18 @@ const filteredRuns = computed(() => {
 })
 
 const FILTER_OPTIONS = computed(() =>
-  FILTER_OPTIONS_BASE.map((opt) => ({ ...opt, count: countFor(opt.value) })),
+  FILTER_OPTIONS_BASE.map((opt) => ({
+    ...opt,
+    count: countFor(opt.value),
+  })),
 )
 
 function countFor(status: StatusFilter): number {
   switch (status) {
-    case 'all':
-      return runs.value.length
-    case 'active':
-      return runs.value.filter((r) => r.status === 'pending' || r.status === 'running').length
-    case 'completed':
-      return runs.value.filter((r) => r.status === 'completed').length
-    case 'failed':
-      return runs.value.filter((r) => r.status === 'failed').length
+    case 'all': return runs.value.length
+    case 'active': return runs.value.filter((r) => r.status === 'pending' || r.status === 'running').length
+    case 'completed': return runs.value.filter((r) => r.status === 'completed').length
+    case 'failed': return runs.value.filter((r) => r.status === 'failed').length
   }
 }
 
@@ -327,7 +330,7 @@ const groupedByUpload = computed(() => {
     groups.get(key)!.push(r)
   }
   const out = Array.from(groups.entries()).map(([uploadId, groupRuns]) => ({
-    upload: uploadId == null ? null : (uploadsById.value.get(uploadId) ?? null),
+    upload: uploadId == null ? null : uploadsById.value.get(uploadId) ?? null,
     runs: [...groupRuns].sort(
       (a, b) => new Date(b.created_at).getTime() - new Date(a.created_at).getTime(),
     ),
@@ -342,7 +345,8 @@ const groupedByUpload = computed(() => {
 
 function progressPercent(run: Run): number {
   if (!run.image_count) return 0
-  return Math.min(100, Math.round(((run.processed_image_count ?? 0) / run.image_count) * 100))
+  const processed = run.processed_image_count ?? 0
+  return Math.min(100, Math.round((processed / run.image_count) * 100))
 }
 
 function durationSeconds(run: Run): number {
@@ -363,7 +367,8 @@ function humanDuration(seconds: number): string {
 
 function formatDate(iso: string): string {
   const d = new Date(iso)
-  const diffSec = (Date.now() - d.getTime()) / 1000
+  const now = Date.now()
+  const diffSec = (now - d.getTime()) / 1000
   if (diffSec < 60) return 'just now'
   if (diffSec < 3600) return `${Math.round(diffSec / 60)}m ago`
   if (diffSec < 86400) return `${Math.round(diffSec / 3600)}h ago`
@@ -371,18 +376,28 @@ function formatDate(iso: string): string {
   return d.toLocaleDateString()
 }
 
+function hasClassBreakdown(run: Run): boolean {
+  return !!run.detections_by_class && Object.keys(run.detections_by_class).length > 0
+}
+
+function classRows(run: Run) {
+  if (!run.detections_by_class) return []
+  return Object.entries(run.detections_by_class)
+    .sort((a, b) => b[1] - a[1])
+    .map(([cls, count]) => ({
+      label: cls[0].toUpperCase() + cls.slice(1),
+      count,
+      color: CLASS_COLORS[cls] ?? '#9aa3ab',
+    }))
+}
+
 function statusClass(s: string): string {
   switch (s) {
-    case 'completed':
-      return 'bg-green-200 text-green-800'
-    case 'running':
-      return 'bg-blue-200 text-blue-800'
-    case 'failed':
-      return 'bg-red-200 text-red-800'
-    case 'pending':
-      return 'bg-amber-200 text-amber-800'
-    default:
-      return 'bg-muted text-muted-foreground'
+    case 'completed': return 'bg-green-200 text-green-800'
+    case 'running': return 'bg-blue-200 text-blue-800'
+    case 'failed': return 'bg-red-200 text-red-800'
+    case 'pending': return 'bg-amber-200 text-amber-800'
+    default: return 'bg-muted text-muted-foreground'
   }
 }
 </script>

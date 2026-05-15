@@ -1,0 +1,117 @@
+{
+  "queued": {
+    "id": 10,
+    "name": "PEH batch May 2026",
+    "status": "pending",
+    "created_at_offset_seconds": -120,
+    "started_at_offset_seconds": null,
+    "completed_at_offset_seconds": null,
+    "image_count": 40,
+    "processed_image_count": 0,
+    "detection_count": 0,
+    "failed_image_count": 0,
+    "config": {
+      "selected_seed": "PEH",
+      "confidence_threshold": "0.25",
+      "slice_overlap_ratio": "0.25",
+      "enable_viability": false
+    },
+    "activity_log": [
+      { "offset_seconds": -120, "message": "Run created, waiting for worker", "level": "info" }
+    ]
+  },
+  "running": {
+    "id": 11,
+    "name": "PEH batch May 2026",
+    "status": "running",
+    "created_at_offset_seconds": -600,
+    "started_at_offset_seconds": -540,
+    "completed_at_offset_seconds": null,
+    "image_count": 40,
+    "processed_image_count": 18,
+    "detection_count": 142,
+    "failed_image_count": 0,
+    "config": {
+      "selected_seed": "PEH",
+      "confidence_threshold": "0.30",
+      "slice_overlap_ratio": "0.15",
+      "enable_viability": true
+    },
+    "activity_log": [
+      { "offset_seconds": -540, "message": "Worker picked up run", "level": "info" },
+      {
+        "offset_seconds": -500,
+        "message": "Processing image PEH_001.jpg — 8 seeds detected",
+        "level": "info"
+      },
+      {
+        "offset_seconds": -460,
+        "message": "Processing image PEH_002.jpg — 6 seeds detected",
+        "level": "info"
+      },
+      {
+        "offset_seconds": -380,
+        "message": "Processing image PEH_004.jpg — 11 seeds detected",
+        "level": "info"
+      }
+    ]
+  },
+  "completed": {
+    "id": 12,
+    "name": "PEH batch May 2026",
+    "status": "completed",
+    "created_at_offset_seconds": -3600,
+    "started_at_offset_seconds": -3540,
+    "completed_at_offset_seconds": -1200,
+    "image_count": 40,
+    "processed_image_count": 40,
+    "detection_count": 312,
+    "failed_image_count": 1,
+    "viability": { "active": 287, "aborted": 25, "threshold": 0.42 },
+    "config": {
+      "selected_seed": "PEH",
+      "confidence_threshold": "0.20",
+      "slice_overlap_ratio": "0.30",
+      "enable_viability": false
+    },
+    "activity_log": [
+      { "offset_seconds": -3540, "message": "Worker picked up run", "level": "info" },
+      {
+        "offset_seconds": -3500,
+        "message": "Processing image PEH_001.jpg — 8 seeds detected",
+        "level": "info"
+      },
+      {
+        "offset_seconds": -2000,
+        "message": "PEH_021.jpg failed to load, skipping",
+        "level": "error"
+      },
+      { "offset_seconds": -1300, "message": "All images processed", "level": "info" },
+      { "offset_seconds": -1200, "message": "Viability report generated", "level": "info" }
+    ]
+  },
+  "failed": {
+    "id": 13,
+    "name": "VAU trial A",
+    "status": "failed",
+    "created_at_offset_seconds": -7200,
+    "started_at_offset_seconds": -7140,
+    "completed_at_offset_seconds": null,
+    "image_count": 20,
+    "processed_image_count": 5,
+    "detection_count": 0,
+    "failed_image_count": 0,
+    "error_message": "Model not found for VAU. Please train a model first.",
+    "config": {
+      "selected_seed": "VAU",
+      "confidence_threshold": "0.40",
+      "slice_overlap_ratio": "0.25",
+      "enable_viability": true
+    },
+    "activity_log": [
+      { "offset_seconds": -7140, "message": "Worker picked up run", "level": "info" },
+      { "offset_seconds": -7100, "message": "Loading VAU model weights...", "level": "info" },
+      { "offset_seconds": -7090, "message": "Model weights not found for VAU", "level": "error" }
+    ]
+  }
+}

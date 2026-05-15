@@ -1,0 +1,137 @@
+{
+  "default": {
+    "tracks": [
+      {
+        "id": "PEH",
+        "label": "PEH",
+        "species": "Pisum sativum",
+        "versions": [
+          {
+            "id": 1,
+            "version_name": "PEH-01",
+            "is_active": true,
+            "metrics": { "mae": 3.2, "precision": 0.91, "recall": 0.85, "f1": 0.88 },
+            "samples": 420,
+            "trained_at_offset_seconds": -86400,
+            "training_duration_seconds": 3240,
+            "parameters": { "epochs": 90, "imgsz": 768, "batch": 2, "confidence": 0.25 },
+            "charts": null
+          }
+        ],
+        "data_pool": { "total_samples": 420, "new_since_active": 38 },
+        "active_job": null
+      },
+
+      {
+        "id": "PHYCA",
+        "label": "PHYCA",
+        "species": "Phacelia tanacetifolia",
+        "versions": [],
+        "data_pool": { "total_samples": 180, "new_since_active": 0 },
+        "active_job": {
+          "id": 2,
+          "version_name": "PHYCA-02",
+          "started_at_offset_seconds": -1800,
+          "estimated_total_seconds": 7200,
+          "current_epoch": 24,
+          "total_epochs": 90,
+          "loss": 0.412
+        }
+      },
+
+      {
+        "id": "VAU",
+        "label": "VAU",
+        "species": "Vicia sativa",
+        "versions": [],
+        "data_pool": { "total_samples": 95, "new_since_active": 0 },
+        "active_job": {
+          "id": 3,
+          "version_name": "VAU-01",
+          "started_at_offset_seconds": -600,
+          "estimated_total_seconds": 5400,
+          "current_epoch": 8,
+          "total_epochs": 90,
+          "loss": 0.61
+        }
+      },
+
+      {
+        "id": "CAT",
+        "label": "CAT",
+        "species": "Carthamus tinctorius",
+        "versions": [
+          {
+            "id": 2,
+            "version_name": "CAT-01",
+            "is_active": true,
+            "metrics": { "mae": 4.7, "precision": 0.83, "recall": 0.79, "f1": 0.81 },
+            "samples": 210,
+            "trained_at_offset_seconds": -172800,
+            "training_duration_seconds": 1980,
+            "parameters": { "epochs": 90, "imgsz": 768, "batch": 2, "confidence": 0.25 },
+            "charts": null
+          }
+        ],
+        "data_pool": { "total_samples": 210, "new_since_active": 12 },
+        "active_job": null
+      }
+    ],
+
+    "training_history": [
+      {
+        "id": 1,
+        "track_id": "PEH",
+        "track_label": "PEH",
+        "version_name": "PEH-01",
+        "samples_used": 420,
+        "epochs_total": 90,
+        "started_at_offset_seconds": -90000,
+        "duration_seconds": 3240,
+        "status": "completed",
+        "main_metric_value": 3.2,
+        "precision": 0.91,
+        "recall": 0.85,
+        "f1": 0.88,
+        "initiated_by": "clausevilla",
+        "error_message": null
+      },
+
+      {
+        "id": 2,
+        "track_id": "CAT",
+        "track_label": "CAT",
+        "version_name": "CAT-01",
+        "samples_used": 210,
+        "epochs_total": 90,
+        "started_at_offset_seconds": -176000,
+        "duration_seconds": 1980,
+        "status": "completed",
+        "main_metric_value": 4.7,
+        "precision": 0.83,
+        "recall": 0.79,
+        "f1": 0.81,
+        "initiated_by": "clausevilla",
+        "error_message": null
+      },
+
+      {
+        "id": 3,
+        "track_id": "VAU",
+        "track_label": "VAU",
+        "version_name": "VAU-01",
+        "samples_used": 80,
+        "epochs_total": 90,
+        "started_at_offset_seconds": -200000,
+        "duration_seconds": null,
+        "status": "failed",
+        "main_metric_value": null,
+        "precision": null,
+        "recall": null,
+        "f1": null,
+        "initiated_by": "clausevilla",
+        "error_message": "Out of memory on epoch 12"
+      }
+    ]
+  }
+}
