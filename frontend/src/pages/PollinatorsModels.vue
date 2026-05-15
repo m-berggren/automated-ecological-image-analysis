@@ -9,9 +9,11 @@
           v-for="opt in filterOptions"
           :key="opt.value"
           class="px-3 py-1.5 rounded-md font-medium transition-colors"
-          :class="kindFilter === opt.value
-            ? 'bg-primary text-primary-foreground'
-            : 'text-muted-foreground hover:bg-muted'"
+          :class="
+            kindFilter === opt.value
+              ? 'bg-primary text-primary-foreground'
+              : 'text-muted-foreground hover:bg-muted'
+          "
           @click="kindFilter = opt.value"
         >
           {{ opt.label }}
@@ -35,7 +37,10 @@
     <div class="flex-1 overflow-auto">
       <div v-if="loading" class="p-8 text-sm text-muted-foreground">Loading…</div>
       <div v-else-if="loadError" class="p-8 text-sm text-red-600">{{ loadError }}</div>
-      <div v-else-if="!filteredTracks.length" class="p-12 text-center text-sm text-muted-foreground">
+      <div
+        v-else-if="!filteredTracks.length"
+        class="p-12 text-center text-sm text-muted-foreground"
+      >
         No models match this filter.
       </div>
 
@@ -45,7 +50,9 @@
           :key="track.id"
           class="rounded-xl border border-border bg-card overflow-hidden shadow-md"
         >
-          <header class="px-5 py-4 bg-primary/[0.22] border-b border-border flex items-baseline gap-3">
+          <header
+            class="px-5 py-4 bg-primary/[0.22] border-b border-border flex items-baseline gap-3"
+          >
             <h2 class="font-bold text-lg tracking-tight">{{ track.label }}</h2>
             <span class="text-xs text-muted-foreground">
               {{ track.versions.length }} {{ track.versions.length === 1 ? 'version' : 'versions' }}
@@ -100,46 +107,38 @@
                     {{ expandedIds.has(v.id) ? '▾' : '▸' }}
                   </td>
                 </tr>
-                <tr
-                  v-if="expandedIds.has(v.id)"
-                  class="border-t border-border bg-muted/10"
-                >
+                <tr v-if="expandedIds.has(v.id)" class="border-t border-border bg-muted/10">
                   <td></td>
                   <td colspan="4" class="px-3 py-4">
                     <div class="grid grid-cols-2 gap-x-8 gap-y-3 max-w-3xl">
                       <div>
-                        <div class="text-[11px] font-semibold uppercase tracking-wider text-muted-foreground mb-1">
+                        <div
+                          class="text-[11px] font-semibold uppercase tracking-wider text-muted-foreground mb-1"
+                        >
                           Parameters
                         </div>
                         <dl class="text-xs grid grid-cols-[auto_1fr] gap-x-4 gap-y-1">
-                          <template
-                            v-for="(value, key) in v.parameters"
-                            :key="String(key)"
-                          >
+                          <template v-for="(value, key) in v.parameters" :key="String(key)">
                             <dt class="text-muted-foreground">{{ String(key) }}</dt>
                             <dd class="font-mono">{{ formatParam(value) }}</dd>
                           </template>
                         </dl>
                       </div>
                       <div>
-                        <div class="text-[11px] font-semibold uppercase tracking-wider text-muted-foreground mb-1">
+                        <div
+                          class="text-[11px] font-semibold uppercase tracking-wider text-muted-foreground mb-1"
+                        >
                           Metrics
                         </div>
                         <dl class="text-xs grid grid-cols-[auto_1fr] gap-x-4 gap-y-1">
-                          <template
-                            v-for="(value, key) in v.metrics"
-                            :key="String(key)"
-                          >
+                          <template v-for="(value, key) in v.metrics" :key="String(key)">
                             <dt class="text-muted-foreground">{{ String(key) }}</dt>
                             <dd class="font-mono">{{ formatMetric(value) }}</dd>
                           </template>
                         </dl>
                       </div>
                     </div>
-                    <div
-                      v-if="v.artifacts.length > 0"
-                      class="mt-4 pt-3 border-t border-border"
-                    >
+                    <div v-if="v.artifacts.length > 0" class="mt-4 pt-3 border-t border-border">
                       <button
                         class="flex items-center gap-1.5 text-[11px] font-semibold uppercase tracking-wider text-muted-foreground hover:text-foreground"
                         @click="toggleArtifacts(v.id)"
@@ -148,10 +147,7 @@
                         <span>Training artifacts ({{ v.artifacts.length }})</span>
                       </button>
                       <div v-if="expandedArtifactIds.has(v.id)" class="mt-3 space-y-4">
-                        <div
-                          v-for="group in groupedArtifacts(v)"
-                          :key="group.kind"
-                        >
+                        <div v-for="group in groupedArtifacts(v)" :key="group.kind">
                           <div class="text-xs font-medium text-foreground mb-1.5">
                             {{ group.label }}
                           </div>
@@ -218,10 +214,7 @@
       <div class="bg-card border border-border rounded-xl shadow-xl w-full max-w-md">
         <header class="px-5 py-3 border-b border-border flex items-center justify-between">
           <h3 class="font-semibold">Upload existing model</h3>
-          <button
-            class="text-muted-foreground hover:text-foreground"
-            @click="uploadOpen = false"
-          >
+          <button class="text-muted-foreground hover:text-foreground" @click="uploadOpen = false">
             ✕
           </button>
         </header>
@@ -262,60 +255,25 @@
             />
           </label>
           <div>
-            <span class="text-xs font-medium text-muted-foreground">Source</span>
-            <div class="mt-1 inline-flex rounded border border-border overflow-hidden text-xs">
-              <button
-                type="button"
-                class="px-3 py-1.5"
-                :class="uploadMode === 'file' ? 'bg-primary text-primary-foreground' : 'bg-background hover:bg-muted'"
-                @click="uploadMode = 'file'"
-              >
-                Single weights file
-              </button>
-              <button
-                type="button"
-                class="px-3 py-1.5"
-                :class="uploadMode === 'folder' ? 'bg-primary text-primary-foreground' : 'bg-background hover:bg-muted'"
-                @click="uploadMode = 'folder'"
-              >
-                Training run folder
-              </button>
-            </div>
-          </div>
-          <label v-if="uploadMode === 'file'" class="block">
             <span class="text-xs font-medium text-muted-foreground">
-              Weights file
+              Source
               <span class="text-red-600">*</span>
             </span>
-            <input
-              type="file"
-              accept=".pt,.pth,.bin"
-              class="mt-1 w-full text-xs"
-              @change="pickUploadFile"
+            <UploadDropZone
+              class="mt-1"
+              v-model:active-tab="uploadMode"
+              :tabs="modelUploadTabs"
+              :has-files="uploadHasFiles"
+              @select="onModelUploadSelect"
             />
-            <span class="text-[11px] text-muted-foreground">
-              .pt / .pth — metadata (img_size, arch, epoch) is auto-extracted if present.
-            </span>
-          </label>
-          <div v-else class="block">
-            <span class="text-xs font-medium text-muted-foreground">
-              Ultralytics run folder
-              <span class="text-red-600">*</span>
-            </span>
-            <input
-              type="file"
-              webkitdirectory
-              directory
-              multiple
-              class="mt-1 w-full text-xs"
-              @change="pickUploadFolder"
-            />
-            <span class="text-[11px] text-muted-foreground">
-              Pick the run folder; the server takes weights/best.pt (fallback last.pt) and
-              ingests recognised siblings (curves, confusion matrix, results.csv, sample tiles, args.yaml).
-            </span>
+            <p
+              v-if="uploadMode === 'file' && uploadFile"
+              class="mt-2 text-[11px] text-muted-foreground font-mono"
+            >
+              {{ uploadFile.name }} · {{ formatFileSize(uploadFile.size) }}
+            </p>
             <div
-              v-if="uploadFolderFiles.length"
+              v-if="uploadMode === 'folder' && uploadFolderFiles.length"
               class="mt-2 rounded border border-border bg-muted/30 p-2 text-[11px] space-y-1"
             >
               <div>
@@ -369,6 +327,7 @@
 import { computed, onMounted, ref } from 'vue'
 import { useRoute } from 'vue-router'
 import PageHeader from '@/components/PageHeader.vue'
+import UploadDropZone, { type UploadTab } from '@/components/UploadDropZone.vue'
 import { api } from '@/api'
 import { useAuthStore } from '@/stores/auth'
 import {
@@ -442,10 +401,13 @@ function groupedArtifacts(v: Version) {
   }))
 }
 
-// Toggle that gates the "Upload model" button. Currently checks staff
-// status from the auth store; flip to `true` to make the button visible
-// to everyone (e.g. for local testing without staff users).
-const canUploadModels = computed(() => auth.user?.is_staff === true)
+// Gates the "Upload model" button. Set REQUIRE_STAFF_FOR_UPLOAD=true to
+// restore the staff-only check; left open while we work out the right
+// permissioning for model uploads.
+const REQUIRE_STAFF_FOR_UPLOAD = false
+const canUploadModels = computed(() =>
+  REQUIRE_STAFF_FOR_UPLOAD ? auth.user?.is_staff === true : !!auth.user,
+)
 
 // --- Upload modal state ---
 const uploadOpen = ref(false)
@@ -461,16 +423,61 @@ const uploadError = ref('')
 const uploadMode = ref<'file' | 'folder'>('file')
 const uploadFolderFiles = ref<File[]>([])
 
+const modelUploadTabs: UploadTab[] = [
+  {
+    key: 'file',
+    label: 'Single weights file',
+    mode: 'single-file',
+    accept: '.pt,.pth,.bin',
+    placeholder: 'Drop a .pt / .pth file or click to browse',
+    helper: '.pt / .pth — metadata (img_size, arch, epoch) is auto-extracted if present.',
+  },
+  {
+    key: 'folder',
+    label: 'Training run folder',
+    mode: 'folder',
+    placeholder: 'Drop an Ultralytics run folder or click to browse',
+    helper: 'Server takes weights/best.pt (or last.pt) and ingests recognised additional files.',
+  },
+]
+
+const uploadHasFiles = computed(() =>
+  uploadMode.value === 'file' ? !!uploadFile.value : uploadFolderFiles.value.length > 0,
+)
+
+function formatFileSize(bytes: number): string {
+  if (bytes < 1024) return `${bytes} B`
+  if (bytes < 1024 * 1024) return `${(bytes / 1024).toFixed(0)} KB`
+  return `${(bytes / 1024 / 1024).toFixed(1)} MB`
+}
+
+function onModelUploadSelect(files: File[], tabKey: string) {
+  if (tabKey === 'file') {
+    uploadFile.value = files[0] ?? null
+  } else if (tabKey === 'folder') {
+    uploadFolderFiles.value = files
+  }
+}
+
 // Names the backend recognises and ingests into ModelArtifact. Used by the
 // preview list so the user sees what will land in the DB before they submit.
 // Kept aligned with _ARTIFACT_NAME_MAP in apps/analysis/views.py — when one
 // changes, update the other.
 const KNOWN_ARTIFACT_NAMES = new Set([
-  'BoxF1_curve.png', 'BoxP_curve.png', 'BoxPR_curve.png', 'BoxR_curve.png',
-  'F1_curve.png', 'P_curve.png', 'PR_curve.png', 'R_curve.png',
-  'confusion_matrix.png', 'confusion_matrix_normalized.png',
-  'labels.jpg', 'labels_correlogram.jpg',
-  'results.csv', 'results.png',
+  'BoxF1_curve.png',
+  'BoxP_curve.png',
+  'BoxPR_curve.png',
+  'BoxR_curve.png',
+  'F1_curve.png',
+  'P_curve.png',
+  'PR_curve.png',
+  'R_curve.png',
+  'confusion_matrix.png',
+  'confusion_matrix_normalized.png',
+  'labels.jpg',
+  'labels_correlogram.jpg',
+  'results.csv',
+  'results.png',
   'args.yaml',
 ])
 const SAMPLE_PREFIXES = ['train_batch', 'val_batch']
@@ -516,7 +523,7 @@ const folderPreview = computed<FolderPreview>(() => {
   }
   return {
     weightsLabel: weights
-      ? ((weights as File & { webkitRelativePath?: string }).webkitRelativePath || weights.name)
+      ? (weights as File & { webkitRelativePath?: string }).webkitRelativePath || weights.name
       : null,
     recognised: recognised.sort((a, b) => a.localeCompare(b)),
     skipped,
@@ -538,16 +545,6 @@ function openUpload() {
   uploadMode.value = 'file'
   uploadError.value = ''
   uploadOpen.value = true
-}
-
-function pickUploadFile(e: Event) {
-  const target = e.target as HTMLInputElement
-  uploadFile.value = target.files?.[0] ?? null
-}
-
-function pickUploadFolder(e: Event) {
-  const target = e.target as HTMLInputElement
-  uploadFolderFiles.value = target.files ? Array.from(target.files) : []
 }
 
 async function submitUpload() {
@@ -667,9 +664,7 @@ async function loadFromApi() {
 }
 
 const filterOptions = computed(() => {
-  const opts = [
-    { value: 'all', label: 'All', count: totalVersions.value },
-  ]
+  const opts = [{ value: 'all', label: 'All', count: totalVersions.value }]
   for (const t of tracks.value) {
     opts.push({ value: t.id, label: t.label, count: t.versions.length })
   }
@@ -681,15 +676,10 @@ const filteredTracks = computed(() => {
   return tracks.value.filter((t) => t.id === kindFilter.value)
 })
 
-const totalVersions = computed(() =>
-  tracks.value.reduce((sum, t) => sum + t.versions.length, 0),
-)
+const totalVersions = computed(() => tracks.value.reduce((sum, t) => sum + t.versions.length, 0))
 
 const activeCount = computed(() =>
-  tracks.value.reduce(
-    (sum, t) => sum + t.versions.filter((v) => v.is_active).length,
-    0,
-  ),
+  tracks.value.reduce((sum, t) => sum + t.versions.filter((v) => v.is_active).length, 0),
 )
 
 function mainMetric(v: Version, metricLabel: string): number | undefined {
@@ -748,5 +738,4 @@ function formatParam(value: unknown): string {
   }
   return String(value)
 }
-
 </script>
