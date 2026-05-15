@@ -7,6 +7,7 @@ from .views import (
     InferenceRunDetailView,
     InferenceRunListCreateView,
     InferenceRunRecomputeExclusionsView,
+    ModelVersionDetailView,
     ModelVersionListCreateView,
     ModelVersionSetActiveView,
     TrainingJobCancelView,
@@ -19,6 +20,11 @@ urlpatterns = [
         'models/',
         ModelVersionListCreateView.as_view(),
         name='model-version-list-create',
+    ),
+    path(
+        'models/<int:pk>/',
+        ModelVersionDetailView.as_view(),
+        name='model-version-detail',
     ),
     path(
         'models/<int:pk>/set-active/',

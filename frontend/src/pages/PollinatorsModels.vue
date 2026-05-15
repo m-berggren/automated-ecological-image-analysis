@@ -104,7 +104,24 @@
                     {{ formatRelative(v.trained_at) }}
                   </td>
                   <td class="px-3 py-3 text-right text-muted-foreground">
-                    {{ expandedIds.has(v.id) ? '▾' : '▸' }}
+                    <div class="flex items-center justify-end gap-3" @click.stop>
+                      <button
+                        v-if="canDeleteModels"
+                        :disabled="deletingId === v.id"
+                        :title="
+                          v.is_active
+                            ? 'Cannot delete the active version. Pick another default first.'
+                            : `Delete ${v.version_name}`
+                        "
+                        class="text-muted-foreground hover:text-red-600 disabled:opacity-40 disabled:cursor-not-allowed"
+                        @click="confirmDelete(v)"
+                      >
+                        <Trash2 class="w-4 h-4" />
+                      </button>
+                      <span @click="toggleExpanded(v.id)" class="cursor-pointer">
+                        {{ expandedIds.has(v.id) ? '▾' : '▸' }}
+                      </span>
+                    </div>
                   </td>
                 </tr>
                 <tr v-if="expandedIds.has(v.id)" class="border-t border-border bg-muted/10">
@@ -118,8 +135,11 @@
                           Parameters
                         </div>
                         <dl class="text-xs grid grid-cols-[auto_1fr] gap-x-4 gap-y-1">
-                          <template v-for="(value, key) in v.parameters" :key="String(key)">
-                            <dt class="text-muted-foreground">{{ String(key) }}</dt>
+                          <template
+                            v-for="[key, value] in visibleParams(v.parameters)"
+                            :key="key"
+                          >
+                            <dt class="text-muted-foreground">{{ key }}</dt>
                             <dd class="font-mono">{{ formatParam(value) }}</dd>
                           </template>
                         </dl>
@@ -328,6 +348,7 @@ import { computed, onMounted, ref } from 'vue'
 import { useRoute } from 'vue-router'
 import PageHeader from '@/components/PageHeader.vue'
 import UploadDropZone, { type UploadTab } from '@/components/UploadDropZone.vue'
+import { Trash2 } from 'lucide-vue-next'
 import { api } from '@/api'
 import { useAuthStore } from '@/stores/auth'
 import {
@@ -408,6 +429,28 @@ const REQUIRE_STAFF_FOR_UPLOAD = false
 const canUploadModels = computed(() =>
   REQUIRE_STAFF_FOR_UPLOAD ? auth.user?.is_staff === true : !!auth.user,
 )
+const canDeleteModels = canUploadModels
+
+const deletingId = ref<number | null>(null)
+
+// Parameters surfaced from the trainer that don't add value to the
+// per-version detail view: yolo_model/yolo_data are always the same
+// reference paths, and `epoch` is the legacy in-checkpoint name we now
+// expose as `yolo_epochs`.
+const HIDDEN_PARAM_KEYS = new Set(['yolo_model', 'yolo_data'])
+
+function visibleParams(
+  params: Record<string, unknown>,
+): Array<[string, unknown]> {
+  const hasYoloEpochs = 'yolo_epochs' in params
+  return Object.entries(params).filter(([key]) => {
+    if (HIDDEN_PARAM_KEYS.has(key)) return false
+    // Drop the raw `epoch` field when yolo_epochs already covers it; keep
+    // it for non-YOLO models that don't surface yolo_epochs.
+    if (key === 'epoch' && hasYoloEpochs) return false
+    return true
+  })
+}
 
 // --- Upload modal state ---
 const uploadOpen = ref(false)
@@ -721,6 +764,30 @@ async function setDefault(track: Track, v: Version) {
       if (prev) prev.is_active = true
     }
     loadError.value = e instanceof Error ? e.message : String(e)
+  }
+}
+
+async function confirmDelete(v: Version) {
+  if (v.is_active) {
+    loadError.value = 'Cannot delete the active version. Pick another default first.'
+    return
+  }
+  if (deletingId.value !== null) return
+  if (!window.confirm(`Delete model "${v.version_name}"? This cannot be undone.`)) {
+    return
+  }
+  deletingId.value = v.id
+  try {
+    const res = await api(`/api/analysis/models/${v.id}/`, { method: 'DELETE' })
+    if (!res.ok) {
+      const data = await res.json().catch(() => ({}))
+      throw new Error(data.error || data.detail || `HTTP ${res.status}`)
+    }
+    await loadFromApi()
+  } catch (e) {
+    loadError.value = e instanceof Error ? e.message : String(e)
+  } finally {
+    deletingId.value = null
   }
 }
 
