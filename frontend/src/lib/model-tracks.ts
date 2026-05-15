@@ -2,6 +2,14 @@
 // grouped Track shape the Models and Training pages render. Track ids match
 // ModelKind values so filter UIs can pass them straight through.
 
+export interface ModelArtifact {
+  id: number
+  kind: string
+  caption: string
+  url: string | null
+  created_at: string
+}
+
 export interface BackendModelVersion {
   id: number
   module: string
@@ -11,6 +19,7 @@ export interface BackendModelVersion {
   metrics: Record<string, number>
   parameters: Record<string, unknown>
   created_at: string
+  artifacts?: ModelArtifact[]
 }
 
 export interface TrackVersion {
@@ -20,6 +29,7 @@ export interface TrackVersion {
   metrics: Record<string, number>
   parameters: Record<string, unknown>
   trained_at: string
+  artifacts: ModelArtifact[]
 }
 
 export interface Track {
@@ -70,6 +80,7 @@ export function tracksFromVersions(versions: BackendModelVersion[]): Track[] {
       metrics: v.metrics,
       parameters: v.parameters,
       trained_at: v.created_at,
+      artifacts: v.artifacts ?? [],
     }))
     const active = trackVersions.find((v) => v.is_active)
     return {

@@ -2,7 +2,7 @@
   <PageHeader title="Upload" subtitle="Configure and upload a camera-trap folder" />
   <PollinatorsStepper current="upload" />
 
-  <div class="flex-1 p-8 space-y-6 max-w-3xl mx-auto w-full">
+  <div class="flex-1 min-h-0 overflow-y-auto p-8 space-y-6 max-w-3xl mx-auto w-full">
     <!-- Run details -->
     <section class="rounded-xl border border-border bg-surface p-5 space-y-3">
       <h2 class="text-sm font-semibold">Run details</h2>
@@ -76,7 +76,10 @@
           <span class="text-xs text-muted-foreground">YOLO confidence</span>
           <input
             v-model.number="config.yolo.confidence"
-            type="number" min="0" max="1" step="0.05"
+            type="number"
+            min="0"
+            max="1"
+            step="0.05"
             class="w-full px-2 py-1.5 rounded border border-border bg-background text-sm font-mono"
           />
         </label>
@@ -84,7 +87,10 @@
           <span class="text-xs text-muted-foreground">Binary confidence</span>
           <input
             v-model.number="config.binary_classifier.confidence"
-            type="number" min="0" max="1" step="0.05"
+            type="number"
+            min="0"
+            max="1"
+            step="0.05"
             class="w-full px-2 py-1.5 rounded border border-border bg-background text-sm font-mono"
           />
         </label>
@@ -92,7 +98,10 @@
           <span class="text-xs text-muted-foreground">Group confidence</span>
           <input
             v-model.number="config.group_classifier.confidence"
-            type="number" min="0" max="1" step="0.05"
+            type="number"
+            min="0"
+            max="1"
+            step="0.05"
             class="w-full px-2 py-1.5 rounded border border-border bg-background text-sm font-mono"
           />
         </label>
@@ -108,7 +117,8 @@
           <span class="text-xs text-muted-foreground">Start at image</span>
           <input
             v-model.number="config.start_at_image"
-            type="number" min="1"
+            type="number"
+            min="1"
             class="w-20 px-2 py-1 rounded border border-border bg-background text-sm font-mono"
           />
         </label>
@@ -121,16 +131,16 @@
       >
         {{ showAdvanced ? '▾ Hide advanced' : '▸ Advanced' }}
       </button>
-      <div
-        v-if="showAdvanced"
-        class="border-t border-border pt-3 space-y-3"
-      >
+      <div v-if="showAdvanced" class="border-t border-border pt-3 space-y-3">
         <div class="grid grid-cols-1 md:grid-cols-3 gap-4">
           <label class="space-y-1">
             <span class="text-xs text-muted-foreground">Crop padding</span>
             <input
               v-model.number="config.preprocessing.crop_pad_frac"
-              type="number" min="0" max="2" step="0.1"
+              type="number"
+              min="0"
+              max="2"
+              step="0.1"
               class="w-full px-2 py-1.5 rounded border border-border bg-background text-sm font-mono"
             />
           </label>
@@ -138,7 +148,10 @@
             <span class="text-xs text-muted-foreground">Min contour area (px²)</span>
             <input
               v-model.number="config.preprocessing.min_contour_area"
-              type="number" min="50" max="5000" step="50"
+              type="number"
+              min="50"
+              max="5000"
+              step="50"
               class="w-full px-2 py-1.5 rounded border border-border bg-background text-sm font-mono"
             />
           </label>
@@ -146,7 +159,10 @@
             <span class="text-xs text-muted-foreground">Max contour area (px²)</span>
             <input
               v-model.number="config.preprocessing.max_contour_area"
-              type="number" min="1000" max="200000" step="1000"
+              type="number"
+              min="1000"
+              max="200000"
+              step="1000"
               class="w-full px-2 py-1.5 rounded border border-border bg-background text-sm font-mono"
             />
           </label>
@@ -156,7 +172,9 @@
             <span class="text-xs text-muted-foreground">Background sample size</span>
             <input
               v-model.number="config.preprocessing.background_sample_size"
-              type="number" min="0" max="500"
+              type="number"
+              min="0"
+              max="500"
               class="w-full px-2 py-1.5 rounded border border-border bg-background text-sm font-mono"
             />
           </label>
@@ -164,7 +182,10 @@
             <span class="text-xs text-muted-foreground">Sunny shutter threshold</span>
             <input
               v-model.number="config.preprocessing.sunny_shutter_threshold"
-              type="number" min="50" max="500" step="10"
+              type="number"
+              min="50"
+              max="500"
+              step="10"
               class="w-full px-2 py-1.5 rounded border border-border bg-background text-sm font-mono"
             />
           </label>
@@ -213,36 +234,45 @@
         /
         <label class="text-primary cursor-pointer hover:underline">
           browse folder
+          <!-- webkitdirectory makes the OS dialog let you pick a folder
+               (instead of files). Without it the link is a no-op. -->
           <input
             ref="folderInput"
             type="file"
             multiple
+            webkitdirectory
+            directory
             class="hidden"
             @change="onPick($event, true)"
           />
         </label>
       </p>
-      <p class="text-xs text-muted-foreground mt-1">
-        JPG, PNG — up to ~12,000 images per run
-      </p>
+      <p class="text-xs text-muted-foreground mt-1">JPG, PNG — up to ~12,000 images per run</p>
     </section>
 
-    <!-- Upload progress + start -->
-    <section
-      v-if="uploader && uploader.items.length"
-      class="rounded-xl border border-border bg-surface"
-    >
+    <!-- Upload progress + start. Always rendered so the Start button is
+         visible even before any image has been picked; it's disabled with
+         an explanatory hint when there's nothing to run on yet. -->
+    <section class="rounded-xl border border-border bg-surface">
       <header class="flex items-center justify-between px-5 py-3 border-b border-border">
         <div class="text-sm">
-          <span class="font-medium">{{ doneCount }}</span>
-          <span class="text-muted-foreground"> of </span>
-          <span class="font-medium">{{ uploader.items.length }}</span>
-          <span class="text-muted-foreground"> uploaded</span>
-          <span v-if="failedCount" class="ml-3 text-red-600">{{ failedCount }} failed</span>
+          <template v-if="uploader && uploader.items.length">
+            <span class="font-medium">{{ doneCount }}</span>
+            <span class="text-muted-foreground"> of </span>
+            <span class="font-medium">{{ uploader.items.length }}</span>
+            <span class="text-muted-foreground"> uploaded</span>
+            <span v-if="failedCount" class="ml-3 text-red-600">{{ failedCount }} failed</span>
+          </template>
+          <template v-else>
+            <span class="text-muted-foreground">
+              Drop or browse images above, then start detection.
+            </span>
+          </template>
         </div>
         <div class="flex items-center gap-2">
           <button
             :disabled="!doneCount || starting"
+            :title="!doneCount ? 'Upload at least one image first' : ''"
             class="px-3 py-1.5 rounded-md text-sm font-medium bg-primary text-primary-foreground hover:bg-primary/90 disabled:opacity-50 disabled:cursor-not-allowed"
             @click="startDetection"
           >
@@ -252,7 +282,10 @@
         </div>
       </header>
 
-      <ul v-if="recentFailures.length" class="max-h-60 overflow-auto divide-y divide-border">
+      <ul
+        v-if="recentFailures.length"
+        class="max-h-60 overflow-auto divide-y divide-border"
+      >
         <li
           v-for="item in recentFailures"
           :key="item.id"
@@ -269,8 +302,12 @@
           </button>
         </li>
       </ul>
-      <p v-else class="px-5 py-3 text-xs text-muted-foreground">
-        No failures. (Per-file list hidden at this scale — failures will appear here as they happen.)
+      <p
+        v-else-if="uploader && uploader.items.length"
+        class="px-5 py-3 text-xs text-muted-foreground"
+      >
+        No failures. (Per-file list hidden at this scale — failures will appear here as they
+        happen.)
       </p>
     </section>
 
@@ -331,7 +368,7 @@ interface PipelineConfig {
 }
 
 const config = ref<PipelineConfig>({
-  yolo: { model_version_id: null, confidence: 0.4 },
+  yolo: { model_version_id: null, confidence: 0.6 },
   binary_classifier: { model_version_id: null, confidence: 0.5 },
   group_classifier: { model_version_id: null, confidence: 0.6 },
   preprocessing: {
@@ -370,8 +407,7 @@ onMounted(async () => {
       detectorModels.value = all.filter((m) => m.kind === 'detector')
       binaryModels.value = all.filter((m) => m.kind === 'binary_classifier')
       groupModels.value = all.filter((m) => m.kind === 'group_classifier')
-      const pickDefault = (list: ModelVersion[]) =>
-        list.find((m) => m.is_active) ?? list[0]
+      const pickDefault = (list: ModelVersion[]) => list.find((m) => m.is_active) ?? list[0]
       const yoloDefault = pickDefault(detectorModels.value)
       const binaryDefault = pickDefault(binaryModels.value)
       const groupDefault = pickDefault(groupModels.value)
@@ -414,9 +450,7 @@ const IMAGE_EXT_RE = /\.(jpe?g|png|webp)$/i
 async function handleFiles(files: File[]) {
   // Folder drops can include non-image files (subfolders' siblings,
   // hidden system files like .DS_Store, etc.). Drop them before enqueueing.
-  const images = files.filter(
-    (f) => f.type.startsWith('image/') || IMAGE_EXT_RE.test(f.name),
-  )
+  const images = files.filter((f) => f.type.startsWith('image/') || IMAGE_EXT_RE.test(f.name))
   if (!images.length) return
   const id = await ensureUpload()
   if (!id || !uploader.value) return
@@ -456,7 +490,7 @@ async function onDrop(e: DragEvent) {
 async function collectFiles(entry: FileSystemEntry, out: File[]): Promise<void> {
   if (entry.isFile) {
     const file = await new Promise<File>((resolve, reject) => {
-      (entry as FileSystemFileEntry).file(resolve, reject)
+      ;(entry as FileSystemFileEntry).file(resolve, reject)
     })
     out.push(file)
     return

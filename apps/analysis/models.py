@@ -387,6 +387,15 @@ class Detection(models.Model):
     )
     reviewed_at = models.DateTimeField(null=True, blank=True)
 
+    excluded_from_export = models.BooleanField(
+        default=False,
+        help_text=(
+            'When True, this detection is hidden from the CSV export counts '
+            'even if it was accepted by the reviewer. Used by the Export '
+            'step to drop duplicates (same insect detected twice).'
+        ),
+    )
+
     class Meta:
         indexes = [
             models.Index(fields=['inference_run', 'status']),

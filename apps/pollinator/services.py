@@ -144,6 +144,12 @@ def run_inference_pipeline(run: InferenceRun) -> None:
         binary_thr = float(
             (config.get('binary_classifier') or {}).get('confidence', 0.5)
         )
+        # Group threshold defaults to 0 -> keep every group call (current
+        # behaviour). When the upload sets it, sub-threshold group calls are
+        # stripped to insectnet_class='' inside the pipeline.
+        group_thr = float(
+            (config.get('group_classifier') or {}).get('confidence', 0.0)
+        )
         # Frontend start_at_image is 1-based; library skip_first_n is 0-based.
         skip_first = max(0, int(config.get('start_at_image', 1)) - 1)
 
@@ -169,6 +175,8 @@ def run_inference_pipeline(run: InferenceRun) -> None:
             output_dir = Path(settings.MEDIA_ROOT) / 'runs' / str(run.pk)
             output_dir.mkdir(parents=True, exist_ok=True)
 
+            progress_cb = _make_progress_callback(run.pk)
+
             result = _run_pipeline(
                 image_dir=str(tmp),
                 output_dir=str(output_dir),
@@ -180,8 +188,9 @@ def run_inference_pipeline(run: InferenceRun) -> None:
                 yolo_slice_size=yolo_slice_size,
                 yolo_overlap=yolo_overlap,
                 binary_threshold=binary_thr,
+                group_threshold=group_thr,
                 skip_first_n=skip_first,
-                progress_callback=_make_progress_callback(run.pk),
+                progress_callback=progress_cb,
             )
 
         json_path = Path(result['output_json'])
@@ -243,13 +252,47 @@ def run_inference_pipeline(run: InferenceRun) -> None:
 
         # Render the per-detection crop files after the rows are committed
         # so we have stable detection pks for the filenames, and so a PIL
-        # failure on one image can't roll back the whole run.
+        # failure on one image can't roll back the whole run. Ping the
+        # progress callback every 50 crops so the activity log advances
+        # past the final pipeline tick instead of looking frozen.
+        total_dets = len(created)
+        n_images = int(run_summary.get('n_images', len(images)))
+        if total_dets:
+            try:
+                progress_cb(n_images, n_images, f'Writing {total_dets} crops...')
+            except RunCancelled:
+                pass
         crop_updates: list[Detection] = []
-        for det in created:
+        for idx, det in enumerate(created, start=1):
             if write_detection_crop(det):
                 crop_updates.append(det)
+            if idx % 50 == 0 or idx == total_dets:
+                # Heavy work is already done; finishing the remaining crops
+                # is cheap. Don't propagate a cancel here — we'd just orphan
+                # half-written files. The post-loop status check below honours
+                # the cancellation request instead.
+                try:
+                    progress_cb(n_images, n_images, f'Crops: {idx}/{total_dets}')
+                except RunCancelled:
+                    pass
         if crop_updates:
             Detection.objects.bulk_update(crop_updates, ['crop'])
+
+        # If cancel landed while crops were being written, preserve the
+        # CANCELLED status instead of overwriting with COMPLETED. The user
+        # gets a cancelled run with detections + crops they can still review
+        # or delete; either is more useful than discarding everything.
+        current_status = (
+            InferenceRun.objects.filter(pk=run.pk)
+            .values_list('status', flat=True)
+            .first()
+        )
+        if current_status == JobStatus.CANCELLED:
+            logger.info(
+                f'Run {run.pk} cancelled after inference; '
+                f'detections + crops preserved'
+            )
+            return
 
         run.status = JobStatus.COMPLETED
         run.completed_at = timezone.now()
