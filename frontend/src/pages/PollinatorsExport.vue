@@ -97,6 +97,11 @@
                 class="cursor-pointer"
                 @click="toggleExclude(d)"
               />
+              <ROIOverlay
+                :bbox="roiBbox"
+                :image-w="card.naturalW"
+                :image-h="card.naturalH"
+              />
             </svg>
             <div
               v-else
@@ -147,6 +152,7 @@ import { computed, onMounted, ref } from 'vue'
 import { RouterLink, useRoute } from 'vue-router'
 import PageHeader from '@/components/PageHeader.vue'
 import PollinatorsStepper from '@/components/PollinatorsStepper.vue'
+import ROIOverlay from '@/components/ROIOverlay.vue'
 import { api } from '@/api'
 
 type ClassName = 'fly' | 'bumblebee' | 'butterfly' | 'other'
@@ -179,6 +185,11 @@ interface RunRow {
   id: number
   name: string
   status: string
+  config?: {
+    preprocessing?: {
+      roi_bbox?: [number, number, number, number] | null
+    }
+  }
 }
 
 const CLASSES: ClassName[] = ['fly', 'bumblebee', 'butterfly', 'other']
@@ -216,6 +227,11 @@ function effective(d: Detection): ClassName | null {
 function strokeFor(d: Detection): string {
   return CLASS_COLORS[effective(d) ?? 'other']
 }
+
+const roiBbox = computed<[number, number, number, number] | null>(() => {
+  const r = run.value?.config?.preprocessing?.roi_bbox
+  return r && r.length === 4 ? r : null
+})
 
 // Only accepted detections matter for export. Rejected/unsure/unreviewed
 // don't count in the CSV anyway, so don't clutter the Export view with

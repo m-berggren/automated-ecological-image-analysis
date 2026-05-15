@@ -311,6 +311,11 @@
                   stroke="#ef4444"
                   :stroke-width="bboxStrokeWidth"
                 />
+                <ROIOverlay
+                  :bbox="roiBbox"
+                  :image-w="sourceImage.w"
+                  :image-h="sourceImage.h"
+                />
               </svg>
               <span
                 v-else
@@ -506,6 +511,12 @@
             :stroke-width="bboxStrokeWidth"
             vector-effect="non-scaling-stroke"
           />
+          <ROIOverlay
+            :bbox="roiBbox"
+            :image-w="sourceImage.w"
+            :image-h="sourceImage.h"
+            non-scaling-stroke
+          />
         </g>
       </svg>
       <button
@@ -526,6 +537,7 @@ import { computed, nextTick, onMounted, onUnmounted, ref, watch } from 'vue'
 import { useRoute } from 'vue-router'
 import PageHeader from '@/components/PageHeader.vue'
 import PollinatorsStepper from '@/components/PollinatorsStepper.vue'
+import ROIOverlay from '@/components/ROIOverlay.vue'
 import { api } from '@/api'
 
 type ClassName = 'fly' | 'bumblebee' | 'butterfly' | 'other'
@@ -575,6 +587,9 @@ interface ReviewBundle {
     config?: {
       yolo?: { confidence?: number }
       binary_classifier?: { confidence?: number }
+      preprocessing?: {
+        roi_bbox?: [number, number, number, number] | null
+      }
     }
   }
   detections: Detection[]
@@ -911,6 +926,11 @@ const bboxOutline = computed(() => {
     width: b.w + 2 * margin,
     height: b.h + 2 * margin,
   }
+})
+
+const roiBbox = computed<[number, number, number, number] | null>(() => {
+  const r = run.value?.config?.preprocessing?.roi_bbox
+  return r && r.length === 4 ? r : null
 })
 
 // Fullscreen zoom modal. State lives in viewBox units; the SVG <g> is
