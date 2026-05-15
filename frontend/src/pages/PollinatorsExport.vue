@@ -11,11 +11,7 @@
       class="px-8 py-3 border-b border-border bg-surface flex items-center gap-4 flex-wrap text-sm"
     >
       <span class="text-muted-foreground">Will export:</span>
-      <span
-        v-for="row in classCounts"
-        :key="row.label"
-        class="inline-flex items-center gap-1.5"
-      >
+      <span v-for="row in classCounts" :key="row.label" class="inline-flex items-center gap-1.5">
         <span class="w-2 h-2 rounded-full" :style="{ backgroundColor: row.color }" />
         <span class="font-mono">{{ row.count }}</span>
         <span class="text-muted-foreground">{{ row.label.toLowerCase() }}</span>
@@ -23,18 +19,42 @@
       <span class="text-muted-foreground">·</span>
       <span class="font-mono">{{ totalIncluded }}</span>
       <span class="text-muted-foreground">total ({{ totalExcluded }} excluded)</span>
-      <button
-        class="ml-auto px-3 py-1.5 rounded-md text-sm font-medium border border-border hover:bg-muted disabled:opacity-50"
-        :disabled="exporting || !run"
-        @click="downloadCsv"
+      <span
+        v-if="loadProgress.total && loadProgress.loaded < loadProgress.total"
+        class="text-muted-foreground italic"
       >
-        {{ exporting ? 'Exporting…' : 'Download CSV' }}
-      </button>
+        loading {{ loadProgress.loaded }}/{{ loadProgress.total }}…
+      </span>
+      <div class="ml-auto flex items-center gap-2">
+        <button
+          class="px-3 py-1.5 rounded-md text-sm font-medium border border-border hover:bg-muted disabled:opacity-50"
+          :disabled="downloading !== null || !run"
+          @click="downloadExport('csv')"
+        >
+          {{ downloading === 'csv' ? 'Downloading…' : 'CSV' }}
+        </button>
+        <button
+          class="px-3 py-1.5 rounded-md text-sm font-medium border border-border hover:bg-muted disabled:opacity-50"
+          :disabled="downloading !== null || !run"
+          @click="downloadExport('crops')"
+        >
+          {{ downloading === 'crops' ? 'Downloading…' : 'Crops (zip)' }}
+        </button>
+        <button
+          class="px-3 py-1.5 rounded-md text-sm font-medium border border-border hover:bg-muted disabled:opacity-50"
+          :disabled="downloading !== null || !run"
+          @click="downloadExport('annotated')"
+        >
+          {{ downloading === 'annotated' ? 'Downloading…' : 'Annotated images (zip)' }}
+        </button>
+      </div>
     </header>
 
     <div v-if="!imageCards.length" class="flex-1 p-12 text-center text-sm text-muted-foreground">
       No accepted detections in this run yet. Confirm or correct some in
-      <RouterLink :to="`/pollinators/runs/${runId}/review`" class="text-primary hover:underline">Review</RouterLink>
+      <RouterLink :to="`/pollinators/runs/${runId}/review`" class="text-primary hover:underline"
+        >Review</RouterLink
+      >
       first.
     </div>
 
@@ -62,11 +82,7 @@
               preserveAspectRatio="xMidYMid meet"
               class="absolute inset-0 w-full h-full"
             >
-              <image
-                :href="card.sourceUrl"
-                :width="card.naturalW"
-                :height="card.naturalH"
-              />
+              <image :href="card.sourceUrl" :width="card.naturalW" :height="card.naturalH" />
               <rect
                 v-for="d in card.detections"
                 :key="d.id"
@@ -82,7 +98,10 @@
                 @click="toggleExclude(d)"
               />
             </svg>
-            <div v-else class="absolute inset-0 flex items-center justify-center text-xs text-muted-foreground">
+            <div
+              v-else
+              class="absolute inset-0 flex items-center justify-center text-xs text-muted-foreground"
+            >
               source unavailable
             </div>
           </div>
@@ -92,9 +111,9 @@
               v-for="d in card.detections"
               :key="d.id"
               class="relative aspect-square rounded-md overflow-hidden border-2 transition-colors focus:outline-none"
-              :class="d.excluded_from_export
-                ? 'border-red-500'
-                : 'border-transparent hover:border-border'"
+              :class="
+                d.excluded_from_export ? 'border-red-500' : 'border-transparent hover:border-border'
+              "
               :title="`${classLabel(effective(d))} · ${(d.confidence ?? 0).toFixed(2)}`"
               @click="toggleExclude(d)"
             >
@@ -177,7 +196,9 @@ const loadError = ref('')
 const run = ref<RunRow | null>(null)
 const detections = ref<Detection[]>([])
 const naturalSize = ref<Record<string, { w: number; h: number }>>({})
-const exporting = ref(false)
+type DownloadKind = 'csv' | 'crops' | 'annotated'
+const downloading = ref<DownloadKind | null>(null)
+const loadProgress = ref({ loaded: 0, total: 0 })
 
 const headerTitle = computed(() =>
   run.value ? `Export · ${run.value.name || `Run #${run.value.id}`}` : 'Export',
@@ -258,50 +279,74 @@ const classCounts = computed(() => {
   }))
 })
 
-const totalIncluded = computed(() =>
-  acceptedDetections.value.filter((d) => !d.excluded_from_export).length,
+const totalIncluded = computed(
+  () => acceptedDetections.value.filter((d) => !d.excluded_from_export).length,
 )
-const totalExcluded = computed(() =>
-  acceptedDetections.value.filter((d) => d.excluded_from_export).length,
+const totalExcluded = computed(
+  () => acceptedDetections.value.filter((d) => d.excluded_from_export).length,
 )
+
+interface PageResponse {
+  count: number
+  next: string | null
+  results: Detection[]
+}
+
+function preloadDims(d: Detection, seen: Set<string>) {
+  if (!d.source_image_url || seen.has(d.source_image_filename)) return
+  seen.add(d.source_image_filename)
+  const fname = d.source_image_filename
+  const url = d.source_image_url
+  const img = new Image()
+  img.onload = () => {
+    naturalSize.value = {
+      ...naturalSize.value,
+      [fname]: { w: img.naturalWidth, h: img.naturalHeight },
+    }
+  }
+  img.src = url
+}
+
+async function fetchAllPages() {
+  // First page resolves loading=false so the user gets immediate feedback.
+  // Subsequent pages stream in via reactive push to detections.value, and
+  // image cards re-render incrementally.
+  const seen = new Set<string>()
+  let next: string | null = `/api/pollinator/runs/${runId}/detections/`
+  let firstPage = true
+  while (next) {
+    // Strip absolute prefix when DRF returns the full URL — api() expects
+    // a relative path.
+    const url: string = next.startsWith('http') ? next.replace(/^https?:\/\/[^/]+/, '') : next
+    const res = await api(url)
+    if (!res.ok) {
+      loadError.value = `Detections: HTTP ${res.status}`
+      return
+    }
+    const page = (await res.json()) as PageResponse
+    for (const d of page.results) preloadDims(d, seen)
+    detections.value = detections.value.concat(page.results)
+    loadProgress.value = { loaded: detections.value.length, total: page.count }
+    next = page.next
+    if (firstPage) {
+      loading.value = false
+      firstPage = false
+    }
+  }
+}
 
 onMounted(async () => {
   try {
-    const [runRes, detRes] = await Promise.all([
-      api(`/api/analysis/runs/${runId}/`),
-      api(`/api/pollinator/runs/${runId}/detections/`),
-    ])
+    const runRes = await api(`/api/analysis/runs/${runId}/`)
     if (!runRes.ok) {
       loadError.value = `Run: HTTP ${runRes.status}`
-      return
-    }
-    if (!detRes.ok) {
-      loadError.value = `Detections: HTTP ${detRes.status}`
+      loading.value = false
       return
     }
     run.value = await runRes.json()
-    detections.value = await detRes.json()
-    // Pre-load source-image dimensions per image so the SVG viewBox can be
-    // set correctly without waiting for in-template <image> onload (SVG
-    // <image> doesn't have a reliable onload across browsers).
-    const seen = new Set<string>()
-    for (const d of detections.value) {
-      if (seen.has(d.source_image_filename) || !d.source_image_url) continue
-      seen.add(d.source_image_filename)
-      const fname = d.source_image_filename
-      const url = d.source_image_url
-      const img = new Image()
-      img.onload = () => {
-        naturalSize.value = {
-          ...naturalSize.value,
-          [fname]: { w: img.naturalWidth, h: img.naturalHeight },
-        }
-      }
-      img.src = url
-    }
+    await fetchAllPages()
   } catch (e) {
     loadError.value = e instanceof Error ? e.message : String(e)
-  } finally {
     loading.value = false
   }
 })
@@ -320,20 +365,30 @@ async function toggleExclude(d: Detection) {
   }
 }
 
-async function downloadCsv() {
-  if (!run.value || exporting.value) return
-  exporting.value = true
+async function downloadExport(kind: DownloadKind) {
+  if (!run.value || downloading.value !== null) return
+  downloading.value = kind
   try {
-    const res = await api(`/api/pollinator/runs/${run.value.id}/export.csv`)
+    const path = {
+      csv: `/api/pollinator/runs/${run.value.id}/export.csv`,
+      crops: `/api/pollinator/runs/${run.value.id}/export-crops.zip`,
+      annotated: `/api/pollinator/runs/${run.value.id}/export-annotated.zip`,
+    }[kind]
+    const res = await api(path)
     if (!res.ok) {
-      loadError.value = `Export: HTTP ${res.status}`
+      loadError.value = `Export (${kind}): HTTP ${res.status}`
       return
     }
     const blob = await res.blob()
+    const filename = {
+      csv: `run-${run.value.id}-images.csv`,
+      crops: `run-${run.value.id}-crops.zip`,
+      annotated: `run-${run.value.id}-annotated.zip`,
+    }[kind]
     const url = URL.createObjectURL(blob)
     const a = document.createElement('a')
     a.href = url
-    a.download = `run-${run.value.id}-images.csv`
+    a.download = filename
     document.body.appendChild(a)
     a.click()
     a.remove()
@@ -341,7 +396,7 @@ async function downloadCsv() {
   } catch (e) {
     loadError.value = e instanceof Error ? e.message : String(e)
   } finally {
-    exporting.value = false
+    downloading.value = null
   }
 }
 </script>

@@ -16,6 +16,7 @@ from rest_framework.views import APIView
 from apps.datasets.models import UploadStatus
 from apps.pollinator.services import spawn_inference_pipeline
 
+from .engulfment import apply_engulfment_exclusions
 from .models import (
     Detection,
     InferenceRun,
@@ -203,8 +204,12 @@ class ModelVersionListCreateView(generics.ListAPIView):
     pagination_class = None
     parser_classes = [MultiPartParser, FormParser, JSONParser]
 
+    # Flip back to True to restore staff-only model upload (frontend has the
+    # mirror flag REQUIRE_STAFF_FOR_UPLOAD in PollinatorsModels.vue).
+    REQUIRE_STAFF_FOR_UPLOAD = False
+
     def get_permissions(self):
-        if self.request.method == 'POST':
+        if self.request.method == 'POST' and self.REQUIRE_STAFF_FOR_UPLOAD:
             return [IsAdminUser()]
         return super().get_permissions()
 
@@ -520,6 +525,25 @@ class DetectionExclusionView(APIView):
         d.excluded_from_export = excluded
         d.save(update_fields=['excluded_from_export'])
         return Response({'id': d.pk, 'excluded_from_export': excluded})
+
+
+class InferenceRunRecomputeExclusionsView(APIView):
+    """POST /api/analysis/runs/<id>/recompute-exclusions/
+
+    Re-runs engulfment auto-exclude over the run's detections. Safe to call
+    on completed runs; add-only (a manually-cleared exclusion stays cleared
+    only until this is invoked, then any qualifying engulfing bbox is
+    re-marked). Returns the number of rows newly excluded.
+    """
+
+    def post(self, request: Request, pk: int) -> Response:
+        if not InferenceRun.objects.filter(pk=pk).exists():
+            return Response(
+                {'error': 'Run not found'},
+                status=status.HTTP_404_NOT_FOUND,
+            )
+        excluded = apply_engulfment_exclusions(pk)
+        return Response({'excluded': excluded})
 
 
 class DetectionBulkView(APIView):

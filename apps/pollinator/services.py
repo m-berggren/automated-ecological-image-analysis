@@ -28,6 +28,7 @@ from django.utils import timezone
 
 from apps.analysis.cancellation import RunCancelled
 from apps.analysis.crops import write_detection_crop
+from apps.analysis.engulfment import apply_engulfment_exclusions
 from apps.analysis.models import (
     Detection,
     DetectionStatus,
@@ -147,9 +148,7 @@ def run_inference_pipeline(run: InferenceRun) -> None:
         # Group threshold defaults to 0 -> keep every group call (current
         # behaviour). When the upload sets it, sub-threshold group calls are
         # stripped to insectnet_class='' inside the pipeline.
-        group_thr = float(
-            (config.get('group_classifier') or {}).get('confidence', 0.0)
-        )
+        group_thr = float((config.get('group_classifier') or {}).get('confidence', 0.0))
         # Frontend start_at_image is 1-based; library skip_first_n is 0-based.
         skip_first = max(0, int(config.get('start_at_image', 1)) - 1)
 
@@ -289,8 +288,7 @@ def run_inference_pipeline(run: InferenceRun) -> None:
         )
         if current_status == JobStatus.CANCELLED:
             logger.info(
-                f'Run {run.pk} cancelled after inference; '
-                f'detections + crops preserved'
+                f'Run {run.pk} cancelled after inference; detections + crops preserved'
             )
             return
 
@@ -310,6 +308,11 @@ def run_inference_pipeline(run: InferenceRun) -> None:
                 'detections_by_source',
             ]
         )
+        excluded = apply_engulfment_exclusions(run.pk)
+        if excluded:
+            logger.info(
+                f'Inference run {run.pk}: auto-excluded {excluded} engulfing bbox(es)'
+            )
         logger.info(f'Inference run {run.pk} completed: {len(det_objs)} detections')
 
     except RunCancelled:
