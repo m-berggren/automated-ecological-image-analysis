@@ -2,7 +2,7 @@
   <PageHeader title="Upload" subtitle="Configure and upload a camera-trap folder" />
   <PollinatorsStepper current="upload" />
 
-  <div class="flex-1 p-8 space-y-6 max-w-3xl mx-auto w-full">
+  <div class="flex-1 min-h-0 overflow-y-auto p-8 space-y-6 max-w-3xl mx-auto w-full">
     <!-- Run details -->
     <section class="rounded-xl border border-border bg-surface p-5 space-y-3">
       <h2 class="text-sm font-semibold">Run details</h2>
@@ -76,7 +76,10 @@
           <span class="text-xs text-muted-foreground">YOLO confidence</span>
           <input
             v-model.number="config.yolo.confidence"
-            type="number" min="0" max="1" step="0.05"
+            type="number"
+            min="0"
+            max="1"
+            step="0.05"
             class="w-full px-2 py-1.5 rounded border border-border bg-background text-sm font-mono"
           />
         </label>
@@ -84,7 +87,10 @@
           <span class="text-xs text-muted-foreground">Binary confidence</span>
           <input
             v-model.number="config.binary_classifier.confidence"
-            type="number" min="0" max="1" step="0.05"
+            type="number"
+            min="0"
+            max="1"
+            step="0.05"
             class="w-full px-2 py-1.5 rounded border border-border bg-background text-sm font-mono"
           />
         </label>
@@ -92,7 +98,10 @@
           <span class="text-xs text-muted-foreground">Group confidence</span>
           <input
             v-model.number="config.group_classifier.confidence"
-            type="number" min="0" max="1" step="0.05"
+            type="number"
+            min="0"
+            max="1"
+            step="0.05"
             class="w-full px-2 py-1.5 rounded border border-border bg-background text-sm font-mono"
           />
         </label>
@@ -108,10 +117,17 @@
           <span class="text-xs text-muted-foreground">Start at image</span>
           <input
             v-model.number="config.start_at_image"
-            type="number" min="1"
+            type="number"
+            min="1"
             class="w-20 px-2 py-1 rounded border border-border bg-background text-sm font-mono"
           />
         </label>
+      </div>
+      <div
+        v-if="startAtImageOutOfRange"
+        class="text-xs text-red-600"
+      >
+        “Start at image” is outside the uploaded range (max {{ localFiles.length }}).
       </div>
 
       <!-- Advanced -->
@@ -121,16 +137,16 @@
       >
         {{ showAdvanced ? '▾ Hide advanced' : '▸ Advanced' }}
       </button>
-      <div
-        v-if="showAdvanced"
-        class="border-t border-border pt-3 space-y-3"
-      >
+      <div v-if="showAdvanced" class="border-t border-border pt-3 space-y-3">
         <div class="grid grid-cols-1 md:grid-cols-3 gap-4">
           <label class="space-y-1">
             <span class="text-xs text-muted-foreground">Crop padding</span>
             <input
               v-model.number="config.preprocessing.crop_pad_frac"
-              type="number" min="0" max="2" step="0.1"
+              type="number"
+              min="0"
+              max="2"
+              step="0.1"
               class="w-full px-2 py-1.5 rounded border border-border bg-background text-sm font-mono"
             />
           </label>
@@ -138,7 +154,10 @@
             <span class="text-xs text-muted-foreground">Min contour area (px²)</span>
             <input
               v-model.number="config.preprocessing.min_contour_area"
-              type="number" min="50" max="5000" step="50"
+              type="number"
+              min="50"
+              max="5000"
+              step="50"
               class="w-full px-2 py-1.5 rounded border border-border bg-background text-sm font-mono"
             />
           </label>
@@ -146,7 +165,10 @@
             <span class="text-xs text-muted-foreground">Max contour area (px²)</span>
             <input
               v-model.number="config.preprocessing.max_contour_area"
-              type="number" min="1000" max="200000" step="1000"
+              type="number"
+              min="1000"
+              max="200000"
+              step="1000"
               class="w-full px-2 py-1.5 rounded border border-border bg-background text-sm font-mono"
             />
           </label>
@@ -156,7 +178,9 @@
             <span class="text-xs text-muted-foreground">Background sample size</span>
             <input
               v-model.number="config.preprocessing.background_sample_size"
-              type="number" min="0" max="500"
+              type="number"
+              min="0"
+              max="500"
               class="w-full px-2 py-1.5 rounded border border-border bg-background text-sm font-mono"
             />
           </label>
@@ -164,7 +188,10 @@
             <span class="text-xs text-muted-foreground">Sunny shutter threshold</span>
             <input
               v-model.number="config.preprocessing.sunny_shutter_threshold"
-              type="number" min="50" max="500" step="10"
+              type="number"
+              min="50"
+              max="500"
+              step="10"
               class="w-full px-2 py-1.5 rounded border border-border bg-background text-sm font-mono"
             />
           </label>
@@ -213,36 +240,45 @@
         /
         <label class="text-primary cursor-pointer hover:underline">
           browse folder
+          <!-- webkitdirectory makes the OS dialog let you pick a folder
+               (instead of files). Without it the link is a no-op. -->
           <input
             ref="folderInput"
             type="file"
             multiple
+            webkitdirectory
+            directory
             class="hidden"
             @change="onPick($event, true)"
           />
         </label>
       </p>
-      <p class="text-xs text-muted-foreground mt-1">
-        JPG, PNG — up to ~12,000 images per run
-      </p>
+      <p class="text-xs text-muted-foreground mt-1">JPG, PNG — up to ~12,000 images per run</p>
     </section>
 
-    <!-- Upload progress + start -->
-    <section
-      v-if="uploader && uploader.items.length"
-      class="rounded-xl border border-border bg-surface"
-    >
+    <!-- Upload progress + start. Always rendered so the Start button is
+         visible even before any image has been picked; it's disabled with
+         an explanatory hint when there's nothing to run on yet. -->
+    <section class="rounded-xl border border-border bg-surface">
       <header class="flex items-center justify-between px-5 py-3 border-b border-border">
         <div class="text-sm">
-          <span class="font-medium">{{ doneCount }}</span>
-          <span class="text-muted-foreground"> of </span>
-          <span class="font-medium">{{ uploader.items.length }}</span>
-          <span class="text-muted-foreground"> uploaded</span>
-          <span v-if="failedCount" class="ml-3 text-red-600">{{ failedCount }} failed</span>
+          <template v-if="uploader && uploader.items.length">
+            <span class="font-medium">{{ doneCount }}</span>
+            <span class="text-muted-foreground"> of </span>
+            <span class="font-medium">{{ uploader.items.length }}</span>
+            <span class="text-muted-foreground"> uploaded</span>
+            <span v-if="failedCount" class="ml-3 text-red-600">{{ failedCount }} failed</span>
+          </template>
+          <template v-else>
+            <span class="text-muted-foreground">
+              Drop or browse images above, then start detection.
+            </span>
+          </template>
         </div>
         <div class="flex items-center gap-2">
           <button
             :disabled="!doneCount || starting"
+            :title="!doneCount ? 'Upload at least one image first' : ''"
             class="px-3 py-1.5 rounded-md text-sm font-medium bg-primary text-primary-foreground hover:bg-primary/90 disabled:opacity-50 disabled:cursor-not-allowed"
             @click="startDetection"
           >
@@ -252,7 +288,10 @@
         </div>
       </header>
 
-      <ul v-if="recentFailures.length" class="max-h-60 overflow-auto divide-y divide-border">
+      <ul
+        v-if="recentFailures.length"
+        class="max-h-60 overflow-auto divide-y divide-border"
+      >
         <li
           v-for="item in recentFailures"
           :key="item.id"
@@ -270,11 +309,21 @@
         </li>
       </ul>
       <p v-else class="px-5 py-3 text-xs text-muted-foreground">
-        No failures. (Per-file list hidden at this scale — failures will appear here as they happen.)
+        No failures. (Per-file list hidden at this scale — failures will appear here as they
+        happen.)
       </p>
     </section>
 
     <p v-if="error" class="text-sm text-red-600">{{ error }}</p>
+    <!-- The ROI drawer modal -->
+    <div>
+      <ROIDrawer
+        v-if="showRoiModal"
+        :image-url="previewUrl"
+        @close="closeRoiModal"
+        @confirm="onSaveRoi"
+      />
+    </div>
   </div>
 </template>
 
@@ -286,6 +335,7 @@ import PollinatorsStepper from '@/components/PollinatorsStepper.vue'
 import { createUploader, type UploadItem } from '@/lib/uploader'
 import { api } from '@/api'
 import { UploadCloud, XCircle } from 'lucide-vue-next'
+import ROIDrawer from '@/components/ROIDrawer.vue'
 
 interface ModelVersion {
   id: number
@@ -294,6 +344,16 @@ interface ModelVersion {
   version_name: string
   is_active: boolean
 }
+
+const startAtImageOutOfRange = computed(() => {
+  if (!localFiles.value.length) return false
+  const idx = (config.value.start_at_image || 1) - 1
+  return idx < 0 || idx >= localFiles.value.length
+})
+
+const localFiles = ref<File[]>([])
+const showRoiModal = ref(false)
+const previewUrl = ref<string | null>(null)
 
 const router = useRouter()
 const dragOver = ref(false)
@@ -318,6 +378,7 @@ interface PipelineConfig {
   group_classifier: { model_version_id: number | null; confidence: number }
   preprocessing: {
     use_roi: boolean
+    roi_bbox: null | RoiBBox
     crop_pad_frac: number
     background_sample_size: number
     min_contour_area: number
@@ -330,12 +391,20 @@ interface PipelineConfig {
   start_at_image: number
 }
 
+interface RoiBBox {
+  x: number
+  y: number
+  width: number
+  height: number
+}
+
 const config = ref<PipelineConfig>({
-  yolo: { model_version_id: null, confidence: 0.4 },
+  yolo: { model_version_id: null, confidence: 0.6 },
   binary_classifier: { model_version_id: null, confidence: 0.5 },
   group_classifier: { model_version_id: null, confidence: 0.6 },
   preprocessing: {
     use_roi: false,
+    roi_bbox: null,
     crop_pad_frac: 0.3,
     background_sample_size: 100,
     min_contour_area: 400,
@@ -370,8 +439,7 @@ onMounted(async () => {
       detectorModels.value = all.filter((m) => m.kind === 'detector')
       binaryModels.value = all.filter((m) => m.kind === 'binary_classifier')
       groupModels.value = all.filter((m) => m.kind === 'group_classifier')
-      const pickDefault = (list: ModelVersion[]) =>
-        list.find((m) => m.is_active) ?? list[0]
+      const pickDefault = (list: ModelVersion[]) => list.find((m) => m.is_active) ?? list[0]
       const yoloDefault = pickDefault(detectorModels.value)
       const binaryDefault = pickDefault(binaryModels.value)
       const groupDefault = pickDefault(groupModels.value)
@@ -414,13 +482,12 @@ const IMAGE_EXT_RE = /\.(jpe?g|png|webp)$/i
 async function handleFiles(files: File[]) {
   // Folder drops can include non-image files (subfolders' siblings,
   // hidden system files like .DS_Store, etc.). Drop them before enqueueing.
-  const images = files.filter(
-    (f) => f.type.startsWith('image/') || IMAGE_EXT_RE.test(f.name),
-  )
+  const images = files.filter((f) => f.type.startsWith('image/') || IMAGE_EXT_RE.test(f.name))
   if (!images.length) return
   const id = await ensureUpload()
   if (!id || !uploader.value) return
   uploader.value.enqueue(images)
+  localFiles.value = images
 }
 
 function onPick(e: Event, _isFolder: boolean) {
@@ -456,7 +523,7 @@ async function onDrop(e: DragEvent) {
 async function collectFiles(entry: FileSystemEntry, out: File[]): Promise<void> {
   if (entry.isFile) {
     const file = await new Promise<File>((resolve, reject) => {
-      (entry as FileSystemFileEntry).file(resolve, reject)
+      ;(entry as FileSystemFileEntry).file(resolve, reject)
     })
     out.push(file)
     return
@@ -481,6 +548,17 @@ onMounted(() => {
 })
 
 async function startDetection() {
+  if(config.value.preprocessing.use_roi) {
+    const roi = await openRoiModal()
+
+  if (!roi) {
+    error.value = 'ROI selection was cancelled.'
+    return
+  }
+  }
+
+
+
   error.value = ''
   if (!uploadId.value) {
     error.value = 'No upload in progress.'
@@ -506,7 +584,7 @@ async function startDetection() {
         module: 'pollinators',
         upload: uploadId.value,
         name: runName.value,
-        config: config.value,
+        config: fixROIFormat(config.value),
       }),
     })
     if (!res.ok) {
@@ -521,4 +599,82 @@ async function startDetection() {
     starting.value = false
   }
 }
+
+const roiResolver = ref<((roi: RoiBBox | null) => void) | null>(null)
+
+// Choses the current selected manual roi image and makes the ROI drawing modal appear
+function openRoiModal() {
+  return new Promise((resolve) => {
+    if (!localFiles.value.length) {
+      resolve(null)
+      return
+    }
+
+    const index = (config.value.start_at_image || 1) - 1
+
+    if (index < 0 || index >= localFiles.value.length) {
+      resolve(null)
+      return
+    }
+
+    const file = localFiles.value[index]
+
+    // clean up old URL
+    if (previewUrl.value) {
+      URL.revokeObjectURL(previewUrl.value)
+    }
+
+    previewUrl.value = URL.createObjectURL(file)
+    showRoiModal.value = true
+
+    roiResolver.value = resolve
+
+  })
+}
+
+// Makes the modal disappear and clears up the old image URL
+function closeRoiModal() {
+  showRoiModal.value = false
+
+  if (previewUrl.value) {
+    URL.revokeObjectURL(previewUrl.value)
+    previewUrl.value = null
+  }
+
+  if (roiResolver.value) {
+    roiResolver.value(null)
+    roiResolver.value = null
+  }
+}
+
+function onSaveRoi(roi: any) {
+  config.value.preprocessing.roi_bbox = roi
+
+  if (roiResolver.value) {
+    roiResolver.value(roi)
+    roiResolver.value = null
+  }
+
+  closeRoiModal()
+}
+
+// Changes the format of the config ROI to what the backend expects
+function fixROIFormat(cfg: PipelineConfig) {
+  return {
+    ...cfg,
+    preprocessing: {
+      ...cfg.preprocessing,
+      roi_bbox: cfg.preprocessing.roi_bbox
+        ? [
+            cfg.preprocessing.roi_bbox.x,
+            cfg.preprocessing.roi_bbox.y,
+            cfg.preprocessing.roi_bbox.width,
+            cfg.preprocessing.roi_bbox.height,
+          ]
+        : null,
+    },
+  }
+}
+
+
 </script>

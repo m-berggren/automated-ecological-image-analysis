@@ -67,6 +67,7 @@ def run_yolo_step(
     zone: Optional[np.ndarray] = None,
     slice_size: int = 640,
     overlap: float = 0.2,
+    progress_callback: Optional[Callable[[int, int, str, str], None]] = None,
 ) -> list:
     """
     Run YOLO on every image and save bbox crops to crop_dir. When `zone` is
@@ -89,41 +90,45 @@ def run_yolo_step(
     out = []
     n_total = 0
     n_in_roi = 0
-    for img_path in image_paths:
+    n_images = len(image_paths)
+    for img_idx, img_path in enumerate(image_paths):
         try:
             dets = detector.predict(img_path)
         except Exception as e:
             logger.warning(f'YOLO failed on {img_path.name}: {e}')
-            continue
-        if not dets:
-            continue
-        img = cv2.imread(str(img_path))
-        if img is None:
-            logger.warning(f'Could not read {img_path} for crop save')
-            continue
-        for i, d in enumerate(dets):
-            n_total += 1
-            bbox_xywh = (d['x1'], d['y1'], d['w'], d['h'])
-            if zone is not None and not is_in_roi(bbox_xywh, zone):
-                continue
-            n_in_roi += 1
-            crop = img[d['y1'] : d['y2'], d['x1'] : d['x2']]
-            if crop.size == 0:
-                continue
-            crop_fn = f'{img_path.stem}_yolo_{i}_{d["class"]}.jpg'
-            crop_path = crop_dir / crop_fn
-            cv2.imwrite(str(crop_path), crop)
-            out.append(
-                {
-                    'image_name': img_path.name,
-                    'bbox': (d['x1'], d['y1'], d['x2'], d['y2']),
-                    'bbox_w': d['w'],
-                    'bbox_h': d['h'],
-                    'yolo_class': d['class'],
-                    'yolo_confidence': float(d['confidence']),
-                    'crop_path': str(crop_path),
-                }
-            )
+        else:
+            if dets:
+                img = cv2.imread(str(img_path))
+                if img is None:
+                    logger.warning(f'Could not read {img_path} for crop save')
+                else:
+                    for i, d in enumerate(dets):
+                        n_total += 1
+                        bbox_xywh = (d['x1'], d['y1'], d['w'], d['h'])
+                        if zone is not None and not is_in_roi(bbox_xywh, zone):
+                            continue
+                        n_in_roi += 1
+                        crop = img[d['y1'] : d['y2'], d['x1'] : d['x2']]
+                        if crop.size == 0:
+                            continue
+                        crop_fn = f'{img_path.stem}_yolo_{i}_{d["class"]}.jpg'
+                        crop_path = crop_dir / crop_fn
+                        cv2.imwrite(str(crop_path), crop)
+                        out.append(
+                            {
+                                'image_name': img_path.name,
+                                'bbox': (d['x1'], d['y1'], d['x2'], d['y2']),
+                                'bbox_w': d['w'],
+                                'bbox_h': d['h'],
+                                'yolo_class': d['class'],
+                                'yolo_confidence': float(d['confidence']),
+                                'crop_path': str(crop_path),
+                            }
+                        )
+        # Per-N progress so the bar advances during the long YOLO sweep
+        # instead of jumping from 0% to 40% only when the whole pass ends.
+        if progress_callback and ((img_idx + 1) % 10 == 0 or img_idx + 1 == n_images):
+            progress_callback(img_idx + 1, n_images, '', 'info')
     if zone is not None:
         logger.info(
             f'YOLO: {n_in_roi}/{n_total} detections inside ROI across {len(image_paths)} images'
@@ -139,6 +144,7 @@ def run_insectnet_step(
     binary_model: str,
     group_model: str,
     binary_threshold: float,
+    group_threshold: float,
     device: Optional[str],
 ) -> list:
     """
@@ -194,6 +200,7 @@ def run_insectnet_step(
     group_by_path = {gr['path']: gr for gr in group_results}
 
     out = []
+    n_below = 0
     for br, meta in insect_crops:
         gr = group_by_path.get(br['path'])
         if gr is None or gr['label'] == 'error':
@@ -205,6 +212,15 @@ def run_insectnet_step(
             h = int(meta['bbox_h'])
         except (KeyError, ValueError):
             continue
+        group_conf = float(gr['confidence'])
+        # Binary said insect, group classifier's top class wasn't confident
+        # enough: keep the detection but strip the class label so a reviewer
+        # has to assign one. class_probs is preserved for inspection.
+        if group_conf < group_threshold:
+            gr_label = ''
+            n_below += 1
+        else:
+            gr_label = gr['label']
         out.append(
             {
                 'image_name': meta.get('image_name', ''),
@@ -214,13 +230,16 @@ def run_insectnet_step(
                 'datetime': meta.get('datetime', ''),
                 'weather': meta.get('weather', ''),
                 'binary_confidence': float(br['confidence']),
-                'insectnet_class': gr['label'],
-                'insectnet_confidence': float(gr['confidence']),
+                'insectnet_class': gr_label,
+                'insectnet_confidence': group_conf,
                 'class_probs': gr['all_probs'],
                 'crop_path': br['path'],
             }
         )
-    logger.info(f'Group: classified {len(out)} insect crops')
+    logger.info(
+        f'Group: classified {len(out)} insect crops '
+        f'({n_below} below threshold={group_threshold} -> unclassified)'
+    )
     return out
 
 
@@ -235,6 +254,7 @@ def run_pipeline(
     yolo_slice_size: int = 640,
     yolo_overlap: float = 0.2,
     binary_threshold: float = 0.5,
+    group_threshold: float = 0.0,
     iou_threshold: float = 0.3,
     skip_first_n: int = 0,
     device: Optional[str] = None,
@@ -323,6 +343,23 @@ def run_pipeline(
     n = len(image_paths)
     _emit(0, n, f'Starting run on {n} images')
 
+    def _phase_emit(start: float, end: float):
+        """Wrap _emit so a step's local 0..total progress lands in
+        [start..end] of the overall pipeline bar."""
+
+        def emit(
+            processed_in_phase: int,
+            total_in_phase: int,
+            message: str = '',
+            level: str = 'info',
+        ) -> None:
+            if total_in_phase <= 0:
+                return
+            frac = min(1.0, max(0.0, processed_in_phase / total_in_phase))
+            _emit(int((start + frac * (end - start)) * n), n, message, level)
+
+        return emit
+
     cfg = config or {}
     first_img = cv2.imread(str(image_paths[0]))
     zone = setup_zone(first_img, cfg) if first_img is not None else None
@@ -341,6 +378,7 @@ def run_pipeline(
         zone=zone,
         slice_size=yolo_slice_size,
         overlap=yolo_overlap,
+        progress_callback=_phase_emit(0.0, 0.4),
     )
     _emit(int(n * 0.4), n, f'YOLO detected {len(yolo_dets)} candidates')
 
@@ -351,19 +389,23 @@ def run_pipeline(
         config=config,
         debug=debug,
         skip_first_n=skip_first_n,
+        progress_callback=_phase_emit(0.4, 0.7),
     )
     n_candidates = prep_result['n_crops']
     logger.info(f'  Extracted {n_candidates} candidate crops')
     _emit(int(n * 0.7), n, f'Preprocessing extracted {n_candidates} candidate crops')
 
     if n_candidates > 0:
-        logger.info(f'Step 3+4: InsectNet (binary threshold={binary_threshold})')
+        logger.info(
+            f'Step 3+4: InsectNet (binary={binary_threshold}, group={group_threshold})'
+        )
         insect_dets = run_insectnet_step(
             prep_csv_path=Path(prep_result['csv_path']),
             prep_crop_dir=Path(prep_result['crop_dir']),
             binary_model=binary_model,
             group_model=group_model,
             binary_threshold=binary_threshold,
+            group_threshold=group_threshold,
             device=device,
         )
         _emit(int(n * 0.9), n, f'Classifier kept {len(insect_dets)} insect crops')
@@ -396,6 +438,7 @@ def run_pipeline(
             'config': {
                 'yolo_confidence': yolo_confidence,
                 'binary_threshold': binary_threshold,
+                'group_threshold': group_threshold,
                 'iou_threshold': iou_threshold,
             },
         },
@@ -428,6 +471,7 @@ if __name__ == '__main__':
     parser.add_argument('--group_model', required=True)
     parser.add_argument('--yolo_confidence', type=float, default=0.25)
     parser.add_argument('--binary_threshold', type=float, default=0.5)
+    parser.add_argument('--group_threshold', type=float, default=0.0)
     parser.add_argument('--iou_threshold', type=float, default=0.3)
     parser.add_argument(
         '--skip_first_n',
@@ -446,6 +490,7 @@ if __name__ == '__main__':
         group_model=args.group_model,
         yolo_confidence=args.yolo_confidence,
         binary_threshold=args.binary_threshold,
+        group_threshold=args.group_threshold,
         iou_threshold=args.iou_threshold,
         skip_first_n=args.skip_first_n,
         debug=args.debug,

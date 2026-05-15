@@ -19,6 +19,8 @@ from PIL import ExifTags, Image
 _JSON_SAFE = (str, int, float, bool, type(None))
 
 EXIF_TAG_EXPOSURE_TIME = 33434
+EXIF_TAG_SHUTTER_SPEED_VALUE = 37377  # APEX: ExposureTime = 1 / 2**value
+_EXIF_IFD_POINTER = 0x8769
 
 
 def _exif_to_dict(img: Image.Image) -> dict[str, Any]:
@@ -29,7 +31,40 @@ def _exif_to_dict(img: Image.Image) -> dict[str, Any]:
     for tag_id, value in raw.items():
         name = ExifTags.TAGS.get(tag_id, str(tag_id))
         out[name] = _coerce(value)
+    # Photographic tags (ExposureTime, ShutterSpeedValue, ISO, FNumber,
+    # DateTimeOriginal, ...) live in the ExifIFD sub-block, not the top-
+    # level dict. Merge them in so callers see one flat namespace. Without
+    # this, weather/shutter_speed extraction silently fall through to
+    # 'unknown' on cameras (e.g. Wingscapes TLCAM PRO) that only write
+    # exposure data inside the sub-IFD.
+    try:
+        sub = raw.get_ifd(_EXIF_IFD_POINTER)
+    except Exception:
+        sub = {}
+    for tag_id, value in sub.items():
+        name = ExifTags.TAGS.get(tag_id, str(tag_id))
+        out[name] = _coerce(value)
     return out
+
+
+def _shutter_denominator(exif: dict) -> int | None:
+    """Return the integer N such that the shutter speed is 1/N second.
+
+    Tries ExposureTime first (preferred — direct seconds value); falls
+    back to ShutterSpeedValue (APEX, log2(1/exposure)) which is what
+    Wingscapes cameras actually write."""
+    exposure = exif.get('ExposureTime')
+    if isinstance(exposure, (tuple, list)) and len(exposure) >= 2:
+        try:
+            return int(exposure[1])
+        except (ValueError, TypeError):
+            pass
+    if isinstance(exposure, float) and exposure > 0:
+        return int(1 / exposure)
+    apex = exif.get('ShutterSpeedValue')
+    if isinstance(apex, (int, float)) and apex > 0:
+        return int(2 ** float(apex))
+    return None
 
 
 def _coerce(value: Any) -> Any:
@@ -65,19 +100,8 @@ def _derive_weather(exif_raw: dict, exif: dict) -> str:
     """Camera with fixed aperture (Wingscapes TLCAM PRO f/2.8): fast shutter
     → bright → sunny, slow shutter → dim → cloudy."""
     threshold = getattr(settings, 'SUNNY_SHUTTER_THRESHOLD', 150)
-    exposure = exif_raw.get(EXIF_TAG_EXPOSURE_TIME)
-    if exposure is None:
-        exposure = exif.get('ExposureTime')
-    if exposure is None:
-        return 'unknown'
-    try:
-        if isinstance(exposure, (tuple, list)) and len(exposure) >= 2:
-            denom = int(exposure[1])
-        elif isinstance(exposure, float) and exposure > 0:
-            denom = int(1 / exposure)
-        else:
-            return 'unknown'
-    except (ValueError, ZeroDivisionError):
+    denom = _shutter_denominator(exif)
+    if denom is None:
         return 'unknown'
     return 'sunny' if denom > threshold else 'cloudy'
 
@@ -139,12 +163,8 @@ def extract_image_metadata(file: Any) -> dict[str, Any]:
 
     weather = _derive_weather(raw_exif, exif)
 
-    shutter_speed = ''
-    exposure = exif.get('ExposureTime')
-    if isinstance(exposure, (tuple, list)) and len(exposure) >= 2:
-        shutter_speed = f'1/{int(exposure[1])}'
-    elif isinstance(exposure, float) and exposure > 0:
-        shutter_speed = f'1/{int(1 / exposure)}'
+    denom = _shutter_denominator(exif)
+    shutter_speed = f'1/{denom}' if denom else ''
 
     excluded, exclusion_reason = _determine_exclusion(flash_fired, laplacian_var)
 
