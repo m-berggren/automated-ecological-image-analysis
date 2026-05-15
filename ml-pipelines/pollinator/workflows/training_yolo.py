@@ -13,7 +13,7 @@ place.
 from __future__ import annotations
 
 from pathlib import Path
-from typing import Optional
+from typing import Optional, Union
 
 from ..training.slicing import slice_dataset
 from ..training.train_yolo import train_yolo
@@ -25,8 +25,9 @@ def retrain_yolo(
     use_tiles: bool = True,
     tile_size: int = 640,
     overlap: float = 0.2,
-    min_area: float = 0.3,
-    keep_empty_tiles: bool = False,
+    min_area: float = 0.1,
+    keep_empty_tiles: Union[bool, int, float, dict] = False,
+    slice_seed: int = 42,
     img_size: Optional[int] = None,
     **train_kwargs,
 ) -> dict:
@@ -39,7 +40,12 @@ def retrain_yolo(
         tile_size:        Tile edge length in pixels.
         overlap:          Fractional overlap between adjacent tiles.
         min_area:         Minimum surviving area for a clipped bbox (drops slivers).
-        keep_empty_tiles: When True, keep tiles with no labels as negatives.
+        keep_empty_tiles: How many label-free tiles to keep as negatives.
+                          bool: False=drop all, True=keep all.
+                          int >= 1: per-positive negative ratio (e.g. 2 -> 2:1).
+                          float in (0, 1]: fraction of all empties to keep.
+                          See pollinator.training.slicing for full semantics.
+        slice_seed:       Seed for deterministic empty-tile sampling.
         img_size:         YOLO input size. Defaults to tile_size when slicing,
                           else falls through to train_yolo's own default.
         **train_kwargs:   Forwarded to pollinator.training.train_yolo.train_yolo.
@@ -57,6 +63,7 @@ def retrain_yolo(
             overlap=overlap,
             min_area=min_area,
             keep_empty_tiles=keep_empty_tiles,
+            seed=slice_seed,
         )
         dataset_root = str(sliced)
         if img_size is None:

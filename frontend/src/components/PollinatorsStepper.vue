@@ -41,7 +41,7 @@ import { computed } from 'vue'
 import { RouterLink } from 'vue-router'
 import { Check } from 'lucide-vue-next'
 
-type StepKey = 'upload' | 'detect' | 'review'
+type StepKey = 'upload' | 'detect' | 'review' | 'export'
 
 interface Step {
   key: StepKey
@@ -57,6 +57,7 @@ const steps: Step[] = [
   { key: 'upload', label: 'Upload' },
   { key: 'detect', label: 'Detect' },
   { key: 'review', label: 'Review' },
+  { key: 'export', label: 'Export' },
 ]
 
 const currentIdx = computed(() => steps.findIndex((s) => s.key === props.current))
@@ -78,6 +79,7 @@ function hrefFor(step: Step): string | null {
   if (!props.runId) return null
   if (step.key === 'detect') return `/pollinators/runs/${props.runId}/detect`
   if (step.key === 'review') return `/pollinators/runs/${props.runId}/review`
+  if (step.key === 'export') return `/pollinators/runs/${props.runId}/export`
   return null
 }
 </script>

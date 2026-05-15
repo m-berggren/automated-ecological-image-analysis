@@ -22,7 +22,7 @@ import logging
 import re
 from datetime import datetime
 from pathlib import Path
-from typing import Optional
+from typing import Callable, Optional
 
 import cv2
 import numpy as np
@@ -88,6 +88,7 @@ def run_preprocessing(
     debug: bool = False,
     debug_csv: bool = True,
     skip_first_n: int = 0,
+    progress_callback: Optional[Callable[[int, int, str, str], None]] = None,
 ) -> dict:
     """
     Run background subtraction pipeline on a single camera folder.
@@ -172,6 +173,10 @@ def run_preprocessing(
     max_gap_sec = float(cfg.get('max_gap_seconds', 3600))
 
     for idx, path in enumerate(paths):
+        # Tick the progress bar every 10 images. Emitted at the top of the
+        # iteration so `continue` branches below don't skip the update.
+        if progress_callback and idx % 10 == 0:
+            progress_callback(idx, len(paths), '', 'info')
         img = cv2.imread(str(path))
         if img is None:
             logger.warning(f'Could not read {path}')
@@ -304,6 +309,8 @@ def run_preprocessing(
             f'[{idx + 1}/{len(paths)}] {rel_id} | {len(detections)} candidate(s)'
         )
 
+    if progress_callback:
+        progress_callback(len(paths), len(paths), '', 'info')
     logger.info(f'Done. Crops: {n_crops} | Skipped: {n_skipped} | CSV: {csv_path}')
     return {
         'csv_path': str(csv_path),
