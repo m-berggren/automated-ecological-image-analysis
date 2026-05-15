@@ -2,7 +2,7 @@
   <PageHeader title="Upload" subtitle="Configure and upload a camera-trap folder" />
   <PollinatorsStepper current="upload" />
 
-  <div class="flex-1 min-h-0 overflow-y-auto p-8 space-y-6 max-w-3xl mx-auto w-full">
+  <div class="flex-1 min-h-0 overflow-y-auto px-8 py-4 space-y-3 max-w-3xl mx-auto w-full">
     <!-- Run details -->
     <section class="rounded-xl border border-border bg-surface p-5 space-y-3">
       <h2 class="text-sm font-semibold">Run details</h2>
