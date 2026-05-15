@@ -523,7 +523,8 @@ class DetectionExclusionView(APIView):
                 status=status.HTTP_400_BAD_REQUEST,
             )
         d.excluded_from_export = excluded
-        d.save(update_fields=['excluded_from_export'])
+        d.export_exclusion_user_set = True
+        d.save(update_fields=['excluded_from_export', 'export_exclusion_user_set'])
         return Response({'id': d.pk, 'excluded_from_export': excluded})
 
 

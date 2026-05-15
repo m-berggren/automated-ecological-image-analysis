@@ -4,16 +4,24 @@ When two detectors fire on the same insect, one bbox often strictly
 contains the other (e.g. a tight YOLO crop sitting inside a broader
 preprocessing window). Both rows survive review, both end up in the CSV.
 
-apply_engulfment_exclusions marks the *outer* (engulfing) detection of
-each pair as ``excluded_from_export=True`` so it drops out of the export
-counts while leaving the tighter crop in. Add-only: never clears an
-existing exclusion, so a reviewer who manually un-marked a duplicate
-keeps that decision across re-runs.
+apps/analysis/engulfment.apply_engulfment_exclusions marks the *outer*
+(engulfing) detection of each pair as ``excluded_from_export=True`` so
+it drops out of the export counts while leaving the tighter crop in.
+
+Runs on the Export step, not at inference time — there is no point
+deciding which duplicate to keep before the reviewer has filtered out
+rejected detections in Review. Only accepted (confirmed or corrected)
+detections are considered, in both the outer and inner positions: a
+rejected inner bbox must not cause us to drop a real outer bbox.
+
+Sticky per row: once a reviewer has explicitly toggled
+excluded_from_export from the Export page, ``export_exclusion_user_set``
+flips to True on that row and engulfment will never re-flag it.
 """
 
 from __future__ import annotations
 
-from .models import Detection
+from .models import Detection, DetectionStatus
 
 
 def apply_engulfment_exclusions(run_id: int) -> int:
@@ -25,8 +33,10 @@ def apply_engulfment_exclusions(run_id: int) -> int:
     """
     rows = list(
         Detection.objects.filter(
-            inference_run_id=run_id, excluded_from_export=False
-        ).values('id', 'image_id', 'bbox')
+            inference_run_id=run_id,
+            status=DetectionStatus.ACCEPTED,
+            excluded_from_export=False,
+        ).values('id', 'image_id', 'bbox', 'export_exclusion_user_set')
     )
     by_image: dict[int, list[dict]] = {}
     for row in rows:
@@ -39,6 +49,8 @@ def apply_engulfment_exclusions(run_id: int) -> int:
         if len(items) < 2:
             continue
         for outer in items:
+            if outer['export_exclusion_user_set']:
+                continue
             ob = outer['bbox']
             outer_area = (ob['x2'] - ob['x1']) * (ob['y2'] - ob['y1'])
             for inner in items:

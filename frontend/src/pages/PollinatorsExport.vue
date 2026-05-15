@@ -90,10 +90,13 @@
                 :y="d.bbox.y1"
                 :width="d.bbox.w"
                 :height="d.bbox.h"
-                :fill="d.excluded_from_export ? '#ef4444' : 'transparent'"
-                :fill-opacity="d.excluded_from_export ? 0.35 : 0"
-                :stroke="d.excluded_from_export ? '#ef4444' : strokeFor(d)"
-                :stroke-width="Math.max(2, Math.max(card.naturalW, card.naturalH) * 0.002)"
+                fill="#ef4444"
+                :fill-opacity="d.excluded_from_export ? 0.5 : 0"
+                stroke="#ef4444"
+                :stroke-width="
+                  Math.max(2, Math.max(card.naturalW, card.naturalH) * 0.002) *
+                  (d.excluded_from_export ? 2 : 1)
+                "
                 class="cursor-pointer"
                 @click="toggleExclude(d)"
               />
@@ -360,6 +363,10 @@ onMounted(async () => {
       return
     }
     run.value = await runRes.json()
+    // Apply engulfment auto-exclude on every Export visit. The backend
+    // skips rows the reviewer has already toggled here, so this only
+    // catches newly-accepted duplicates from Review.
+    await api(`/api/analysis/runs/${runId}/recompute-exclusions/`, { method: 'POST' })
     await fetchAllPages()
   } catch (e) {
     loadError.value = e instanceof Error ? e.message : String(e)

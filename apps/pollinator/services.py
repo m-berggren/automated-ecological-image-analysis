@@ -28,7 +28,6 @@ from django.utils import timezone
 
 from apps.analysis.cancellation import RunCancelled
 from apps.analysis.crops import write_detection_crop
-from apps.analysis.engulfment import apply_engulfment_exclusions
 from apps.analysis.models import (
     Detection,
     DetectionStatus,
@@ -308,11 +307,6 @@ def run_inference_pipeline(run: InferenceRun) -> None:
                 'detections_by_source',
             ]
         )
-        excluded = apply_engulfment_exclusions(run.pk)
-        if excluded:
-            logger.info(
-                f'Inference run {run.pk}: auto-excluded {excluded} engulfing bbox(es)'
-            )
         logger.info(f'Inference run {run.pk} completed: {len(det_objs)} detections')
 
     except RunCancelled:
