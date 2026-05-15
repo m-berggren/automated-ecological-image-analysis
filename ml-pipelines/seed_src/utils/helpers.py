@@ -1,5 +1,6 @@
-import glob
 import os
+import re
+import shutil
 
 from PIL import Image
 from sahi import AutoDetectionModel
@@ -84,7 +85,6 @@ def get_next_run_name(base_run_name):
     Checks the runs/obb directory and returns a name with an incremented suffix
     if the base name already exists (e.g., 'phyca' -> 'phyca2' -> 'phyca3').
     """
-    import re
 
     target_dir = os.path.join('runs', 'obb')
     if not os.path.exists(target_dir):
@@ -114,3 +114,55 @@ def get_next_run_name(base_run_name):
         return base_run_name
 
     return f'{base_run_name}{max_num + 1}'
+
+
+def identify_species(img_name, img_path, species_list, ocr_tool):
+    """
+    Identifies species via filename (primary approach) or OCR (fallback approach in case filename is wrong).
+    """
+    name_lower = img_name.lower()
+
+    # Filename check
+    for s in species_list:
+        if s in name_lower:
+            print(f'Found species of {img_name}: {s}')
+            return s
+
+    # OCR check
+    print(f'Filename {img_name} unclear. Running OCR fallback.')
+    extracted_text = ocr_tool.extract_from_image(img_path)
+    for s in species_list:
+        if s.upper() in extracted_text:
+            print(f'Found species of {img_name}: {s}')
+            return s
+
+    return 'UNKNOWN'
+
+
+def verify_and_route_data(base_path, species_list, ocr_tool):
+    """
+    Ensures that the image is in the correct validation folder based on the extracted species label.
+    """
+    for species in species_list:
+        val_dir = os.path.join(base_path, f'{species}_model', 'val', 'images')
+        if not os.path.exists(val_dir):
+            continue
+
+        for img_name in os.listdir(val_dir):
+            img_path = os.path.join(val_dir, img_name)
+
+            # Check if the image actually belongs where it is, based on its extracted species label
+            actual_species = identify_species(
+                img_name, img_path, species_list, ocr_tool
+            )
+
+            if actual_species != 'UNKNOWN' and actual_species != species:
+                # Route to the correct folder if misplaced
+                target_dir = os.path.join(
+                    base_path, f'{actual_species}_model', 'val', 'images'
+                )
+                os.makedirs(target_dir, exist_ok=True)
+                print(
+                    f'Routing Error: Moving {img_name} from {species} to {actual_species}'
+                )
+                shutil.move(img_path, os.path.join(target_dir, img_name))

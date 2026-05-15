@@ -9,7 +9,9 @@ from seed_src.utils.helpers import (
     load_ground_truth,
     load_model,
     update_class_labels,
+    verify_and_route_data,
 )
+from seed_src.utils.label_extractor import LabelExtractor
 from seed_src.utils.metrics import (
     calculate_precision_recall_f1_score,
     calculate_tp_fp_fn,
@@ -49,7 +51,7 @@ CONFIG_MAP = {
 }  # Map species to their specific yaml files
 
 # -------------------------
-# LABEL PREPARATION
+# LABEL.TXT PREPARATION
 # -------------------------
 SPECIES_IDS = {s: 0 for s in SPECIES_LIST}
 SPLITS = ['train', 'val']
@@ -70,7 +72,6 @@ def prepare_data_labels():
 if PREPARE_LABELS:
     prepare_data_labels()
     print(f'Class labels prepared')
-
 
 # -------------------------
 # TRAIN
@@ -134,7 +135,6 @@ for species in SPECIES_LIST:
 # -------------------------
 # LOAD MODEL
 # -------------------------
-# model = load_model(best_model_path)
 models = {s: load_model(path) for s, path in best_model_paths.items()}
 
 
@@ -143,7 +143,12 @@ models = {s: load_model(path) for s, path in best_model_paths.items()}
 # -------------------------
 VAL_BASE = '../data/seed'
 
+# Extract seed species (from image name or handwritten label)
+ocr_tool = LabelExtractor(gpu=False)
+verify_and_route_data(VAL_BASE, SPECIES_LIST, ocr_tool)
+
 image_paths = []
+
 
 for species in SPECIES_LIST:
     species_dir = os.path.join(VAL_BASE, f'{species}_model', 'val', 'images')
