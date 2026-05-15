@@ -123,10 +123,7 @@
           />
         </label>
       </div>
-      <div
-        v-if="startAtImageOutOfRange"
-        class="text-xs text-red-600"
-      >
+      <div v-if="startAtImageOutOfRange" class="text-xs text-red-600">
         “Start at image” is outside the uploaded range (max {{ localFiles.length }}).
       </div>
 
@@ -288,10 +285,7 @@
         </div>
       </header>
 
-      <ul
-        v-if="recentFailures.length"
-        class="max-h-60 overflow-auto divide-y divide-border"
-      >
+      <ul v-if="recentFailures.length" class="max-h-60 overflow-auto divide-y divide-border">
         <li
           v-for="item in recentFailures"
           :key="item.id"
@@ -548,16 +542,14 @@ onMounted(() => {
 })
 
 async function startDetection() {
-  if(config.value.preprocessing.use_roi) {
+  if (config.value.preprocessing.use_roi) {
     const roi = await openRoiModal()
 
-  if (!roi) {
-    error.value = 'ROI selection was cancelled.'
-    return
+    if (!roi) {
+      error.value = 'ROI selection was cancelled.'
+      return
+    }
   }
-  }
-
-
 
   error.value = ''
   if (!uploadId.value) {
@@ -628,7 +620,6 @@ function openRoiModal() {
     showRoiModal.value = true
 
     roiResolver.value = resolve
-
   })
 }
 
@@ -675,6 +666,4 @@ function fixROIFormat(cfg: PipelineConfig) {
     },
   }
 }
-
-
 </script>

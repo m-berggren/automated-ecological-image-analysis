@@ -6,21 +6,22 @@
     <div v-else-if="loadError" class="p-8 text-sm text-red-600">{{ loadError }}</div>
 
     <div v-else class="p-6 space-y-4 max-w-4xl mx-auto w-full">
-
       <!-- Card -->
       <section class="rounded-xl border border-border bg-card overflow-hidden shadow-md">
-
         <!-- Header -->
         <header class="px-5 py-4 bg-primary/[0.22] border-b border-border">
-          <h2 class="font-bold text-lg tracking-tight">New training job</h2>
+          <h2 class="font-bold text-lg tracking-tight">New Training Job</h2>
           <p class="text-xs text-muted-foreground mt-0.5">
-            Select a seed species and start training. Training that runs on CPU may take a long time.
+            Select a seed species and start training. Training that runs on CPU may take a long
+            time.
           </p>
         </header>
 
         <!-- Training mode -->
         <div class="px-5 py-4 border-b border-border">
-          <div class="text-[11px] font-semibold uppercase tracking-wider text-muted-foreground mb-3">
+          <div
+            class="text-[11px] font-semibold uppercase tracking-wider text-muted-foreground mb-3"
+          >
             Training mode
           </div>
 
@@ -31,7 +32,7 @@
                 'rounded-lg border p-4 text-left transition-colors',
                 trainingMode === 'retrain'
                   ? 'border-primary bg-primary/5'
-                  : 'border-border hover:border-primary/40'
+                  : 'border-border hover:border-primary/40',
               ]"
             >
               <div class="font-medium text-sm">Retrain model</div>
@@ -46,7 +47,7 @@
                 'rounded-lg border p-4 text-left transition-colors',
                 trainingMode === 'scratch'
                   ? 'border-primary bg-primary/5'
-                  : 'border-border hover:border-primary/40'
+                  : 'border-border hover:border-primary/40',
               ]"
             >
               <div class="font-medium text-sm">Train new model</div>
@@ -59,78 +60,171 @@
 
         <!-- Step 1 -->
         <div class="px-5 py-4 border-b border-border">
-
-          <div class="text-[11px] font-semibold uppercase tracking-wider text-muted-foreground mb-3">
-            {{ trainingMode === 'scratch'
-              ? '1. Choose seed type'
-              : '1. Choose model to retrain'
-            }}
+          <div
+            class="text-[11px] font-semibold uppercase tracking-wider text-muted-foreground mb-3"
+          >
+            {{ trainingMode === 'scratch' ? '1. Choose seed type' : '1. Choose model to retrain' }}
           </div>
 
-          <div class="space-y-2">
-            <label
-              v-for="track in tracks"
-              :key="track.id"
-              class="flex items-start gap-3 p-3 rounded-lg border cursor-pointer transition-colors"
-              :class="
-                selectedTrackId === track.id
-                  ? 'border-primary bg-primary/5'
-                  : 'border-border hover:border-primary/40'
-              "
-            >
-              <input type="radio" :value="track.id" v-model="selectedTrackId" class="mt-0.5" />
-
-              <div class="flex-1 min-w-0">
-
-                <!-- Always show base info -->
-                <div class="flex items-baseline gap-2 flex-wrap">
-                  <span class="font-medium text-sm">{{ track.label }}</span>
-                  <span class="text-xs text-muted-foreground italic">{{ track.species }}</span>
-
+          <!-- SCRATCH: seed type picker -->
+          <template v-if="trainingMode === 'scratch'">
+            <div class="grid grid-cols-4 gap-3 pt-1 max-h-[10rem] overflow-y-auto">
+              <div v-for="seed in seedTypes" :key="seed.id" class="relative shrink-0 pt-2 pr-2">
+                <button
+                  v-if="seed.isCustom"
+                  @click.stop="removeSeed(seed.id)"
+                  class="absolute -top-0 -right-0 w-5 h-5 flex items-center justify-center rounded-full bg-green-900 text-white text-xs z-10"
+                >
+                  ×
+                </button>
+                <button
+                  @click="selectedSeed = seed.id"
+                  :class="[
+                    'group w-36 flex items-center px-3 py-2 rounded-lg border-2 text-left transition-all overflow-hidden',
+                    selectedSeed === seed.id
+                      ? 'border-primary bg-primary/5'
+                      : 'border-border bg-background hover:border-primary/40',
+                  ]"
+                >
+                  <span class="text-sm font-semibold shrink-0">{{ seed.id }}</span>
                   <span
-                    v-if="trainingMode === 'retrain' && activeVersion(track)"
-                    class="text-xs px-2 py-0.5 rounded-full bg-green-300 text-green-900 font-medium"
+                    v-if="seed.species"
+                    class="ml-2 overflow-hidden whitespace-nowrap text-[11px] text-muted-foreground italic max-w-0 group-hover:max-w-[100px] opacity-0 group-hover:opacity-100 transition-all duration-200"
                   >
-                    {{ activeVersion(track)!.version_name }}
+                    · {{ seed.species }}
                   </span>
-                </div>
-
-                <div v-if="trainingMode === 'scratch'" class="text-xs text-muted-foreground mt-1">
-                    New model will be saved as
-                  <span class="font-mono text-foreground">{{ generateVersionName(track) }}</span>
-                </div>
-
-                <!-- Retrain mode details -->
-                <div v-else-if="activeVersion(track)" class="text-xs text-muted-foreground mt-1">
-                  MAE
-                  <span class="font-mono ml-1 text-foreground">
-                    {{ formatMetric(activeMainMetric(track)) }}
-                  </span>
-
-                  · {{ track.data_pool.total_samples.toLocaleString() }} samples
-                </div>
-
+                </button>
               </div>
-            </label>
-          </div>
+            </div>
+
+            <button
+              @click="showAddSeed = true"
+              class="mt-3 w-full rounded-lg border-2 border-dashed border-border px-4 py-2 text-sm text-muted-foreground transition hover:border-primary hover:text-primary"
+            >
+              + Add new seed type
+            </button>
+
+            <div
+              v-if="showAddSeed"
+              class="mt-3 rounded-lg border border-border bg-background p-3 space-y-3"
+            >
+              <input
+                v-model="newSeedId"
+                placeholder="Code name (e.g. PEH)"
+                class="w-full px-3 py-2 text-sm border border-border rounded-md"
+              />
+              <input
+                v-model="newSeedSpecies"
+                placeholder="Species name (optional)"
+                class="w-full px-3 py-2 text-sm border border-border rounded-md"
+              />
+              <div class="flex gap-2">
+                <button
+                  @click="addSeed"
+                  class="px-3 py-1.5 rounded-md text-sm bg-primary text-primary-foreground"
+                >
+                  Add
+                </button>
+                <button
+                  @click="cancelAddSeed"
+                  class="px-3 py-1.5 rounded-md text-sm border border-border"
+                >
+                  Cancel
+                </button>
+              </div>
+            </div>
+          </template>
+
+          <!-- RETRAIN: model version picker -->
+          <template v-else>
+            <div v-if="!allVersions.length" class="text-sm text-muted-foreground">
+              No trained models found. Train a new model first.
+            </div>
+            <div v-else class="space-y-2">
+              <label
+                v-for="version in allVersions"
+                :key="version.id"
+                class="flex items-start gap-3 p-3 rounded-lg border cursor-pointer transition-colors"
+                :class="
+                  selectedVersionId === version.id
+                    ? 'border-primary bg-primary/5'
+                    : 'border-border hover:border-primary/40'
+                "
+              >
+                <input
+                  type="radio"
+                  :value="version.id"
+                  v-model="selectedVersionId"
+                  class="mt-0.5"
+                />
+                <div class="flex-1 min-w-0">
+                  <div class="flex items-baseline gap-2 flex-wrap">
+                    <span class="font-medium text-sm">{{ version.version_name }}</span>
+                    <span
+                      v-if="version.is_active"
+                      class="text-xs px-2 py-0.5 rounded-full bg-green-300 text-green-900 font-medium"
+                    >
+                      active
+                    </span>
+                    <span class="text-xs text-muted-foreground italic">{{
+                      version.track_label
+                    }}</span>
+                  </div>
+                  <div class="text-xs text-muted-foreground mt-0.5">
+                    MAE
+                    <span class="font-mono text-foreground">{{
+                      formatMetric(version.metrics?.mae)
+                    }}</span>
+                    · F1
+                    <span class="font-mono text-foreground">{{
+                      formatMetric(version.metrics?.f1)
+                    }}</span>
+                    · {{ version.samples.toLocaleString() }} samples
+                  </div>
+                </div>
+              </label>
+            </div>
+          </template>
         </div>
 
         <!-- Step 2 -->
-        <div v-if="selectedTrackId" class="px-5 py-4 border-b border-border">
-
-          <div class="text-[11px] font-semibold uppercase tracking-wider text-muted-foreground mb-3">
+        <div
+          v-if="trainingMode === 'scratch' ? selectedSeed : selectedVersionId"
+          class="px-5 py-4 border-b border-border"
+        >
+          <div
+            class="text-[11px] font-semibold uppercase tracking-wider text-muted-foreground mb-3"
+          >
             2. Training data
           </div>
 
           <div class="rounded-lg border border-border bg-muted/20 p-4 space-y-2">
-            <div class="text-sm font-medium">
-              {{ totalPoolSamples.toLocaleString() }} samples available
-            </div>
+            <!-- Scratch -->
+
+            <template v-if="trainingMode === 'scratch'">
+              <div class="text-sm font-medium">New dataset for {{ selectedSeed }}</div>
+
+              <div class="text-xs text-muted-foreground">
+                Upload the full dataset for this new species
+              </div>
+            </template>
+
+            <!-- Retrain -->
+
+            <template v-else>
+              <div class="text-sm font-medium">Extending model {{ selectedVersionId }}</div>
+
+              <div class="text-xs text-muted-foreground">
+                Upload additional samples (will be merged with existing dataset)
+              </div>
+            </template>
+
             <div class="text-xs text-muted-foreground">
-              {{ selectedTrack.data_pool.total_samples.toLocaleString() }} existing ·
-              {{ uploadedFiles.length }} uploaded
+              {{ uploadedFiles.length }} file(s) selected
             </div>
           </div>
+
+          <!-- Drop zone -->
 
           <div
             class="mt-3 rounded-lg border-2 border-dashed border-border p-5 text-center cursor-pointer hover:bg-muted/20"
@@ -140,12 +234,9 @@
             @drop.prevent="onDrop"
             @click="triggerFilePicker"
           >
-            <div class="text-sm font-medium">
-              Drop images or click to upload
-            </div>
-            <div class="text-xs text-muted-foreground mt-1">
-              .jpg, .png, .zip supported
-            </div>
+            <div class="text-sm font-medium">Drop images or click to upload</div>
+
+            <div class="text-xs text-muted-foreground mt-1">.jpg, .png, .zip supported</div>
 
             <input
               ref="fileInputRef"
@@ -157,6 +248,8 @@
             />
           </div>
 
+          <!-- File list -->
+
           <ul v-if="uploadedFiles.length" class="mt-3 space-y-1 text-xs">
             <li
               v-for="(file, idx) in uploadedFiles"
@@ -164,11 +257,12 @@
               class="flex items-center gap-2 px-2 py-1 rounded border border-border bg-card"
             >
               <span class="font-mono flex-1 truncate">{{ file.name }}</span>
+
               <span class="text-muted-foreground">{{ formatFileSize(file.size) }}</span>
+
               <button class="text-red-500" @click="removeUpload(idx)">✕</button>
             </li>
           </ul>
-
         </div>
 
         <!-- Submit -->
@@ -178,21 +272,19 @@
           </span>
 
           <button
-            :disabled="!canSubmit"
+            :disabled="trainingMode === 'scratch' ? !selectedSeed : !selectedVersionId"
             class="px-4 py-2 rounded-md text-sm font-medium bg-primary text-primary-foreground disabled:opacity-50"
             @click="startTraining"
           >
             Start training
           </button>
         </div>
-
       </section>
 
       <!-- Active & Recent Jobs -->
       <section class="rounded-xl border border-border bg-card overflow-hidden shadow-md">
-
         <header class="px-5 py-4 bg-primary/[0.22] border-b border-border">
-          <h2 class="font-bold text-lg tracking-tight">Active & recent jobs</h2>
+          <h2 class="font-bold text-lg tracking-tight">Active & Recent Jobs</h2>
           <p class="text-xs text-muted-foreground mt-0.5">
             Live training progress and recent results.
           </p>
@@ -204,7 +296,6 @@
 
         <ul v-else class="divide-y divide-border">
           <li v-for="job in jobRows" :key="job.id" class="px-5 py-4 space-y-2">
-
             <!-- Top row -->
             <div class="flex items-center justify-between gap-2 flex-wrap">
               <div class="flex items-center gap-2 flex-wrap">
@@ -216,17 +307,24 @@
               <span
                 class="text-xs px-2 py-0.5 rounded-full font-medium"
                 :class="{
-                  'bg-blue-100 text-blue-800':   job.status === 'running',
+                  'bg-blue-100 text-blue-800': job.status === 'running',
                   'bg-green-100 text-green-800': job.status === 'completed',
-                  'bg-red-100 text-red-800':     job.status === 'failed',
+                  'bg-red-100 text-red-800': job.status === 'failed',
                 }"
               >
-                {{ job.status === 'running' ? `Epoch ${job.currentEpoch} / ${job.totalEpochs}` : job.status }}
+                {{
+                  job.status === 'running'
+                    ? `Epoch ${job.currentEpoch} / ${job.totalEpochs}`
+                    : job.status
+                }}
               </span>
             </div>
 
             <!-- Progress bar (running only) -->
-            <div v-if="job.status === 'running'" class="w-full h-1.5 rounded-full bg-muted overflow-hidden">
+            <div
+              v-if="job.status === 'running'"
+              class="w-full h-1.5 rounded-full bg-muted overflow-hidden"
+            >
               <div
                 class="h-full bg-primary rounded-full transition-all duration-1000"
                 :style="{ width: job.progress + '%' }"
@@ -236,10 +334,12 @@
             <!-- Stats row -->
             <div class="flex gap-4 text-xs text-muted-foreground flex-wrap">
               <span v-if="job.status === 'running'">
-                Elapsed <span class="font-mono text-foreground">{{ formatDuration(job.elapsed) }}</span>
+                Elapsed
+                <span class="font-mono text-foreground">{{ formatDuration(job.elapsed) }}</span>
               </span>
               <span v-if="job.status === 'completed'">
-                Duration <span class="font-mono text-foreground">{{ formatDuration(job.duration) }}</span>
+                Duration
+                <span class="font-mono text-foreground">{{ formatDuration(job.duration) }}</span>
               </span>
               <span v-if="job.status === 'failed'" class="text-red-500">
                 {{ job.errorMessage }}
@@ -250,18 +350,16 @@
             </div>
           </li>
         </ul>
-
       </section>
-
     </div>
   </div>
 </template>
 
 <script setup lang="ts">
-import { computed, onMounted, onUnmounted, ref } from 'vue'
+import { api } from '@/api'
+import { computed, onMounted, onUnmounted, ref, watch } from 'vue'
 import { useRoute } from 'vue-router'
 import PageHeader from '@/components/PageHeader.vue'
-import { api } from '@/api'
 
 const route = useRoute()
 const loading = ref(true)
@@ -269,8 +367,7 @@ const loadError = ref('')
 
 const tracks = ref<any[]>([])
 const trainingHistory = ref<any[]>([])
-const selectedTrackId = ref<string | null>(null)
-const trainingMode = ref<'retrain' | 'scratch'>('retrain')
+const trainingMode = ref<'scratch' | 'retrain'>('scratch')
 const uploadedFiles = ref<{ name: string; size: number }[]>([])
 const fileInputRef = ref<HTMLInputElement | null>(null)
 const dragOver = ref(false)
@@ -278,19 +375,54 @@ const formMessage = ref('')
 const now = ref(Date.now())
 let ticker: ReturnType<typeof setInterval>
 
-const selectedTrack = computed(() =>
-  tracks.value.find(t => t.id === selectedTrackId.value) ?? null
+const seedTypes = ref([
+  { id: 'PEH', species: 'Pisum sativum', isCustom: false },
+  { id: 'PHYCA', species: 'Phacelia tanacetifolia', isCustom: false },
+  { id: 'VAU', species: 'Vicia sativa', isCustom: false },
+  { id: 'CAT', species: 'Carthamus tinctorius', isCustom: false },
+])
+
+const selectedSeed = ref<string | null>(null)
+const showAddSeed = ref(false)
+const newSeedId = ref('')
+const newSeedSpecies = ref('')
+
+const selectedVersionId = ref<number | null>(null)
+
+// Flatten all versions from all tracks with their track label attached
+const allVersions = computed(() =>
+  tracks.value.flatMap((t) => (t.versions ?? []).map((v: any) => ({ ...v, track_label: t.label }))),
 )
 
-const totalPoolSamples = computed(() =>
-  selectedTrack.value
-    ? selectedTrack.value.data_pool.total_samples + uploadedFiles.value.length
-    : 0
-)
+// Reset selection when switching mode
+watch(trainingMode, () => {
+  selectedSeed.value = null
+  selectedVersionId.value = null
+})
 
-const canSubmit = computed(() =>
-  !!selectedTrack.value && totalPoolSamples.value > 0
-)
+const canSubmit = computed(() => {
+  if (trainingMode.value === 'scratch') return !!selectedSeed.value
+  return !!selectedVersionId.value
+})
+
+function addSeed() {
+  if (!newSeedId.value.trim()) return
+  const id = newSeedId.value.trim().toUpperCase()
+  if (seedTypes.value.some((s) => s.id === id)) return
+  seedTypes.value.push({ id, species: newSeedSpecies.value.trim(), isCustom: true })
+  cancelAddSeed()
+}
+
+function cancelAddSeed() {
+  showAddSeed.value = false
+  newSeedId.value = ''
+  newSeedSpecies.value = ''
+}
+
+function removeSeed(id: string) {
+  seedTypes.value = seedTypes.value.filter((s) => s.id !== id)
+  if (selectedSeed.value === id) selectedSeed.value = null
+}
 
 const jobRows = computed(() => {
   const rows: any[] = []
@@ -302,9 +434,7 @@ const jobRows = computed(() => {
       ? new Date(j.started_at)
       : new Date(now.value + (j.started_at_offset_seconds ?? 0) * 1000)
     const elapsedSec = Math.floor((now.value - startedAt.getTime()) / 1000)
-    const progress = j.total_epochs > 0
-      ? Math.round((j.current_epoch / j.total_epochs) * 100)
-      : 0
+    const progress = j.total_epochs > 0 ? Math.round((j.current_epoch / j.total_epochs) * 100) : 0
     rows.push({
       id: j.id,
       versionName: j.version_name,
@@ -346,43 +476,20 @@ function formatDuration(seconds: number) {
   return `${s}s`
 }
 
-function activeVersion(t: any) {
-  return t.versions?.find((v: any) => v.is_active) ?? null
-}
-
-function activeMainMetric(t: any) {
-  return activeVersion(t)?.metrics?.mae
-}
-
-function formatMetric(v?: number) {
-  return v != null ? v.toFixed(2) : '—'
-}
-
 function formatFileSize(bytes: number) {
   if (bytes < 1024) return `${bytes} B`
   if (bytes < 1024 ** 2) return `${(bytes / 1024).toFixed(1)} KB`
   return `${(bytes / 1024 ** 2).toFixed(1)} MB`
 }
 
-function generateVersionName(track: any) {
-  const next = (track.versions.length + 1).toString().padStart(2, '0')
-  return `${track.id}-${next}`
-}
-
 function startTraining() {
-  if (!selectedTrack.value) return
-  const t = selectedTrack.value
-  t.active_job = {
-    id: Date.now(),
-    version_name: generateVersionName(t),
-    started_at: new Date().toISOString(),
-    current_epoch: 0,
-    total_epochs: 90,
-    loss: 0,
+  if (trainingMode.value === 'scratch') {
+    if (!selectedSeed.value) return
+    formMessage.value = `Training new model for ${selectedSeed.value}`
+    return
   }
-  formMessage.value = trainingMode.value === 'scratch'
-    ? 'New model training started.'
-    : 'Model retraining started.'
+  if (!selectedVersionId.value) return
+  formMessage.value = `Retraining model ${selectedVersionId.value}`
 }
 
 function triggerFilePicker() {
@@ -410,7 +517,9 @@ function removeUpload(i: number) {
 }
 
 onMounted(async () => {
-  ticker = setInterval(() => { now.value = Date.now() }, 1000)
+  ticker = setInterval(() => {
+    now.value = Date.now()
+  }, 1000)
   try {
     if (import.meta.env.DEV && route.query.preview === 'default') {
       const { default: mocks } = await import('@/mocks/seed-models.json')

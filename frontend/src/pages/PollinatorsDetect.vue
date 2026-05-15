@@ -8,10 +8,7 @@
 
     <template v-else-if="run">
       <!-- Status card -->
-      <section
-        class="rounded-xl border bg-surface p-5"
-        :class="statusBorderClass"
-      >
+      <section class="rounded-xl border bg-surface p-5" :class="statusBorderClass">
         <div class="flex items-center gap-3 mb-3">
           <span
             class="text-xs font-semibold uppercase tracking-wide px-2 py-0.5 rounded-full"
@@ -39,15 +36,10 @@
             <span class="text-muted-foreground font-normal">({{ percent }}%)</span>
           </div>
           <div class="mt-2 h-2 rounded-full bg-muted overflow-hidden">
-            <div
-              class="h-full bg-primary transition-all"
-              :style="{ width: percent + '%' }"
-            />
+            <div class="h-full bg-primary transition-all" :style="{ width: percent + '%' }" />
           </div>
           <div class="mt-2 text-xs text-muted-foreground">
-            <template v-if="run.status === 'completed'">
-              Completed in {{ elapsedHuman }}
-            </template>
+            <template v-if="run.status === 'completed'"> Completed in {{ elapsedHuman }} </template>
             <template v-else>
               {{ elapsedHuman }} elapsed
               <span v-if="etaHuman"> · ~{{ etaHuman }} remaining</span>
@@ -75,7 +67,11 @@
             v-if="run.status === 'failed'"
             class="ml-auto text-sm px-3 py-1.5 rounded-md border border-border hover:bg-muted disabled:opacity-50"
             :disabled="rerunning || run.upload == null || !run.module"
-            :title="run.upload == null || !run.module ? 'Original upload missing from this run record' : ''"
+            :title="
+              run.upload == null || !run.module
+                ? 'Original upload missing from this run record'
+                : ''
+            "
             @click="onRerun"
           >
             {{ rerunning ? 'Restarting…' : 'Re-run with same config' }}
@@ -95,29 +91,23 @@
           <div>
             <div class="text-xs text-muted-foreground mb-2">By class</div>
             <ul class="space-y-1 text-sm">
-              <li
-                v-for="row in classRows"
-                :key="row.label"
-                class="flex items-center gap-2"
-              >
+              <li v-for="row in classRows" :key="row.label" class="flex items-center gap-2">
                 <span
                   class="w-2 h-2 rounded-full shrink-0"
                   :style="{ backgroundColor: row.color }"
                 />
                 <span class="flex-1">{{ row.label }}</span>
                 <span class="font-medium">{{ row.count.toLocaleString() }}</span>
-                <span class="text-xs text-muted-foreground w-10 text-right">{{ row.percent }}%</span>
+                <span class="text-xs text-muted-foreground w-10 text-right"
+                  >{{ row.percent }}%</span
+                >
               </li>
             </ul>
           </div>
           <div>
             <div class="text-xs text-muted-foreground mb-2">By source</div>
             <ul class="space-y-1 text-sm">
-              <li
-                v-for="row in sourceRows"
-                :key="row.label"
-                class="flex items-center gap-2"
-              >
+              <li v-for="row in sourceRows" :key="row.label" class="flex items-center gap-2">
                 <span class="flex-1">{{ row.label }}</span>
                 <span class="font-medium">{{ row.count.toLocaleString() }}</span>
               </li>
@@ -161,7 +151,8 @@
         <pre
           v-if="showConfig"
           class="border-t border-border px-5 py-3 text-xs overflow-x-auto bg-background"
-        >{{ JSON.stringify(run.config, null, 2) }}</pre>
+          >{{ JSON.stringify(run.config, null, 2) }}</pre
+        >
       </section>
     </template>
   </div>
@@ -353,21 +344,31 @@ const headerSubtitle = computed(() => {
 
 const statusLabel = computed(() => {
   switch (run.value?.status) {
-    case 'pending': return 'Queued'
-    case 'running': return 'Running'
-    case 'completed': return 'Completed'
-    case 'failed': return 'Failed'
-    default: return ''
+    case 'pending':
+      return 'Queued'
+    case 'running':
+      return 'Running'
+    case 'completed':
+      return 'Completed'
+    case 'failed':
+      return 'Failed'
+    default:
+      return ''
   }
 })
 
 const statusBadgeClass = computed(() => {
   switch (run.value?.status) {
-    case 'pending': return 'bg-muted text-muted-foreground'
-    case 'running': return 'bg-blue-100 text-blue-700'
-    case 'completed': return 'bg-green-100 text-green-700'
-    case 'failed': return 'bg-red-100 text-red-700'
-    default: return 'bg-muted text-muted-foreground'
+    case 'pending':
+      return 'bg-muted text-muted-foreground'
+    case 'running':
+      return 'bg-blue-100 text-blue-700'
+    case 'completed':
+      return 'bg-green-100 text-green-700'
+    case 'failed':
+      return 'bg-red-100 text-red-700'
+    default:
+      return 'bg-muted text-muted-foreground'
   }
 })
 
@@ -379,10 +380,7 @@ const statusBorderClass = computed(() => {
 
 const percent = computed(() => {
   if (!run.value || run.value.image_count === 0) return 0
-  return Math.min(
-    100,
-    Math.round((run.value.processed_image_count / run.value.image_count) * 100),
-  )
+  return Math.min(100, Math.round((run.value.processed_image_count / run.value.image_count) * 100))
 })
 
 const elapsedSeconds = computed(() => {
@@ -408,9 +406,7 @@ const timingLine = computed(() => {
   return `Created ${created}`
 })
 
-const canCancel = computed(
-  () => run.value?.status === 'pending' || run.value?.status === 'running',
-)
+const canCancel = computed(() => run.value?.status === 'pending' || run.value?.status === 'running')
 const canOpenReview = computed(
   () =>
     !!run.value &&
@@ -469,7 +465,11 @@ async function onCancel() {
     run.value.error_message = 'Cancelled by user.'
     return
   }
-  if (!window.confirm('Cancel this run? The worker stops at the next checkpoint and partial results are discarded.')) {
+  if (
+    !window.confirm(
+      'Cancel this run? The worker stops at the next checkpoint and partial results are discarded.',
+    )
+  ) {
     return
   }
   cancelling.value = true
@@ -532,5 +532,4 @@ async function onRerun() {
     rerunning.value = false
   }
 }
-
 </script>

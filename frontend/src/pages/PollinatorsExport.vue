@@ -11,11 +11,7 @@
       class="px-8 py-3 border-b border-border bg-surface flex items-center gap-4 flex-wrap text-sm"
     >
       <span class="text-muted-foreground">Will export:</span>
-      <span
-        v-for="row in classCounts"
-        :key="row.label"
-        class="inline-flex items-center gap-1.5"
-      >
+      <span v-for="row in classCounts" :key="row.label" class="inline-flex items-center gap-1.5">
         <span class="w-2 h-2 rounded-full" :style="{ backgroundColor: row.color }" />
         <span class="font-mono">{{ row.count }}</span>
         <span class="text-muted-foreground">{{ row.label.toLowerCase() }}</span>
@@ -34,7 +30,9 @@
 
     <div v-if="!imageCards.length" class="flex-1 p-12 text-center text-sm text-muted-foreground">
       No accepted detections in this run yet. Confirm or correct some in
-      <RouterLink :to="`/pollinators/runs/${runId}/review`" class="text-primary hover:underline">Review</RouterLink>
+      <RouterLink :to="`/pollinators/runs/${runId}/review`" class="text-primary hover:underline"
+        >Review</RouterLink
+      >
       first.
     </div>
 
@@ -62,11 +60,7 @@
               preserveAspectRatio="xMidYMid meet"
               class="absolute inset-0 w-full h-full"
             >
-              <image
-                :href="card.sourceUrl"
-                :width="card.naturalW"
-                :height="card.naturalH"
-              />
+              <image :href="card.sourceUrl" :width="card.naturalW" :height="card.naturalH" />
               <rect
                 v-for="d in card.detections"
                 :key="d.id"
@@ -82,7 +76,10 @@
                 @click="toggleExclude(d)"
               />
             </svg>
-            <div v-else class="absolute inset-0 flex items-center justify-center text-xs text-muted-foreground">
+            <div
+              v-else
+              class="absolute inset-0 flex items-center justify-center text-xs text-muted-foreground"
+            >
               source unavailable
             </div>
           </div>
@@ -92,9 +89,9 @@
               v-for="d in card.detections"
               :key="d.id"
               class="relative aspect-square rounded-md overflow-hidden border-2 transition-colors focus:outline-none"
-              :class="d.excluded_from_export
-                ? 'border-red-500'
-                : 'border-transparent hover:border-border'"
+              :class="
+                d.excluded_from_export ? 'border-red-500' : 'border-transparent hover:border-border'
+              "
               :title="`${classLabel(effective(d))} · ${(d.confidence ?? 0).toFixed(2)}`"
               @click="toggleExclude(d)"
             >
@@ -258,11 +255,11 @@ const classCounts = computed(() => {
   }))
 })
 
-const totalIncluded = computed(() =>
-  acceptedDetections.value.filter((d) => !d.excluded_from_export).length,
+const totalIncluded = computed(
+  () => acceptedDetections.value.filter((d) => !d.excluded_from_export).length,
 )
-const totalExcluded = computed(() =>
-  acceptedDetections.value.filter((d) => d.excluded_from_export).length,
+const totalExcluded = computed(
+  () => acceptedDetections.value.filter((d) => d.excluded_from_export).length,
 )
 
 onMounted(async () => {

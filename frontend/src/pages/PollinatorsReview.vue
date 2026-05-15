@@ -29,412 +29,439 @@
       </button>
     </div>
     <div class="flex-1 flex flex-col-reverse lg:flex-row min-h-0">
-    <!-- Left: filters + grouped grid -->
-    <section
-      class="w-full lg:w-[480px] shrink-0 border-t lg:border-t-0 lg:border-r border-border flex flex-col bg-surface max-h-[55vh] lg:max-h-none"
-    >
-      <div class="px-4 py-3 border-b border-border space-y-2">
-        <div class="flex items-center gap-2 text-xs">
-          <label class="text-muted-foreground">Show</label>
-          <select
-            v-model="statusFilter"
-            class="px-2 py-1 rounded border border-border bg-background"
+      <!-- Left: filters + grouped grid -->
+      <section
+        class="w-full lg:w-[480px] shrink-0 border-t lg:border-t-0 lg:border-r border-border flex flex-col bg-surface max-h-[55vh] lg:max-h-none"
+      >
+        <div class="px-4 py-3 border-b border-border space-y-2">
+          <div class="flex items-center gap-2 text-xs">
+            <label class="text-muted-foreground">Show</label>
+            <select
+              v-model="statusFilter"
+              class="px-2 py-1 rounded border border-border bg-background"
+            >
+              <option value="todo">Todo</option>
+              <option value="unsure">Unsure</option>
+              <option value="rejected">Rejected</option>
+              <option value="all">All</option>
+            </select>
+            <label class="text-muted-foreground">Class</label>
+            <select
+              v-model="classFilter"
+              class="px-2 py-1 rounded border border-border bg-background"
+            >
+              <option value="all">All</option>
+              <option v-for="cls in CLASSES" :key="cls" :value="cls">
+                {{ classLabel(cls) }}
+              </option>
+            </select>
+            <button
+              class="ml-auto px-2 py-1 rounded border border-border hover:bg-muted disabled:opacity-50 disabled:hover:bg-transparent"
+              :disabled="exporting || !run"
+              @click="exportCsv"
+            >
+              {{ exporting ? 'Exporting…' : 'Export CSV' }}
+            </button>
+          </div>
+          <!-- Per-detector minimum confidence. Detections from the other branch
+             pass through unaffected (preprocessing-only crops have no YOLO
+             score and so on). Step 0.05 keeps the slider snappy. -->
+          <div class="grid grid-cols-[auto_1fr_auto] items-center gap-x-2 gap-y-1 text-xs">
+            <label for="yolo-min" class="text-muted-foreground">YOLO ≥</label>
+            <input
+              id="yolo-min"
+              type="range"
+              :min="inferenceYoloThreshold"
+              max="1"
+              step="0.05"
+              v-model.number="yoloMinConf"
+              class="w-full accent-primary"
+              :title="`Inference threshold: ${inferenceYoloThreshold.toFixed(2)}`"
+            />
+            <span class="font-mono w-10 text-right">{{ yoloMinConf.toFixed(2) }}</span>
+            <label for="insectnet-min" class="text-muted-foreground">InsectNet ≥</label>
+            <input
+              id="insectnet-min"
+              type="range"
+              :min="inferenceInsectnetThreshold"
+              max="1"
+              step="0.05"
+              v-model.number="insectnetMinConf"
+              class="w-full accent-primary"
+              :title="`Inference threshold: ${inferenceInsectnetThreshold.toFixed(2)}`"
+            />
+            <span class="font-mono w-10 text-right">{{ insectnetMinConf.toFixed(2) }}</span>
+          </div>
+          <div v-if="belowThresholdIds.length" class="flex items-center justify-end text-xs">
+            <button
+              class="px-2 py-1 rounded border border-red-300 text-red-700 hover:bg-red-50 disabled:opacity-50"
+              :disabled="rejectingBelow"
+              @click="rejectBelowThreshold"
+            >
+              {{
+                rejectingBelow ? 'Rejecting…' : `Reject ${belowThresholdIds.length} below threshold`
+              }}
+            </button>
+          </div>
+          <div class="text-xs text-muted-foreground flex items-center justify-between gap-3">
+            <span class="flex-1 min-w-0 truncate">
+              {{ filteredDetections.length }} of {{ detections.length }} detections
+            </span>
+            <button
+              class="text-primary hover:underline"
+              :disabled="!filteredDetections.length"
+              @click="selectAllVisible"
+            >
+              Select all
+            </button>
+          </div>
+        </div>
+
+        <!-- Bulk action bar (only when 1+ selected) -->
+        <div
+          v-if="bulkIds.size > 0"
+          class="px-4 py-2 border-b border-border bg-primary/5 flex flex-wrap items-center gap-2 text-xs"
+        >
+          <span class="font-medium">{{ bulkIds.size }} selected</span>
+          <button
+            class="px-2 py-1 rounded bg-primary text-primary-foreground hover:bg-primary/90"
+            @click="bulkConfirm"
           >
-            <option value="todo">Todo</option>
-            <option value="unsure">Unsure</option>
-            <option value="rejected">Rejected</option>
-            <option value="all">All</option>
-          </select>
-          <label class="text-muted-foreground">Class</label>
+            Confirm
+          </button>
+          <button class="px-2 py-1 rounded border border-border hover:bg-muted" @click="bulkReject">
+            Reject
+          </button>
           <select
-            v-model="classFilter"
+            v-model="bulkCorrectClass"
             class="px-2 py-1 rounded border border-border bg-background"
+            @change="onBulkCorrectChange"
           >
-            <option value="all">All</option>
+            <option value="">Correct to…</option>
             <option v-for="cls in CLASSES" :key="cls" :value="cls">
               {{ classLabel(cls) }}
             </option>
           </select>
-          <button
-            class="ml-auto px-2 py-1 rounded border border-border hover:bg-muted disabled:opacity-50 disabled:hover:bg-transparent"
-            :disabled="exporting || !run"
-            @click="exportCsv"
-          >
-            {{ exporting ? 'Exporting…' : 'Export CSV' }}
+          <button class="ml-auto text-muted-foreground hover:text-foreground" @click="clearBulk">
+            Clear
           </button>
-        </div>
-        <!-- Per-detector minimum confidence. Detections from the other branch
-             pass through unaffected (preprocessing-only crops have no YOLO
-             score and so on). Step 0.05 keeps the slider snappy. -->
-        <div class="grid grid-cols-[auto_1fr_auto] items-center gap-x-2 gap-y-1 text-xs">
-          <label for="yolo-min" class="text-muted-foreground">YOLO ≥</label>
-          <input
-            id="yolo-min"
-            type="range"
-            :min="inferenceYoloThreshold"
-            max="1"
-            step="0.05"
-            v-model.number="yoloMinConf"
-            class="w-full accent-primary"
-            :title="`Inference threshold: ${inferenceYoloThreshold.toFixed(2)}`"
-          />
-          <span class="font-mono w-10 text-right">{{ yoloMinConf.toFixed(2) }}</span>
-          <label for="insectnet-min" class="text-muted-foreground">InsectNet ≥</label>
-          <input
-            id="insectnet-min"
-            type="range"
-            :min="inferenceInsectnetThreshold"
-            max="1"
-            step="0.05"
-            v-model.number="insectnetMinConf"
-            class="w-full accent-primary"
-            :title="`Inference threshold: ${inferenceInsectnetThreshold.toFixed(2)}`"
-          />
-          <span class="font-mono w-10 text-right">{{ insectnetMinConf.toFixed(2) }}</span>
         </div>
         <div
-          v-if="belowThresholdIds.length"
-          class="flex items-center justify-end text-xs"
+          v-if="bulkConfirmSkipped > 0"
+          class="px-4 py-2 border-b border-border bg-amber-50 text-amber-800 flex items-center gap-2 text-xs"
         >
-          <button
-            class="px-2 py-1 rounded border border-red-300 text-red-700 hover:bg-red-50 disabled:opacity-50"
-            :disabled="rejectingBelow"
-            @click="rejectBelowThreshold"
-          >
-            {{ rejectingBelow ? 'Rejecting…' : `Reject ${belowThresholdIds.length} below threshold` }}
-          </button>
-        </div>
-        <div class="text-xs text-muted-foreground flex items-center justify-between gap-3">
-          <span class="flex-1 min-w-0 truncate">
-            {{ filteredDetections.length }} of {{ detections.length }} detections
+          <span>
+            Skipped {{ bulkConfirmSkipped }} row{{ bulkConfirmSkipped === 1 ? '' : 's' }}
+            with no predicted class. Correct them explicitly so they're included in group/detector
+            training.
           </span>
           <button
-            class="text-primary hover:underline"
-            :disabled="!filteredDetections.length"
-            @click="selectAllVisible"
+            class="ml-auto text-amber-700 hover:text-amber-900"
+            @click="bulkConfirmSkipped = 0"
           >
-            Select all
+            Dismiss
           </button>
         </div>
-      </div>
 
-      <!-- Bulk action bar (only when 1+ selected) -->
-      <div
-        v-if="bulkIds.size > 0"
-        class="px-4 py-2 border-b border-border bg-primary/5 flex flex-wrap items-center gap-2 text-xs"
-      >
-        <span class="font-medium">{{ bulkIds.size }} selected</span>
-        <button
-          class="px-2 py-1 rounded bg-primary text-primary-foreground hover:bg-primary/90"
-          @click="bulkConfirm"
-        >
-          Confirm
-        </button>
-        <button
-          class="px-2 py-1 rounded border border-border hover:bg-muted"
-          @click="bulkReject"
-        >
-          Reject
-        </button>
-        <select
-          v-model="bulkCorrectClass"
-          class="px-2 py-1 rounded border border-border bg-background"
-          @change="onBulkCorrectChange"
-        >
-          <option value="">Correct to…</option>
-          <option v-for="cls in CLASSES" :key="cls" :value="cls">
-            {{ classLabel(cls) }}
-          </option>
-        </select>
-        <button
-          class="ml-auto text-muted-foreground hover:text-foreground"
-          @click="clearBulk"
-        >
-          Clear
-        </button>
-      </div>
-      <div
-        v-if="bulkConfirmSkipped > 0"
-        class="px-4 py-2 border-b border-border bg-amber-50 text-amber-800 flex items-center gap-2 text-xs"
-      >
-        <span>
-          Skipped {{ bulkConfirmSkipped }} row{{ bulkConfirmSkipped === 1 ? '' : 's' }}
-          with no predicted class. Correct them explicitly so they're included in
-          group/detector training.
-        </span>
-        <button
-          class="ml-auto text-amber-700 hover:text-amber-900"
-          @click="bulkConfirmSkipped = 0"
-        >
-          Dismiss
-        </button>
-      </div>
-
-      <div class="flex-1 overflow-auto">
-        <div v-for="group in groupedDetections" :key="group.label" class="border-b border-border">
-          <header
-            class="px-4 py-2 text-xs font-semibold uppercase tracking-wide bg-surface sticky top-0 z-20 border-b border-border"
-            :class="
-              group.kind === 'needs_review' ? 'text-amber-700'
-              : group.kind === 'unclassified' ? 'text-indigo-700'
-              : group.kind === 'background' ? 'text-muted-foreground/70'
-              : 'text-muted-foreground'
-            "
-          >
-            <span v-if="group.kind === 'needs_review'" class="mr-1">⚠</span>
-            <span v-else-if="group.kind === 'unclassified'" class="mr-1">?</span>
-            <span v-else-if="group.kind === 'background'" class="mr-1">✗</span>
-            {{ group.label }}
-            <span class="font-normal">({{ group.detections.length }})</span>
-          </header>
-          <div class="grid grid-cols-5 gap-1 p-2">
-            <div
-              v-for="d in group.detections"
-              :key="d.id"
-              class="rounded-md overflow-hidden border-2 transition-all"
-              :class="[
-                selectedId === d.id ? 'border-primary ring-2 ring-primary' : 'border-transparent hover:border-border',
-                reviewedFade(d) ? 'opacity-50' : '',
-              ]"
+        <div class="flex-1 overflow-auto">
+          <div v-for="group in groupedDetections" :key="group.label" class="border-b border-border">
+            <header
+              class="px-4 py-2 text-xs font-semibold uppercase tracking-wide bg-surface sticky top-0 z-20 border-b border-border"
+              :class="
+                group.kind === 'needs_review'
+                  ? 'text-amber-700'
+                  : group.kind === 'unclassified'
+                    ? 'text-indigo-700'
+                    : group.kind === 'background'
+                      ? 'text-muted-foreground/70'
+                      : 'text-muted-foreground'
+              "
             >
+              <span v-if="group.kind === 'needs_review'" class="mr-1">⚠</span>
+              <span v-else-if="group.kind === 'unclassified'" class="mr-1">?</span>
+              <span v-else-if="group.kind === 'background'" class="mr-1">✗</span>
+              {{ group.label }}
+              <span class="font-normal">({{ group.detections.length }})</span>
+            </header>
+            <div class="grid grid-cols-5 gap-1 p-2">
               <div
-                :data-detection-id="d.id"
-                role="button"
-                tabindex="0"
-                class="relative aspect-square cursor-pointer focus:outline-none select-none"
-                :class="imageParityById.get(d.id) ? 'bg-muted/60' : 'bg-background'"
-                @click="onTileClick(d, $event)"
-                @keydown.enter.prevent="onTileClick(d, $event)"
+                v-for="d in group.detections"
+                :key="d.id"
+                class="rounded-md overflow-hidden border-2 transition-all"
+                :class="[
+                  selectedId === d.id
+                    ? 'border-primary ring-2 ring-primary'
+                    : 'border-transparent hover:border-border',
+                  reviewedFade(d) ? 'opacity-50' : '',
+                ]"
               >
-                <img
-                  v-if="d.crop_url"
-                  :src="d.crop_url"
-                  :alt="`Detection ${d.id}`"
-                  loading="lazy"
-                  class="absolute inset-0 w-full h-full object-contain"
-                />
                 <div
-                  v-else
-                  class="absolute inset-0 flex items-center justify-center text-2xl font-bold opacity-30"
+                  :data-detection-id="d.id"
+                  role="button"
+                  tabindex="0"
+                  class="relative aspect-square cursor-pointer focus:outline-none select-none"
+                  :class="imageParityById.get(d.id) ? 'bg-muted/60' : 'bg-background'"
+                  @click="onTileClick(d, $event)"
+                  @keydown.enter.prevent="onTileClick(d, $event)"
                 >
-                  {{ classGlyph(primaryClass(d)) }}
+                  <img
+                    v-if="d.crop_url"
+                    :src="d.crop_url"
+                    :alt="`Detection ${d.id}`"
+                    loading="lazy"
+                    class="absolute inset-0 w-full h-full object-contain"
+                  />
+                  <div
+                    v-else
+                    class="absolute inset-0 flex items-center justify-center text-2xl font-bold opacity-30"
+                  >
+                    {{ classGlyph(primaryClass(d)) }}
+                  </div>
                 </div>
-              </div>
-              <div
-                role="checkbox"
-                :aria-checked="bulkIds.has(d.id)"
-                tabindex="0"
-                class="h-5 flex items-center justify-center text-xs cursor-pointer transition-colors"
-                :class="bulkIds.has(d.id)
-                  ? 'bg-primary text-primary-foreground'
-                  : 'bg-surface text-muted-foreground hover:bg-muted'"
-                @click="toggleBulk(d.id)"
-                @keydown.space.prevent="toggleBulk(d.id)"
-              >
-                <span v-if="bulkIds.has(d.id)">✓</span>
+                <div
+                  role="checkbox"
+                  :aria-checked="bulkIds.has(d.id)"
+                  tabindex="0"
+                  class="h-5 flex items-center justify-center text-xs cursor-pointer transition-colors"
+                  :class="
+                    bulkIds.has(d.id)
+                      ? 'bg-primary text-primary-foreground'
+                      : 'bg-surface text-muted-foreground hover:bg-muted'
+                  "
+                  @click="toggleBulk(d.id)"
+                  @keydown.space.prevent="toggleBulk(d.id)"
+                >
+                  <span v-if="bulkIds.has(d.id)">✓</span>
+                </div>
               </div>
             </div>
           </div>
+          <div
+            v-if="!groupedDetections.length"
+            class="p-8 text-center text-sm text-muted-foreground"
+          >
+            No detections match the current filter.
+          </div>
         </div>
-        <div v-if="!groupedDetections.length" class="p-8 text-center text-sm text-muted-foreground">
-          No detections match the current filter.
+      </section>
+
+      <!-- Right: preview pane (mirrors left's structural feel: thin top bar, scroll body, action bar at bottom) -->
+      <section class="flex-1 flex flex-col min-w-0">
+        <div v-if="!selected" class="m-auto text-sm text-muted-foreground">
+          Select a detection on the left to review it.
         </div>
-      </div>
-    </section>
+        <template v-else>
+          <!-- Top bar (height matches left filter bar) -->
+          <header
+            class="px-5 py-3 border-b border-border bg-surface text-sm flex items-center gap-3"
+          >
+            <span class="font-medium">Detection #{{ selected.id }}</span>
+            <span class="text-muted-foreground font-mono text-xs truncate">
+              {{ selected.source_image_filename }}
+            </span>
+            <span
+              class="ml-auto text-xs px-2 py-0.5 rounded-full shrink-0"
+              :class="statusBadgeClass(selected.reviewer_status)"
+              >{{ statusLabel(selected.reviewer_status) }}</span
+            >
+          </header>
 
-    <!-- Right: preview pane (mirrors left's structural feel: thin top bar, scroll body, action bar at bottom) -->
-    <section class="flex-1 flex flex-col min-w-0">
-      <div v-if="!selected" class="m-auto text-sm text-muted-foreground">
-        Select a detection on the left to review it.
-      </div>
-      <template v-else>
-        <!-- Top bar (height matches left filter bar) -->
-        <header class="px-5 py-3 border-b border-border bg-surface text-sm flex items-center gap-3">
-          <span class="font-medium">Detection #{{ selected.id }}</span>
-          <span class="text-muted-foreground font-mono text-xs truncate">
-            {{ selected.source_image_filename }}
-          </span>
-          <span
-            class="ml-auto text-xs px-2 py-0.5 rounded-full shrink-0"
-            :class="statusBadgeClass(selected.reviewer_status)"
-          >{{ statusLabel(selected.reviewer_status) }}</span>
-        </header>
-
-        <div class="flex-1 flex flex-col min-h-0">
-          <!-- Source image with bbox overlay. Click to open the zoom modal.
+          <div class="flex-1 flex flex-col min-h-0">
+            <!-- Source image with bbox overlay. Click to open the zoom modal.
                flex-1 + min-h-0 makes it fill whatever vertical space is left
                after the predictions/label/footer, instead of locking to a
                16:9 box that forced the right pane to scroll. -->
-          <div
-            class="flex-1 min-h-0 relative overflow-hidden"
-            :class="selected.source_image_url && sourceImage.w ? 'cursor-zoom-in' : ''"
-            :style="{ backgroundColor: classBgFor(primaryClass(selected)) }"
-            role="button"
-            tabindex="0"
-            @click="openZoom"
-            @keydown.enter.prevent="openZoom"
-          >
             <div
-              class="absolute top-0 left-0 right-0 h-1.5 z-10"
-              :style="{ backgroundColor: classColor(primaryClass(selected)) }"
-            />
-            <svg
-              v-if="selected.source_image_url && sourceImage.w"
-              :viewBox="`0 0 ${sourceImage.w} ${sourceImage.h}`"
-              preserveAspectRatio="xMidYMid meet"
-              class="absolute inset-0 w-full h-full"
+              class="flex-1 min-h-0 relative overflow-hidden"
+              :class="selected.source_image_url && sourceImage.w ? 'cursor-zoom-in' : ''"
+              :style="{ backgroundColor: classBgFor(primaryClass(selected)) }"
+              role="button"
+              tabindex="0"
+              @click="openZoom"
+              @keydown.enter.prevent="openZoom"
             >
-              <image
-                :href="selected.source_image_url"
-                :width="sourceImage.w"
-                :height="sourceImage.h"
+              <div
+                class="absolute top-0 left-0 right-0 h-1.5 z-10"
+                :style="{ backgroundColor: classColor(primaryClass(selected)) }"
               />
-              <rect
-                v-if="bboxOutline"
-                :x="bboxOutline.x"
-                :y="bboxOutline.y"
-                :width="bboxOutline.width"
-                :height="bboxOutline.height"
-                fill="#ef4444"
-                fill-opacity="0.18"
-                stroke="#ef4444"
-                :stroke-width="bboxStrokeWidth"
-              />
-            </svg>
-            <span
-              v-else
-              class="absolute inset-0 flex items-center justify-center text-7xl font-bold opacity-30"
-            >{{ classGlyph(primaryClass(selected)) }}</span>
-          </div>
-
-          <!-- Predictions + Label: stacked below xl, side-by-side at xl+ (Label left, Predictions right) -->
-          <div class="grid grid-cols-1 xl:grid-cols-2 border-b border-border">
-            <!-- Predictions (compact, two-line). Order swap at xl+ via order-2. -->
-            <div class="px-5 py-4 border-b border-border xl:border-b-0 xl:order-2">
-              <div class="text-[11px] font-semibold uppercase tracking-wider text-muted-foreground mb-2">
-                Predictions
-              </div>
-              <div class="space-y-1.5 text-sm">
-                <div class="flex items-center gap-2" :class="selected.yolo_class == null ? 'opacity-60' : ''">
-                  <span class="text-muted-foreground w-20">YOLO</span>
-                  <span
-                    class="w-2 h-2 rounded-full shrink-0"
-                    :style="{ backgroundColor: classColor(selected.yolo_class) }"
-                  />
-                  <span class="font-medium flex-1">{{ selected.yolo_class ? classLabel(selected.yolo_class) : '—' }}</span>
-                  <span class="font-mono text-xs text-muted-foreground">
-                    {{ selected.yolo_confidence != null ? selected.yolo_confidence.toFixed(2) : '—' }}
-                  </span>
-                </div>
-                <div class="flex items-center gap-2" :class="selected.insectnet_class == null ? 'opacity-60' : ''">
-                  <span class="text-muted-foreground w-20">InsectNet</span>
-                  <span
-                    class="w-2 h-2 rounded-full shrink-0"
-                    :style="{ backgroundColor: classColor(selected.insectnet_class) }"
-                  />
-                  <span class="font-medium flex-1">{{ selected.insectnet_class ? classLabel(selected.insectnet_class) : '—' }}</span>
-                  <span class="font-mono text-xs text-muted-foreground">
-                    {{ selected.insectnet_confidence != null ? selected.insectnet_confidence.toFixed(2) : '—' }}
-                  </span>
-                </div>
-                <div v-if="hasDisagreement(selected)" class="text-xs text-amber-700 pt-1">
-                  ⚠ Models disagree
-                </div>
-                <div
-                  v-else-if="isLowConfidence(selected)"
-                  class="text-xs text-amber-700 pt-1"
-                >
-                  ⚠ Low confidence
-                </div>
-              </div>
+              <svg
+                v-if="selected.source_image_url && sourceImage.w"
+                :viewBox="`0 0 ${sourceImage.w} ${sourceImage.h}`"
+                preserveAspectRatio="xMidYMid meet"
+                class="absolute inset-0 w-full h-full"
+              >
+                <image
+                  :href="selected.source_image_url"
+                  :width="sourceImage.w"
+                  :height="sourceImage.h"
+                />
+                <rect
+                  v-if="bboxOutline"
+                  :x="bboxOutline.x"
+                  :y="bboxOutline.y"
+                  :width="bboxOutline.width"
+                  :height="bboxOutline.height"
+                  fill="#ef4444"
+                  fill-opacity="0.18"
+                  stroke="#ef4444"
+                  :stroke-width="bboxStrokeWidth"
+                />
+              </svg>
+              <span
+                v-else
+                class="absolute inset-0 flex items-center justify-center text-7xl font-bold opacity-30"
+                >{{ classGlyph(primaryClass(selected)) }}</span
+              >
             </div>
 
-            <!-- Label (one row per class with checkbox at end). Visually first at xl+ via order-1. -->
-            <div class="px-5 py-4 xl:order-1 xl:border-r border-border">
-              <div class="text-[11px] font-semibold uppercase tracking-wider text-muted-foreground mb-2">
-                Label
-              </div>
-              <div>
-                <label
-                  v-for="cls in CLASSES"
-                  :key="cls"
-                  class="flex items-center gap-3 py-2 px-2 -mx-2 rounded cursor-pointer"
+            <!-- Predictions + Label: stacked below xl, side-by-side at xl+ (Label left, Predictions right) -->
+            <div class="grid grid-cols-1 xl:grid-cols-2 border-b border-border">
+              <!-- Predictions (compact, two-line). Order swap at xl+ via order-2. -->
+              <div class="px-5 py-4 border-b border-border xl:border-b-0 xl:order-2">
+                <div
+                  class="text-[11px] font-semibold uppercase tracking-wider text-muted-foreground mb-2"
                 >
-                  <span
-                    class="w-2 h-2 rounded-full shrink-0"
-                    :style="{ backgroundColor: classColor(cls) }"
-                  />
-                  <span class="flex-1 text-sm">{{ classLabel(cls) }}</span>
-                  <input
-                    type="checkbox"
-                    :checked="cls === effectiveLabel(selected)"
-                    @change="correctTo(cls)"
-                    class="w-4 h-4"
-                  />
-                </label>
-                <!-- 5th option: rejecting means "this is background" — the
+                  Predictions
+                </div>
+                <div class="space-y-1.5 text-sm">
+                  <div
+                    class="flex items-center gap-2"
+                    :class="selected.yolo_class == null ? 'opacity-60' : ''"
+                  >
+                    <span class="text-muted-foreground w-20">YOLO</span>
+                    <span
+                      class="w-2 h-2 rounded-full shrink-0"
+                      :style="{ backgroundColor: classColor(selected.yolo_class) }"
+                    />
+                    <span class="font-medium flex-1">{{
+                      selected.yolo_class ? classLabel(selected.yolo_class) : '—'
+                    }}</span>
+                    <span class="font-mono text-xs text-muted-foreground">
+                      {{
+                        selected.yolo_confidence != null ? selected.yolo_confidence.toFixed(2) : '—'
+                      }}
+                    </span>
+                  </div>
+                  <div
+                    class="flex items-center gap-2"
+                    :class="selected.insectnet_class == null ? 'opacity-60' : ''"
+                  >
+                    <span class="text-muted-foreground w-20">InsectNet</span>
+                    <span
+                      class="w-2 h-2 rounded-full shrink-0"
+                      :style="{ backgroundColor: classColor(selected.insectnet_class) }"
+                    />
+                    <span class="font-medium flex-1">{{
+                      selected.insectnet_class ? classLabel(selected.insectnet_class) : '—'
+                    }}</span>
+                    <span class="font-mono text-xs text-muted-foreground">
+                      {{
+                        selected.insectnet_confidence != null
+                          ? selected.insectnet_confidence.toFixed(2)
+                          : '—'
+                      }}
+                    </span>
+                  </div>
+                  <div v-if="hasDisagreement(selected)" class="text-xs text-amber-700 pt-1">
+                    ⚠ Models disagree
+                  </div>
+                  <div v-else-if="isLowConfidence(selected)" class="text-xs text-amber-700 pt-1">
+                    ⚠ Low confidence
+                  </div>
+                </div>
+              </div>
+
+              <!-- Label (one row per class with checkbox at end). Visually first at xl+ via order-1. -->
+              <div class="px-5 py-4 xl:order-1 xl:border-r border-border">
+                <div
+                  class="text-[11px] font-semibold uppercase tracking-wider text-muted-foreground mb-2"
+                >
+                  Label
+                </div>
+                <div>
+                  <label
+                    v-for="cls in CLASSES"
+                    :key="cls"
+                    class="flex items-center gap-3 py-2 px-2 -mx-2 rounded cursor-pointer"
+                  >
+                    <span
+                      class="w-2 h-2 rounded-full shrink-0"
+                      :style="{ backgroundColor: classColor(cls) }"
+                    />
+                    <span class="flex-1 text-sm">{{ classLabel(cls) }}</span>
+                    <input
+                      type="checkbox"
+                      :checked="cls === effectiveLabel(selected)"
+                      @change="correctTo(cls)"
+                      class="w-4 h-4"
+                    />
+                  </label>
+                  <!-- 5th option: rejecting means "this is background" — the
                      binary classifier trains rejected detections as the
                      'background' class. Treating it as a label keeps the
                      Label panel as a single source of truth for what the
                      reviewer decided. -->
-                <label
-                  class="flex items-center gap-3 py-2 px-2 -mx-2 rounded cursor-pointer"
-                >
-                  <span class="w-2 h-2 rounded-full shrink-0 bg-muted-foreground/40" />
-                  <span class="flex-1 text-sm">
-                    Background
-                    <span class="text-[10px] text-muted-foreground ml-1">(reject)</span>
-                  </span>
-                  <input
-                    type="checkbox"
-                    :checked="selected.reviewer_status === 'rejected'"
-                    @change="reject()"
-                    class="w-4 h-4"
-                  />
-                </label>
+                  <label class="flex items-center gap-3 py-2 px-2 -mx-2 rounded cursor-pointer">
+                    <span class="w-2 h-2 rounded-full shrink-0 bg-muted-foreground/40" />
+                    <span class="flex-1 text-sm">
+                      Background
+                      <span class="text-[10px] text-muted-foreground ml-1">(reject)</span>
+                    </span>
+                    <input
+                      type="checkbox"
+                      :checked="selected.reviewer_status === 'rejected'"
+                      @change="reject()"
+                      class="w-4 h-4"
+                    />
+                  </label>
+                </div>
               </div>
             </div>
           </div>
-        </div>
 
-        <!-- Bottom action bar -->
-        <footer class="border-t border-border bg-surface px-5 py-3 flex items-center justify-between">
-          <span class="text-[11px] text-muted-foreground font-mono hidden md:block">
-            1-4 confirm · x reject · u unsure · z undo · ⏎ suggested · ←→↑↓ navigate · ⇧ + arrows / click: range select · esc: clear
-          </span>
-          <div class="flex gap-2 ml-auto">
-            <button
-              class="px-3 py-1.5 rounded-md text-sm font-medium border border-border hover:bg-muted disabled:opacity-50 disabled:cursor-not-allowed"
-              :disabled="!lastAction || undoing"
-              :title="lastAction ? `Undo last action on detection #${lastAction.id}` : 'Nothing to undo'"
-              @click="undoLast"
-            >
-              {{ undoing ? 'Undoing…' : 'Undo' }}
-            </button>
-            <button
-              class="px-3 py-1.5 rounded-md text-sm font-medium border border-border hover:bg-muted"
-              @click="reject"
-            >
-              Reject
-            </button>
-            <button
-              class="px-3 py-1.5 rounded-md text-sm font-medium border border-amber-300 text-amber-700 hover:bg-amber-50"
-              @click="markUnsure"
-            >
-              Unsure
-            </button>
-            <button
-              class="px-3 py-1.5 rounded-md text-sm font-medium bg-primary text-primary-foreground hover:bg-primary/90 disabled:opacity-50 disabled:cursor-not-allowed disabled:hover:bg-primary"
-              :disabled="!effectiveLabel(selected)"
-              :title="effectiveLabel(selected) ? '' : 'Pick a label or wait for models to agree'"
-              @click="confirmAs(effectiveLabel(selected))"
-            >
-              Confirm
-            </button>
-          </div>
-        </footer>
-      </template>
-    </section>
+          <!-- Bottom action bar -->
+          <footer
+            class="border-t border-border bg-surface px-5 py-3 flex items-center justify-between"
+          >
+            <span class="text-[11px] text-muted-foreground font-mono hidden md:block">
+              1-4 confirm · x reject · u unsure · z undo · ⏎ suggested · ←→↑↓ navigate · ⇧ + arrows
+              / click: range select · esc: clear
+            </span>
+            <div class="flex gap-2 ml-auto">
+              <button
+                class="px-3 py-1.5 rounded-md text-sm font-medium border border-border hover:bg-muted disabled:opacity-50 disabled:cursor-not-allowed"
+                :disabled="!lastAction || undoing"
+                :title="
+                  lastAction ? `Undo last action on detection #${lastAction.id}` : 'Nothing to undo'
+                "
+                @click="undoLast"
+              >
+                {{ undoing ? 'Undoing…' : 'Undo' }}
+              </button>
+              <button
+                class="px-3 py-1.5 rounded-md text-sm font-medium border border-border hover:bg-muted"
+                @click="reject"
+              >
+                Reject
+              </button>
+              <button
+                class="px-3 py-1.5 rounded-md text-sm font-medium border border-amber-300 text-amber-700 hover:bg-amber-50"
+                @click="markUnsure"
+              >
+                Unsure
+              </button>
+              <button
+                class="px-3 py-1.5 rounded-md text-sm font-medium bg-primary text-primary-foreground hover:bg-primary/90 disabled:opacity-50 disabled:cursor-not-allowed disabled:hover:bg-primary"
+                :disabled="!effectiveLabel(selected)"
+                :title="effectiveLabel(selected) ? '' : 'Pick a label or wait for models to agree'"
+                @click="confirmAs(effectiveLabel(selected))"
+              >
+                Confirm
+              </button>
+            </div>
+          </footer>
+        </template>
+      </section>
     </div>
   </div>
 
@@ -462,11 +489,7 @@
         class="w-full h-full"
       >
         <g :transform="`translate(${zoom.tx} ${zoom.ty}) scale(${zoom.scale})`">
-          <image
-            :href="selected.source_image_url"
-            :width="sourceImage.w"
-            :height="sourceImage.h"
-          />
+          <image :href="selected.source_image_url" :width="sourceImage.w" :height="sourceImage.h" />
           <rect
             v-if="bboxOutline"
             :x="bboxOutline.x"
@@ -483,7 +506,9 @@
       <button
         class="absolute top-4 right-4 px-3 py-1.5 rounded-md bg-white/10 text-white text-sm hover:bg-white/20"
         @click.stop="closeZoom"
-      >Close (Esc)</button>
+      >
+        Close (Esc)
+      </button>
       <div class="absolute bottom-4 left-1/2 -translate-x-1/2 text-white/60 text-xs font-mono">
         scroll to zoom · drag to pan · {{ Math.round(zoom.scale * 100) }}%
       </div>
@@ -575,9 +600,7 @@ type ClassFilter = ClassName | 'all'
 const classFilter = ref<ClassFilter>('all')
 // Inference-time thresholds. Anything below these never made it into the
 // DB, so the sliders can't usefully go lower.
-const inferenceYoloThreshold = computed(
-  () => run.value?.config?.yolo?.confidence ?? 0,
-)
+const inferenceYoloThreshold = computed(() => run.value?.config?.yolo?.confidence ?? 0)
 const inferenceInsectnetThreshold = computed(
   () => run.value?.config?.binary_classifier?.confidence ?? 0,
 )
@@ -664,15 +687,11 @@ const filteredDetections = computed(() => {
     )
   }
   if (yoloMinConf.value > 0) {
-    list = list.filter(
-      (d) => d.yolo_confidence == null || d.yolo_confidence >= yoloMinConf.value,
-    )
+    list = list.filter((d) => d.yolo_confidence == null || d.yolo_confidence >= yoloMinConf.value)
   }
   if (insectnetMinConf.value > 0) {
     list = list.filter(
-      (d) =>
-        d.insectnet_confidence == null ||
-        d.insectnet_confidence >= insectnetMinConf.value,
+      (d) => d.insectnet_confidence == null || d.insectnet_confidence >= insectnetMinConf.value,
     )
   }
   return [...list].sort((a, b) => maxConfidence(a) - maxConfidence(b))
@@ -771,9 +790,7 @@ const groupedDetections = computed(() => {
 
 // Flattened in the same order the grid renders, so keyboard navigation
 // matches what the reviewer sees rather than the raw confidence sort.
-const flatVisible = computed(() =>
-  groupedDetections.value.flatMap((g) => g.detections),
-)
+const flatVisible = computed(() => groupedDetections.value.flatMap((g) => g.detections))
 
 // Stripe by source image: same image → same tile background, image
 // changes → flip. Restarts per group so each group's first cluster is
@@ -786,7 +803,7 @@ const imageParityById = computed(() => {
     let lastImage: string | null = null
     for (const d of group.detections) {
       if (lastImage !== null && d.source_image_filename !== lastImage) {
-        parity = (parity === 0 ? 1 : 0)
+        parity = parity === 0 ? 1 : 0
       }
       lastImage = d.source_image_filename
       map.set(d.id, parity)
@@ -795,17 +812,19 @@ const imageParityById = computed(() => {
   return map
 })
 
-const selected = computed(() =>
-  detections.value.find((d) => d.id === selectedId.value) ?? null,
-)
+const selected = computed(() => detections.value.find((d) => d.id === selectedId.value) ?? null)
 
-watch(filteredDetections, (list) => {
-  if (selectedId.value && !list.find((d) => d.id === selectedId.value)) {
-    selectedId.value = list[0]?.id ?? null
-  } else if (!selectedId.value && list.length) {
-    selectedId.value = list[0].id
-  }
-}, { immediate: true })
+watch(
+  filteredDetections,
+  (list) => {
+    if (selectedId.value && !list.find((d) => d.id === selectedId.value)) {
+      selectedId.value = list[0]?.id ?? null
+    } else if (!selectedId.value && list.length) {
+      selectedId.value = list[0].id
+    }
+  },
+  { immediate: true },
+)
 
 watch(selectedId, async (id) => {
   if (id == null) return
@@ -982,11 +1001,7 @@ function needsReview(d: Detection): boolean {
 
 function hasDisagreement(d: Detection): boolean {
   // Disagreement only meaningful when both branches contributed a class.
-  return (
-    d.yolo_class != null &&
-    d.insectnet_class != null &&
-    d.yolo_class !== d.insectnet_class
-  )
+  return d.yolo_class != null && d.insectnet_class != null && d.yolo_class !== d.insectnet_class
 }
 function isLowConfidence(d: Detection): boolean {
   return maxConfidence(d) < LOW_CONFIDENCE_THRESHOLD
@@ -1000,11 +1015,16 @@ function reviewedFade(d: Detection): boolean {
 }
 function statusBadgeClass(s: ReviewerStatus): string {
   switch (s) {
-    case 'confirmed': return 'bg-green-100 text-green-700'
-    case 'corrected': return 'bg-blue-100 text-blue-700'
-    case 'rejected': return 'bg-red-100 text-red-700'
-    case 'unsure': return 'bg-amber-100 text-amber-700'
-    default: return 'bg-muted text-muted-foreground'
+    case 'confirmed':
+      return 'bg-green-100 text-green-700'
+    case 'corrected':
+      return 'bg-blue-100 text-blue-700'
+    case 'rejected':
+      return 'bg-red-100 text-red-700'
+    case 'unsure':
+      return 'bg-amber-100 text-amber-700'
+    default:
+      return 'bg-muted text-muted-foreground'
   }
 }
 function statusLabel(s: ReviewerStatus): string {
@@ -1191,11 +1211,9 @@ const belowThresholdIds = computed<number[]>(() => {
   return detections.value
     .filter((d) => {
       if (d.reviewer_status !== 'unreviewed') return false
-      const yoloFails =
-        d.yolo_confidence != null && d.yolo_confidence < yoloMinConf.value
+      const yoloFails = d.yolo_confidence != null && d.yolo_confidence < yoloMinConf.value
       const insectFails =
-        d.insectnet_confidence != null &&
-        d.insectnet_confidence < insectnetMinConf.value
+        d.insectnet_confidence != null && d.insectnet_confidence < insectnetMinConf.value
       return yoloFails || insectFails
     })
     .map((d) => d.id)
@@ -1260,17 +1278,10 @@ async function exportCsv() {
   }
 }
 
-async function submitBulk(
-  ids: number[],
-  status: ReviewerStatus,
-  label: ClassName | null,
-) {
+async function submitBulk(ids: number[], status: ReviewerStatus, label: ClassName | null) {
   if (!ids.length) return
   const idSet = new Set(ids)
-  const snapshot = new Map<
-    number,
-    { status: ReviewerStatus; label: ClassName | null }
-  >()
+  const snapshot = new Map<number, { status: ReviewerStatus; label: ClassName | null }>()
   for (const d of detections.value) {
     if (idSet.has(d.id)) {
       const existing = failedSaves.value.get(d.id)
@@ -1480,7 +1491,10 @@ function onTileClick(d: Detection, e: MouseEvent | KeyboardEvent) {
 function onKeydown(e: KeyboardEvent) {
   if (!selected.value) return
   if (zoomDialog.value?.open) return
-  if (e.target instanceof HTMLElement && ['INPUT', 'SELECT', 'TEXTAREA'].includes(e.target.tagName)) {
+  if (
+    e.target instanceof HTMLElement &&
+    ['INPUT', 'SELECT', 'TEXTAREA'].includes(e.target.tagName)
+  ) {
     return
   }
   // Escape clears any bulk selection without losing the currently-focused tile.
@@ -1497,10 +1511,22 @@ function onKeydown(e: KeyboardEvent) {
   const classKeyAction = (cls: ClassName) =>
     bulkMode ? applyToBulk('corrected', cls) : confirmAs(cls)
   switch (e.key) {
-    case '1': classKeyAction('fly'); e.preventDefault(); break
-    case '2': classKeyAction('bumblebee'); e.preventDefault(); break
-    case '3': classKeyAction('butterfly'); e.preventDefault(); break
-    case '4': classKeyAction('other'); e.preventDefault(); break
+    case '1':
+      classKeyAction('fly')
+      e.preventDefault()
+      break
+    case '2':
+      classKeyAction('bumblebee')
+      e.preventDefault()
+      break
+    case '3':
+      classKeyAction('butterfly')
+      e.preventDefault()
+      break
+    case '4':
+      classKeyAction('other')
+      e.preventDefault()
+      break
     case 'x':
     case 'X':
       if (bulkMode) applyToBulk('rejected', null)
@@ -1521,15 +1547,30 @@ function onKeydown(e: KeyboardEvent) {
         e.preventDefault()
       }
       break
-    case 'Enter': confirmAs(suggestedClass(selected.value)); e.preventDefault(); break
+    case 'Enter':
+      confirmAs(suggestedClass(selected.value))
+      e.preventDefault()
+      break
     case 'ArrowDown':
-    case 'j': navigate(GRID_COLS, e.shiftKey); e.preventDefault(); break
+    case 'j':
+      navigate(GRID_COLS, e.shiftKey)
+      e.preventDefault()
+      break
     case 'ArrowUp':
-    case 'k': navigate(-GRID_COLS, e.shiftKey); e.preventDefault(); break
+    case 'k':
+      navigate(-GRID_COLS, e.shiftKey)
+      e.preventDefault()
+      break
     case 'ArrowRight':
-    case 'l': navigate(1, e.shiftKey); e.preventDefault(); break
+    case 'l':
+      navigate(1, e.shiftKey)
+      e.preventDefault()
+      break
     case 'ArrowLeft':
-    case 'h': navigate(-1, e.shiftKey); e.preventDefault(); break
+    case 'h':
+      navigate(-1, e.shiftKey)
+      e.preventDefault()
+      break
   }
 }
 
