@@ -1036,13 +1036,6 @@ const totalPoolSamples = computed(() => {
   return selectedTrack.value.data_pool.total_samples + uploadedFiles.value.length
 })
 
-const estimatedTime = computed(() => {
-  if (!selectedTrack.value) return ''
-  const samples = selectedTrack.value.data_pool.total_samples
-  const seconds = (samples * settings.epochs) / 12
-  return humanDuration(seconds)
-})
-
 function activeVersion(t: Track): Version | null {
   return t.versions.find((v) => v.is_active) ?? null
 }

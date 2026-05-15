@@ -10,10 +10,13 @@ __pycache__/
 .venv/
 
 # Images and labels
-data/seed/images/
-data/seed/labels/
-data/seed/train.txt
-data/seed/val.txt
+train/
+val/
+train_sliced/
+val_sliced/
+cohens_kappa/
+
+# Seed redictions
 
 # Jupyter notebook checkpoints
 data/seed/.ipynb_checkpoints/
@@ -22,6 +25,8 @@ ml-pipelines/notebooks/seed-counting/.ipynb_checkpoints/
 # YOLO outputs
 runs/
 sahi_results/
+debug_outputs/
+predictions/
 
 # Django
 db.sqlite3
@@ -35,6 +40,9 @@ tests/integration/bruno/fixtures/
 # Vue build output
 static/vue/
 
+# Image uploads
+media/
+
 # Environment variables
 .env
 
@@ -45,4 +53,5 @@ static/vue/
 
 *.pth
 
-media/
+# Pycharm
+.idea/

@@ -133,8 +133,8 @@ const modules: ModuleItem[] = [
     children: [
       { to: '/seeds/upload', label: 'Upload' },
       { to: '/seeds/runs', label: 'Runs' },
-      { to: '/seeds/export', label: 'Export' },
-      { to: '/seeds/models', label: 'Models', staffOnly: true },
+      { to: '/seeds/training', label: 'Training' },
+      { to: '/seeds/models', label: 'Models' },
     ],
   },
   {

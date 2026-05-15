@@ -1,0 +1,8 @@
+path: ../data/seed/peh_model
+#train: train/images
+#val: val/images
+train: train_sliced
+val: val_sliced
+
+names:
+  0: peh
