@@ -1,3 +1,4 @@
+import json
 import os
 from collections import defaultdict
 
@@ -27,7 +28,7 @@ FINETUNE_WEIGHTS = {  # Per-species checkpoint to fine-tune from (best.pt or las
     'vau': os.path.abspath(os.path.join('runs', 'obb', 'vau', 'weights', 'best.pt')),
 }
 FINETUNE_RUN_SUFFIX = (
-    '_ft1'  # Suffix for the new run directory. A bit clunky now so will update later
+    ''  # Suffix for the new run directory. A bit clunky now so will update later
 )
 # Optional: lower LR for fine-tuning (set to None to use Ultralytics defaults)
 FINETUNE_LR0 = 0.001  # example learning rate, potentially the user should be able to specify/tune this tune (or set to None to use Ultralytics defaults)
@@ -35,7 +36,10 @@ FINETUNE_LRF = 0.01  # example learning rate, same note as LR0
 FINETUNE_EPOCHS = 45  # example, user should definitely be able to specify this (probably will be set to less than a full fresh run)
 
 SPECIES_LIST = [
-    'peh'
+    'cat',
+    'peh',
+    'phyca',
+    'vau',
 ]  # Removed the rest of the species temporarily so I can test incremental training on PEH where we had new images
 # The above is potentially a clunky solution
 
@@ -200,13 +204,18 @@ for species in SPECIES_LIST:
                     flat_poly = [float(c) for c in poly]
 
                 preds.append(
-                    {
-                        'poly': flat_poly[:8],
-                        'class': 0,
-                    }
+                    {'poly': flat_poly[:8], 'class': 0, 'conf': float(pred.score.value)}
                 )
 
         tp, fp, fn = calculate_tp_fp_fn(preds, gt_boxes, iou_threshold=0.3)
+
+        # Save the preds to a json file for testing the seed size calculations
+        export_dir = 'predictions/'
+        os.makedirs(export_dir, exist_ok=True)
+        file_path = os.path.join(export_dir, f'{img_name.split(".")[0]}_preds.json')
+
+        with open(file_path, 'w') as f:
+            json.dump(preds, f)
 
         # Detailed per-image logging (for debug to make our lives easier, pls don't remove for now)
         num_preds = len(preds)

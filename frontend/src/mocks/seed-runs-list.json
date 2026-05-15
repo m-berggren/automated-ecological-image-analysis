@@ -1,0 +1,75 @@
+{
+  "default": {
+    "uploads": [
+      {
+        "id": 1,
+        "name": "PEH batch — May 2026",
+        "image_count": 40,
+        "created_at_offset_seconds": -7200
+      },
+      { "id": 2, "name": "PHYCA trial A", "image_count": 20, "created_at_offset_seconds": -86400 }
+    ],
+    "runs": [
+      {
+        "id": 1,
+        "name": "PEH run 1",
+        "upload": 1,
+        "status": "completed",
+        "image_count": 40,
+        "processed_image_count": 40,
+        "detection_count": 312,
+        "config": {
+          "selected_seed": "PEH",
+          "notes": "Dry conditions, container shaken 3x",
+          "enable_viability": true
+        },
+        "created_at_offset_seconds": -6000,
+        "started_at_offset_seconds": -5900,
+        "completed_at_offset_seconds": -5600
+      },
+      {
+        "id": 2,
+        "name": "PEH run 2",
+        "upload": 1,
+        "status": "running",
+        "image_count": 40,
+        "processed_image_count": 18,
+        "detection_count": 140,
+        "config": { "selected_seed": "PEH", "notes": "", "enable_viability": false },
+        "created_at_offset_seconds": -300,
+        "started_at_offset_seconds": -250,
+        "completed_at_offset_seconds": null
+      },
+      {
+        "id": 3,
+        "name": "PHYCA trial A run 1",
+        "upload": 2,
+        "status": "failed",
+        "image_count": 20,
+        "processed_image_count": 4,
+        "detection_count": 0,
+        "config": {
+          "selected_seed": "PHYCA",
+          "notes": "Images blurry, retake needed",
+          "enable_viability": false
+        },
+        "created_at_offset_seconds": -80000,
+        "started_at_offset_seconds": -79900,
+        "completed_at_offset_seconds": null
+      },
+      {
+        "id": 4,
+        "name": "VAU pending",
+        "upload": null,
+        "status": "pending",
+        "image_count": 0,
+        "processed_image_count": 0,
+        "detection_count": 0,
+        "config": { "selected_seed": "VAU", "notes": "", "enable_viability": false },
+        "created_at_offset_seconds": -60,
+        "started_at_offset_seconds": null,
+        "completed_at_offset_seconds": null
+      }
+    ]
+  }
+}

@@ -125,3 +125,16 @@ class UploadListCreateView(generics.ListCreateAPIView):
             UploadSerializer(upload).data,
             status=status.HTTP_201_CREATED,
         )
+
+
+class UploadDetailView(generics.RetrieveUpdateAPIView):
+    """GET   /api/datasets/uploads/<id>/  read one upload.
+    PATCH /api/datasets/uploads/<id>/  edit fields (currently only `name`).
+
+    Used by the Runs page's inline rename. Other fields on the serializer
+    are read-only so the only thing this exposes for writing is `name`.
+    """
+
+    queryset = Upload.objects.all()
+    serializer_class = UploadSerializer
+    lookup_field = 'pk'

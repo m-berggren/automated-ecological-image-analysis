@@ -2,6 +2,7 @@ from django.urls import path
 
 from .views import (
     DetectionBulkView,
+    DetectionExclusionView,
     InferenceRunCancelView,
     InferenceRunDetailView,
     InferenceRunListCreateView,
@@ -31,6 +32,11 @@ urlpatterns = [
         name='run-cancel',
     ),
     path('detections/bulk/', DetectionBulkView.as_view(), name='detection-bulk'),
+    path(
+        'detections/<int:pk>/exclude/',
+        DetectionExclusionView.as_view(),
+        name='detection-exclude',
+    ),
     path('training/', TrainingJobListView.as_view(), name='training-list'),
     path(
         'training/<int:pk>/',
