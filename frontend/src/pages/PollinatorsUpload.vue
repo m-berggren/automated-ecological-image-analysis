@@ -217,39 +217,41 @@
     <UploadDropZone
       v-model:active-tab="uploadActiveTab"
       :tabs="uploadTabs"
-      :has-files="!!uploader && uploader.items.length > 0"
-      :disabled="creatingUpload"
+      :has-files="pickedFiles.length > 0"
       @select="onUploadSelect"
     />
 
-    <!-- Upload progress + start. Always rendered so the Start button is
-         visible even before any image has been picked; it's disabled with
-         an explanatory hint when there's nothing to run on yet. -->
+    <!-- Selection summary + start. Uploads are deferred to the upcoming
+         pipeline rework (separate branch); for now Detect counts the
+         picked files but does not transmit them. -->
     <section class="rounded-xl border border-border bg-surface">
-      <header class="flex items-center justify-between px-5 py-3 border-b border-border">
+      <header class="flex items-center justify-between px-5 py-3">
         <div class="text-sm">
-          <template v-if="uploader && uploader.items.length">
-            <span class="font-medium">{{ doneCount }}</span>
-            <span class="text-muted-foreground"> of </span>
-            <span class="font-medium">{{ uploader.items.length }}</span>
-            <span class="text-muted-foreground"> uploaded</span>
-            <span v-if="failedCount" class="ml-3 text-red-600">{{ failedCount }} failed</span>
+          <template v-if="pickedFiles.length">
+            <span class="font-medium">{{ pickedFiles.length.toLocaleString() }}</span>
+            <span class="text-muted-foreground">
+              {{ pickedFiles.length === 1 ? 'image' : 'images' }} selected ·
+              {{ formatBytes(totalPickedBytes) }}
+            </span>
+            <button
+              class="ml-3 text-xs text-muted-foreground hover:text-red-600"
+              @click="clearPicked"
+            >
+              Clear
+            </button>
           </template>
           <template v-else>
-            <span class="text-muted-foreground">
-              Drop or browse images above, then start detection.
-            </span>
+            <span class="text-muted-foreground"> Drop or browse images above to count them. </span>
           </template>
         </div>
         <div class="flex items-center gap-2">
           <button
-            :disabled="!doneCount || starting"
-            :title="!doneCount ? 'Upload at least one image first' : ''"
+            :disabled="!pickedFiles.length"
+            :title="pickedFiles.length ? '' : 'Pick at least one image first'"
             class="px-3 py-1.5 rounded-md text-sm font-medium bg-primary text-primary-foreground hover:bg-primary/90 disabled:opacity-50 disabled:cursor-not-allowed"
             @click="startDetection"
           >
-            <span v-if="!starting">Start detection</span>
-            <span v-else>Starting…</span>
+            Start detection
           </button>
         </div>
       </header>
@@ -292,11 +294,9 @@
 
 <script setup lang="ts">
 import { computed, onMounted, ref } from 'vue'
-import { useRouter } from 'vue-router'
 import PageHeader from '@/components/PageHeader.vue'
 import PollinatorsStepper from '@/components/PollinatorsStepper.vue'
 import UploadDropZone, { type UploadTab } from '@/components/UploadDropZone.vue'
-import { createUploader, type UploadItem } from '@/lib/uploader'
 import { api } from '@/api'
 import { XCircle } from 'lucide-vue-next'
 import ROIDrawer from '@/components/ROIDrawer.vue'
@@ -321,6 +321,7 @@ const previewUrl = ref<string | null>(null)
 
 const router = useRouter()
 const creatingUpload = ref(false)
+
 const uploadActiveTab = ref('files')
 const uploadTabs: UploadTab[] = [
   {
@@ -329,7 +330,7 @@ const uploadTabs: UploadTab[] = [
     mode: 'files',
     accept: 'image/*',
     placeholder: 'Drop images here or click to browse',
-    helper: 'JPG, PNG — up to ~12,000 images per run',
+    helper: 'JPG, PNG -> Up to 12,000 images per run',
   },
   {
     key: 'folder',
@@ -339,15 +340,14 @@ const uploadTabs: UploadTab[] = [
     helper: 'Subfolders are walked; non-image files are ignored.',
   },
 ]
-const starting = ref(false)
 const error = ref('')
 const showAdvanced = ref(false)
 
 const runName = ref('')
-const uploadId = ref<number | null>(null)
 
-type Uploader = ReturnType<typeof createUploader>
-const uploader = ref<Uploader | null>(null)
+// Picked files stay in memory only — uploads are deferred to the upcoming
+// pipeline rework. Counting + size summary is enough for now.
+const pickedFiles = ref<File[]>([])
 
 const detectorModels = ref<ModelVersion[]>([])
 const binaryModels = ref<ModelVersion[]>([])
@@ -380,9 +380,9 @@ interface RoiBBox {
 }
 
 const config = ref<PipelineConfig>({
-  yolo: { model_version_id: null, confidence: 0.6 },
-  binary_classifier: { model_version_id: null, confidence: 0.5 },
-  group_classifier: { model_version_id: null, confidence: 0.6 },
+  yolo: { model_version_id: null, confidence: 0.2 },
+  binary_classifier: { model_version_id: null, confidence: 0.2 },
+  group_classifier: { model_version_id: null, confidence: 0.2 },
   preprocessing: {
     use_roi: false,
     roi_bbox: null,
@@ -398,18 +398,17 @@ const config = ref<PipelineConfig>({
   start_at_image: 1,
 })
 
-const doneCount = computed(
-  () => uploader.value?.items.filter((i: UploadItem) => i.status === 'done').length ?? 0,
-)
-const failedCount = computed(
-  () => uploader.value?.items.filter((i: UploadItem) => i.status === 'failed').length ?? 0,
-)
-const recentFailures = computed<UploadItem[]>(
-  () => uploader.value?.items.filter((i: UploadItem) => i.status === 'failed').slice(-20) ?? [],
-)
+const totalPickedBytes = computed(() => pickedFiles.value.reduce((sum, f) => sum + f.size, 0))
 
-function onRetry(id: string) {
-  uploader.value?.retry(id)
+function formatBytes(bytes: number): string {
+  if (bytes < 1024) return `${bytes} B`
+  if (bytes < 1024 * 1024) return `${(bytes / 1024).toFixed(0)} KB`
+  if (bytes < 1024 * 1024 * 1024) return `${(bytes / 1024 / 1024).toFixed(1)} MB`
+  return `${(bytes / 1024 / 1024 / 1024).toFixed(2)} GB`
+}
+
+function clearPicked() {
+  pickedFiles.value = []
 }
 
 onMounted(async () => {
@@ -433,42 +432,14 @@ onMounted(async () => {
   }
 })
 
-async function ensureUpload(): Promise<number | null> {
-  if (uploadId.value) return uploadId.value
-  if (creatingUpload.value) return null
-  creatingUpload.value = true
-  try {
-    const res = await api('/api/datasets/uploads/', {
-      method: 'POST',
-      body: JSON.stringify({ module: 'pollinators', name: runName.value }),
-    })
-    if (!res.ok) {
-      error.value = (await res.text()) || `HTTP ${res.status}`
-      return null
-    }
-    const data = await res.json()
-    uploadId.value = data.id
-    uploader.value = createUploader({ module: 'pollinators', uploadId: data.id })
-    return data.id
-  } catch (e) {
-    error.value = e instanceof Error ? e.message : String(e)
-    return null
-  } finally {
-    creatingUpload.value = false
-  }
-}
-
 const IMAGE_EXT_RE = /\.(jpe?g|png|webp)$/i
 
-async function handleFiles(files: File[]) {
-  // Folder drops can include non-image files (subfolders' siblings,
-  // hidden system files like .DS_Store, etc.). Drop them before enqueueing.
+function onUploadSelect(files: File[]) {
+  // Folder drops include hidden / non-image siblings; drop them before
+  // counting so the summary reflects what would actually be uploaded.
   const images = files.filter((f) => f.type.startsWith('image/') || IMAGE_EXT_RE.test(f.name))
   if (!images.length) return
-  const id = await ensureUpload()
-  if (!id || !uploader.value) return
-  uploader.value.enqueue(images)
-  localFiles.value = images
+  pickedFiles.value = pickedFiles.value.concat(images)
 }
 
 function onUploadSelect(files: File[]) {
