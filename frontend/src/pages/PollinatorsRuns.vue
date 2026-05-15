@@ -189,6 +189,7 @@ import { computed, nextTick, onMounted, ref } from 'vue'
 import { RouterLink, useRoute } from 'vue-router'
 import PageHeader from '@/components/PageHeader.vue'
 import { api } from '@/api'
+import { confirm } from '@/lib/confirm'
 
 interface Upload {
   id: number
@@ -319,9 +320,13 @@ function isRunInFlight(run: Run): boolean {
 async function deleteRun(run: Run) {
   if (deletingRunId.value != null) return
   const label = run.name || `Run #${run.id}`
-  if (!window.confirm(
-    `Delete ${label}? This permanently removes the run, every detection in it, and the saved crops on disk. Source images stay.`,
-  )) return
+  const ok = await confirm({
+    title: 'Delete run',
+    message: `Delete ${label}?\nThis permanently removes the run, every detection in it, and the saved crops on disk. Source images stay.`,
+    confirmLabel: 'Delete',
+    variant: 'danger',
+  })
+  if (!ok) return
   deletingRunId.value = run.id
   try {
     const res = await api(`/api/analysis/runs/${run.id}/`, { method: 'DELETE' })

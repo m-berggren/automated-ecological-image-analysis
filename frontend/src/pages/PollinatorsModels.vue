@@ -350,6 +350,7 @@ import PageHeader from '@/components/PageHeader.vue'
 import UploadDropZone, { type UploadTab } from '@/components/UploadDropZone.vue'
 import { Trash2 } from 'lucide-vue-next'
 import { api } from '@/api'
+import { confirm, alert } from '@/lib/confirm'
 import { useAuthStore } from '@/stores/auth'
 import {
   tracksFromVersions,
@@ -769,13 +770,20 @@ async function setDefault(track: Track, v: Version) {
 
 async function confirmDelete(v: Version) {
   if (v.is_active) {
-    loadError.value = 'Cannot delete the active version. Pick another default first.'
+    await alert({
+      title: 'Cannot delete active model',
+      message: `"${v.version_name}" is the active version. Pick another default first, then delete it.`,
+    })
     return
   }
   if (deletingId.value !== null) return
-  if (!window.confirm(`Delete model "${v.version_name}"? This cannot be undone.`)) {
-    return
-  }
+  const ok = await confirm({
+    title: 'Delete model',
+    message: `Delete model "${v.version_name}"?\nThis removes the weights file and all artifacts. This cannot be undone.`,
+    confirmLabel: 'Delete',
+    variant: 'danger',
+  })
+  if (!ok) return
   deletingId.value = v.id
   try {
     const res = await api(`/api/analysis/models/${v.id}/`, { method: 'DELETE' })
