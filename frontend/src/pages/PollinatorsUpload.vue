@@ -122,24 +122,9 @@
             class="w-20 px-2 py-1 rounded border border-border bg-background text-sm font-mono"
           />
         </label>
-        <!-- Button to open the ROI drawer -->
-        <button
-          v-if="config.preprocessing.use_roi"
-          class="px-3 py-1.5 text-sm rounded bg-primary text-white hover:bg-primary/90"
-          @click="openRoiModal"
-        >
-          Open ROI editor
-        </button>
       </div>
-
-      <div v-if="config.preprocessing.roi_bbox">Roi selected {{ config.preprocessing.roi_bbox }}</div>
-
-      <div v-if="noImagesUploaded" class="text-xs text-muted-foreground">
-        Upload images before choosing the manual ROI.
-      </div>
-
       <div
-        v-else-if="startAtImageOutOfRange"
+        v-if="startAtImageOutOfRange"
         class="text-xs text-red-600"
       >
         “Start at image” is outside the uploaded range (max {{ localFiles.length }}).
@@ -346,8 +331,6 @@ interface ModelVersion {
   is_active: boolean
 }
 
-const noImagesUploaded = computed(() => localFiles.value.length === 0)
-
 const startAtImageOutOfRange = computed(() => {
   if (!localFiles.value.length) return false
   const idx = (config.value.start_at_image || 1) - 1
@@ -551,6 +534,17 @@ onMounted(() => {
 })
 
 async function startDetection() {
+  if(config.value.preprocessing.use_roi) {
+    const roi = await openRoiModal()
+
+  if (!roi) {
+    error.value = 'ROI selection was cancelled.'
+    return
+  }
+  }
+
+
+
   error.value = ''
   if (!uploadId.value) {
     error.value = 'No upload in progress.'
@@ -592,23 +586,36 @@ async function startDetection() {
   }
 }
 
+const roiResolver = ref<((roi: RoiBBox | null) => void) | null>(null)
+
 // Choses the current selected manual roi image and makes the ROI drawing modal appear
 function openRoiModal() {
-  if (!localFiles.value.length) return
+  return new Promise((resolve) => {
+    if (!localFiles.value.length) {
+      resolve(null)
+      return
+    }
 
-  const index = (config.value.start_at_image || 1) - 1
+    const index = (config.value.start_at_image || 1) - 1
 
-  if (index < 0 || index >= localFiles.value.length) return
+    if (index < 0 || index >= localFiles.value.length) {
+      resolve(null)
+      return
+    }
 
-  const file = localFiles.value[index]
+    const file = localFiles.value[index]
 
-  // clean up old URL
-  if (previewUrl.value) {
-    URL.revokeObjectURL(previewUrl.value)
-  }
+    // clean up old URL
+    if (previewUrl.value) {
+      URL.revokeObjectURL(previewUrl.value)
+    }
 
-  previewUrl.value = URL.createObjectURL(file)
-  showRoiModal.value = true
+    previewUrl.value = URL.createObjectURL(file)
+    showRoiModal.value = true
+
+    roiResolver.value = resolve
+
+  })
 }
 
 // Makes the modal disappear and clears up the old image URL
@@ -619,10 +626,21 @@ function closeRoiModal() {
     URL.revokeObjectURL(previewUrl.value)
     previewUrl.value = null
   }
+
+  if (roiResolver.value) {
+    roiResolver.value(null)
+    roiResolver.value = null
+  }
 }
 
 function onSaveRoi(roi: any) {
   config.value.preprocessing.roi_bbox = roi
+
+  if (roiResolver.value) {
+    roiResolver.value(roi)
+    roiResolver.value = null
+  }
+
   closeRoiModal()
 }
 
