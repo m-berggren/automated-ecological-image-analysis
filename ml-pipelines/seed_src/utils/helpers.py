@@ -3,7 +3,6 @@ import os
 
 from PIL import Image
 from sahi import AutoDetectionModel
-from sahi.predict import get_sliced_prediction
 
 
 def load_model(model_path):
@@ -12,20 +11,6 @@ def load_model(model_path):
         model_path=model_path,
         confidence_threshold=0.3,
         device=0,
-    )
-
-
-def run_sahi(image_path, model):
-    return get_sliced_prediction(
-        image_path,
-        model,
-        slice_height=768,
-        slice_width=768,
-        overlap_height_ratio=0.35,
-        overlap_width_ratio=0.35,
-        postprocess_type='GREEDYNMM',
-        postprocess_match_metric='IOS',
-        postprocess_match_threshold=0.3,
     )
 
 
@@ -94,15 +79,38 @@ def update_class_labels(directory, new_id):
             count += 1
 
 
-def get_latest_model_path(base_path='runs/obb'):
+def get_next_run_name(base_run_name):
     """
-    Finds the latest 'train' folder and returns the path to its best.pt weights.
+    Checks the runs/obb directory and returns a name with an incremented suffix
+    if the base name already exists (e.g., 'phyca' -> 'phyca2' -> 'phyca3').
     """
-    folders = glob.glob(os.path.join(base_path, 'train*'))
-    if not folders:
-        return None
+    import re
 
-    latest_folder = max(folders, key=os.path.getctime)
-    best_weights = os.path.join(latest_folder, 'weights', 'best.pt')
+    target_dir = os.path.join('runs', 'obb')
+    if not os.path.exists(target_dir):
+        return base_run_name
 
-    return best_weights if os.path.exists(best_weights) else None
+    existing_runs = [
+        d for d in os.listdir(target_dir) if os.path.isdir(os.path.join(target_dir, d))
+    ]
+
+    # Filter for folders that start with the base run species name
+    pattern = re.compile(rf'^{re.escape(base_run_name)}(\d*)$')
+
+    max_num = 0
+    found = False
+
+    for run in existing_runs:
+        match = pattern.match(run)
+        if match:
+            found = True
+            suffix = match.group(1)
+            if suffix == '':
+                max_num = max(max_num, 1)
+            else:
+                max_num = max(max_num, int(suffix))
+
+    if not found:
+        return base_run_name
+
+    return f'{base_run_name}{max_num + 1}'

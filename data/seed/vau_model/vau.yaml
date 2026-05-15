@@ -1,8 +1,6 @@
 path: ../data/seed/vau_model
-#train: train/images
-#val: val/images
 train: train_sliced
-val: val_sliced
+val: val/images
 
 names:
   0: vau
