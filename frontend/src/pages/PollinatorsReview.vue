@@ -40,9 +40,9 @@
               v-model="statusFilter"
               class="px-2 py-1 rounded border border-border bg-background"
             >
-              <option value="todo">Todo</option>
+              <option value="pending">Pending</option>
+              <option value="reviewed">Reviewed</option>
               <option value="unsure">Unsure</option>
-              <option value="rejected">Rejected</option>
               <option value="all">All</option>
             </select>
             <label class="text-muted-foreground">Class</label>
@@ -55,42 +55,24 @@
                 {{ classLabel(cls) }}
               </option>
             </select>
-            <button
-              class="ml-auto px-2 py-1 rounded border border-border hover:bg-muted disabled:opacity-50 disabled:hover:bg-transparent"
-              :disabled="exporting || !run"
-              @click="exportCsv"
-            >
-              {{ exporting ? 'Exporting…' : 'Export CSV' }}
-            </button>
           </div>
-          <!-- Per-detector minimum confidence. Detections from the other branch
-             pass through unaffected (preprocessing-only crops have no YOLO
-             score and so on). Step 0.05 keeps the slider snappy. -->
+          <!-- Single minimum-confidence slider. Filters on the strongest
+             model score per detection (max of yolo / insectnet). One control
+             instead of two means the slider always does something regardless
+             of which branch produced the detection. Step 0.05 keeps it
+             snappy. -->
           <div class="grid grid-cols-[auto_1fr_auto] items-center gap-x-2 gap-y-1 text-xs">
-            <label for="yolo-min" class="text-muted-foreground">YOLO ≥</label>
+            <label for="min-conf" class="text-muted-foreground">Min conf ≥</label>
             <input
-              id="yolo-min"
+              id="min-conf"
               type="range"
-              :min="inferenceYoloThreshold"
+              min="0"
               max="1"
               step="0.05"
-              v-model.number="yoloMinConf"
+              v-model.number="minConf"
               class="w-full accent-primary"
-              :title="`Inference threshold: ${inferenceYoloThreshold.toFixed(2)}`"
             />
-            <span class="font-mono w-10 text-right">{{ yoloMinConf.toFixed(2) }}</span>
-            <label for="insectnet-min" class="text-muted-foreground">InsectNet ≥</label>
-            <input
-              id="insectnet-min"
-              type="range"
-              :min="inferenceInsectnetThreshold"
-              max="1"
-              step="0.05"
-              v-model.number="insectnetMinConf"
-              class="w-full accent-primary"
-              :title="`Inference threshold: ${inferenceInsectnetThreshold.toFixed(2)}`"
-            />
-            <span class="font-mono w-10 text-right">{{ insectnetMinConf.toFixed(2) }}</span>
+            <span class="font-mono w-10 text-right">{{ minConf.toFixed(2) }}</span>
           </div>
           <div v-if="belowThresholdIds.length" class="flex items-center justify-end text-xs">
             <button
@@ -311,11 +293,7 @@
                   stroke="#ef4444"
                   :stroke-width="bboxStrokeWidth"
                 />
-                <ROIOverlay
-                  :bbox="roiBbox"
-                  :image-w="sourceImage.w"
-                  :image-h="sourceImage.h"
-                />
+                <ROIOverlay :bbox="roiBbox" :image-w="sourceImage.w" :image-h="sourceImage.h" />
               </svg>
               <span
                 v-else
@@ -388,6 +366,11 @@
                 >
                   Label
                 </div>
+                <!-- Radios (not checkboxes) so the browser enforces single-
+                   select at the DOM level. With checkboxes a click race
+                   between Vue's :checked re-binding and the DOM's own state
+                   could leave two ticks visible. The name attribute groups
+                   them so picking one auto-unsets the others. -->
                 <div>
                   <label
                     v-for="cls in CLASSES"
@@ -400,9 +383,10 @@
                     />
                     <span class="flex-1 text-sm">{{ classLabel(cls) }}</span>
                     <input
-                      type="checkbox"
+                      type="radio"
+                      name="label-class"
                       :checked="cls === effectiveLabel(selected)"
-                      @change="correctTo(cls)"
+                      @change="confirmAs(cls)"
                       class="w-4 h-4"
                     />
                   </label>
@@ -418,7 +402,8 @@
                       <span class="text-[10px] text-muted-foreground ml-1">(reject)</span>
                     </span>
                     <input
-                      type="checkbox"
+                      type="radio"
+                      name="label-class"
                       :checked="selected.reviewer_status === 'rejected'"
                       @change="reject()"
                       class="w-4 h-4"
@@ -429,34 +414,41 @@
             </div>
           </div>
 
+          <!-- "All reviewed" CTA. Sits above the footer so the action bar
+             buttons are still visible for further edits, while making the
+             next-step path obvious. -->
+          <div
+            v-if="allReviewed && run"
+            class="border-t border-border bg-green-50 px-5 py-3 flex items-center gap-3 text-sm"
+          >
+            <span class="text-green-800 flex-1">
+              ✓ All detections reviewed. Ready for export.
+            </span>
+            <RouterLink
+              :to="`/pollinators/runs/${run.id}/export`"
+              class="px-3 py-1.5 rounded-md bg-green-600 text-white hover:bg-green-700 font-medium"
+            >
+              Continue to Export →
+            </RouterLink>
+          </div>
           <!-- Bottom action bar -->
           <footer
             class="border-t border-border bg-surface px-5 py-3 flex items-center justify-between"
           >
             <span class="text-[11px] text-muted-foreground font-mono hidden md:block">
-              1-4 confirm · x reject · u unsure · z undo · ⏎ suggested · ←→↑↓ navigate · ⇧ + arrows
-              / click: range select · esc: clear
+              1-4 confirm · x reject · u unsure · ⏎ suggested · ←→↑↓ navigate · ⇧ + arrows / click:
+              range select · esc: clear
             </span>
             <div class="flex gap-2 ml-auto">
               <button
-                class="px-3 py-1.5 rounded-md text-sm font-medium border border-border hover:bg-muted disabled:opacity-50 disabled:cursor-not-allowed"
-                :disabled="!lastAction || undoing"
-                :title="
-                  lastAction ? `Undo last action on detection #${lastAction.id}` : 'Nothing to undo'
-                "
-                @click="undoLast"
-              >
-                {{ undoing ? 'Undoing…' : 'Undo' }}
-              </button>
-              <button
                 class="px-3 py-1.5 rounded-md text-sm font-medium border border-border hover:bg-muted"
-                @click="reject"
+                @click="reject()"
               >
                 Reject
               </button>
               <button
                 class="px-3 py-1.5 rounded-md text-sm font-medium border border-amber-300 text-amber-700 hover:bg-amber-50"
-                @click="markUnsure"
+                @click="markUnsure()"
               >
                 Unsure
               </button>
@@ -534,7 +526,7 @@
 
 <script setup lang="ts">
 import { computed, nextTick, onMounted, onUnmounted, ref, watch } from 'vue'
-import { useRoute } from 'vue-router'
+import { RouterLink, useRoute } from 'vue-router'
 import PageHeader from '@/components/PageHeader.vue'
 import PollinatorsStepper from '@/components/PollinatorsStepper.vue'
 import ROIOverlay from '@/components/ROIOverlay.vue'
@@ -542,11 +534,14 @@ import { api } from '@/api'
 
 type ClassName = 'fly' | 'bumblebee' | 'butterfly' | 'other'
 type ReviewerStatus = 'unreviewed' | 'confirmed' | 'corrected' | 'rejected' | 'unsure'
-// Frontend workflow labels (not the backend reviewer_status). 'todo' is
-// the active queue (unreviewed). 'unsure' / 'rejected' are explicit sub-
-// queues you typically revisit later. 'all' shows everything, with
-// confirmed/corrected ones in their class groups.
-type StatusFilter = 'todo' | 'unsure' | 'rejected' | 'all'
+// Frontend workflow labels (not the backend reviewer_status).
+//   pending  — unreviewed; the active working queue.
+//   reviewed — anything the reviewer has settled (confirmed / corrected /
+//              rejected). Lets the reviewer see what's already handled.
+//   unsure   — explicitly parked for revisit; kept separate so it doesn't
+//              disappear into the reviewed pile.
+//   all      — everything.
+type StatusFilter = 'pending' | 'reviewed' | 'unsure' | 'all'
 type Source = 'yolo' | 'preprocessing' | 'both'
 
 const LOW_CONFIDENCE_THRESHOLD = 0.6
@@ -585,8 +580,6 @@ interface ReviewBundle {
     status: string
     detection_count: number
     config?: {
-      yolo?: { confidence?: number }
-      binary_classifier?: { confidence?: number }
       preprocessing?: {
         roi_bbox?: [number, number, number, number] | null
       }
@@ -615,27 +608,17 @@ const loadError = ref('')
 const run = ref<ReviewBundle['run'] | null>(null)
 const detections = ref<Detection[]>([])
 const selectedId = ref<number | null>(null)
-const statusFilter = ref<StatusFilter>('todo')
+const statusFilter = ref<StatusFilter>('pending')
 type ClassFilter = ClassName | 'all'
 const classFilter = ref<ClassFilter>('all')
-// Inference-time thresholds. Anything below these never made it into the
-// DB, so the sliders can't usefully go lower.
-const inferenceYoloThreshold = computed(() => run.value?.config?.yolo?.confidence ?? 0)
-const inferenceInsectnetThreshold = computed(
-  () => run.value?.config?.binary_classifier?.confidence ?? 0,
-)
-const yoloMinConf = ref(0)
-const insectnetMinConf = ref(0)
-// Snap sliders to the inference thresholds when the run loads so "no
-// filter" matches the actual data floor instead of a misleading 0.
-watch(
-  [inferenceYoloThreshold, inferenceInsectnetThreshold],
-  ([y, i]) => {
-    yoloMinConf.value = y
-    insectnetMinConf.value = i
-  },
-  { immediate: true },
-)
+// Single confidence slider. Filters on the strongest model score per
+// detection so it always does something regardless of which branch fired.
+// Starts at 0 ("no filter") so the reviewer has to opt in.
+const minConf = ref(0)
+
+function passesSliders(d: Detection): boolean {
+  return maxConfidence(d) >= minConf.value
+}
 const bulkIds = ref<Set<number>>(new Set())
 const bulkCorrectClass = ref<'' | ClassName>('')
 // Surfaces how many rows the most recent bulk-confirm skipped because they
@@ -651,7 +634,6 @@ interface FailedEntry {
 }
 const failedSaves = ref<Map<number, FailedEntry>>(new Map())
 const retrying = ref(false)
-const exporting = ref(false)
 const rejectingBelow = ref(false)
 
 onMounted(loadFromApi)
@@ -707,37 +689,55 @@ const headerTitle = computed(() =>
   run.value ? `Review · ${run.value.name || `Run #${run.value.id}`}` : 'Review',
 )
 
+// Reviewer is done when no detection is still in the unreviewed pile.
+// Computed over the full detections list, not filteredDetections, so a
+// status/class filter doesn't make the banner falsely appear.
+const allReviewed = computed(
+  () =>
+    detections.value.length > 0 &&
+    detections.value.every((d) => d.reviewer_status !== 'unreviewed'),
+)
+
 const filteredDetections = computed(() => {
   let list = detections.value
-  if (statusFilter.value === 'todo') {
+  if (statusFilter.value === 'pending') {
     list = list.filter((d) => d.reviewer_status === 'unreviewed')
-  } else if (statusFilter.value === 'unsure') {
-    list = list.filter((d) => d.reviewer_status === 'unsure')
-  } else if (statusFilter.value === 'rejected') {
-    list = list.filter((d) => d.reviewer_status === 'rejected')
-  }
-  // Class filter: a broad match so spotting duplicates works regardless of
-  // who labelled it — accept if any signal (yolo, insectnet, reviewer,
-  // primary) says this class.
-  if (classFilter.value !== 'all') {
-    const cls = classFilter.value
+  } else if (statusFilter.value === 'reviewed') {
     list = list.filter(
       (d) =>
+        d.reviewer_status === 'confirmed' ||
+        d.reviewer_status === 'corrected' ||
+        d.reviewer_status === 'rejected',
+    )
+  } else if (statusFilter.value === 'unsure') {
+    list = list.filter((d) => d.reviewer_status === 'unsure')
+  }
+  // Class filter. Reviewed detections (confirmed/corrected) are bound to
+  // the reviewer's call — match strictly on that label so a tile corrected
+  // to butterfly stops appearing under Class=Fly. Unreviewed / unsure /
+  // rejected still match any signal so the reviewer can hunt by detector
+  // output when nothing has been settled yet.
+  if (classFilter.value !== 'all') {
+    const cls = classFilter.value
+    list = list.filter((d) => {
+      if (d.reviewer_status === 'confirmed' || d.reviewer_status === 'corrected') {
+        return (d.reviewer_label ?? d.predicted_class) === cls
+      }
+      return (
         d.yolo_class === cls ||
         d.insectnet_class === cls ||
         d.reviewer_label === cls ||
-        d.predicted_class === cls,
-    )
+        d.predicted_class === cls
+      )
+    })
   }
-  if (yoloMinConf.value > 0) {
-    list = list.filter((d) => d.yolo_confidence == null || d.yolo_confidence >= yoloMinConf.value)
-  }
-  if (insectnetMinConf.value > 0) {
-    list = list.filter(
-      (d) => d.insectnet_confidence == null || d.insectnet_confidence >= insectnetMinConf.value,
-    )
-  }
-  return [...list].sort((a, b) => maxConfidence(a) - maxConfidence(b))
+  list = list.filter(passesSliders)
+  // Stable sort by id. The previous double-sort (confidence at this layer,
+  // then by source-image filename inside each group) caused tiles to
+  // visibly swap places whenever streamed pages arrived or a review action
+  // shifted the underlying ordering. Insertion order from the backend is
+  // deterministic and never moves once loaded.
+  return [...list].sort((a, b) => a.id - b.id)
 })
 
 const groupedDetections = computed(() => {
@@ -788,26 +788,8 @@ const groupedDetections = computed(() => {
     if (!classGroups.has(cls)) classGroups.set(cls, [])
     classGroups.get(cls)!.push(d)
   }
-  // Cluster same-image detections within each group so multi-insect photos
-  // sit next to each other in the grid.
-  // Stable cluster order: alphabetical by source image filename, then by
-  // ascending confidence within an image. Earlier we ordered clusters by
-  // "first appearance in the pre-sort list", which made removing the
-  // lowest-confidence detection in an image silently slide the whole
-  // cluster past its neighbours — looked like two crops swapped places.
-  const clusterByImage = (list: Detection[]) => {
-    list.sort((a, b) => {
-      const af = a.source_image_filename
-      const bf = b.source_image_filename
-      if (af !== bf) return af.localeCompare(bf)
-      return maxConfidence(a) - maxConfidence(b)
-    })
-  }
-  clusterByImage(review)
-  clusterByImage(unclassified)
-  clusterByImage(background)
-  for (const list of classGroups.values()) clusterByImage(list)
-
+  // No per-group re-sort. filteredDetections is already sorted by id, and
+  // the bucketing above preserves that order within each bucket.
   const out: {
     label: string
     kind: 'needs_review' | 'unclassified' | 'class' | 'background'
@@ -857,12 +839,16 @@ const imageParityById = computed(() => {
 
 const selected = computed(() => detections.value.find((d) => d.id === selectedId.value) ?? null)
 
+// Only pick an initial selection when nothing is selected. We deliberately
+// do not snap to list[0] when the current selection falls out of the
+// filtered view (e.g. slider moved, bulk action, status change) — the
+// reviewer keeps seeing the tile they were on instead of teleporting to a
+// random low-id detection. The grid just won't show a highlight; clicking
+// another tile takes over from there.
 watch(
   filteredDetections,
   (list) => {
-    if (selectedId.value && !list.find((d) => d.id === selectedId.value)) {
-      selectedId.value = list[0]?.id ?? null
-    } else if (!selectedId.value && list.length) {
+    if (!selectedId.value && list.length) {
       selectedId.value = list[0].id
     }
   },
@@ -1159,19 +1145,7 @@ function clearFailedSave(id: number) {
   failedSaves.value = new Map(failedSaves.value)
 }
 
-// Single-step undo. Records the state of the most recently reviewed
-// detection so it can be restored before any subsequent action overwrites
-// the slot. Cleared on successful undo (no undo-an-undo) and on bulk
-// actions (which would need their own snapshot).
-interface UndoEntry {
-  id: number
-  prevStatus: ReviewerStatus
-  prevLabel: ClassName | null
-}
-const lastAction = ref<UndoEntry | null>(null)
-const undoing = ref(false)
-
-async function applyAction(status: ReviewerStatus, label: ClassName | null) {
+async function applyAction(status: ReviewerStatus, label: ClassName | null, advanceAfter = false) {
   if (!selected.value) return
   const d = selected.value
   // If a previous save for this detection already failed, keep its original
@@ -1179,17 +1153,18 @@ async function applyAction(status: ReviewerStatus, label: ClassName | null) {
   const existing = failedSaves.value.get(d.id)
   const prevStatus = existing ? existing.prevStatus : d.reviewer_status
   const prevLabel = existing ? existing.prevLabel : d.reviewer_label
-  // Capture the next tile in the *current* view BEFORE mutating. After the
-  // mutation, d may move out of the view (e.g. labelling under Show:Todo
-  // makes it no longer todo). If we waited, advanceToNext would see d gone
-  // from flatVisible and the filteredDetections watcher would reset
-  // selection to list[0] — the "random jump" the reviewer experiences.
-  const nextId = nextVisibleId(d.id)
-  if (nextId != null) selectedId.value = nextId
+  // Auto-advance is for keyboard review (1/2/3/4/x/u to fly through tiles).
+  // Mouse clicks on the Label panel or footer buttons stay on the current
+  // tile — the reviewer is clearly focused on this tile, and jumping
+  // makes it look like the action saved to a different one. Captured BEFORE
+  // mutating so the next-tile lookup runs against the current view.
+  if (advanceAfter) {
+    const nextId = nextVisibleId(d.id)
+    if (nextId != null) selectedId.value = nextId
+  }
 
   d.reviewer_status = status
   d.reviewer_label = label
-  lastAction.value = { id: d.id, prevStatus, prevLabel }
 
   const ok = await patchDetection(d.id, status, label)
   if (!ok) {
@@ -1200,42 +1175,8 @@ async function applyAction(status: ReviewerStatus, label: ClassName | null) {
   }
 }
 
-async function undoLast() {
-  if (!lastAction.value || undoing.value) return
-  const entry = lastAction.value
-  const d = detections.value.find((x) => x.id === entry.id)
-  if (!d) {
-    lastAction.value = null
-    return
-  }
-  undoing.value = true
-  // Optimistic local restore. Jump back to the reverted detection so the
-  // reviewer sees the result of the undo, not the tile they had advanced to.
-  const newStatus = entry.prevStatus
-  const newLabel = entry.prevLabel
-  d.reviewer_status = newStatus
-  d.reviewer_label = newLabel
-  selectedId.value = entry.id
-
-  const ok = await patchDetection(entry.id, newStatus, newLabel)
-  undoing.value = false
-  if (!ok) {
-    // Mirror applyAction's failure handling so the retry banner can pick
-    // this up like any other failed save.
-    failedSaves.value.set(entry.id, {
-      status: newStatus,
-      label: newLabel,
-      prevStatus: newStatus,
-      prevLabel: newLabel,
-    })
-    failedSaves.value = new Map(failedSaves.value)
-  } else {
-    clearFailedSave(entry.id)
-  }
-  lastAction.value = null
-}
-
 function toggleBulk(id: number) {
+  bulkConfirmSkipped.value = 0
   const next = new Set(bulkIds.value)
   if (next.has(id)) next.delete(id)
   else next.add(id)
@@ -1245,34 +1186,29 @@ function toggleBulk(id: number) {
 function clearBulk() {
   bulkIds.value = new Set()
   bulkCorrectClass.value = ''
+  bulkConfirmSkipped.value = 0
 }
 
 function selectAllVisible() {
+  bulkConfirmSkipped.value = 0
   bulkIds.value = new Set(filteredDetections.value.map((d) => d.id))
 }
 
 // Unreviewed detections that the confidence sliders are currently hiding.
 // Restricted to 'unreviewed' so we never silently overwrite a reviewer's
-// confirmed/corrected/unsure call when the slider moves.
-const belowThresholdIds = computed<number[]>(() => {
-  if (yoloMinConf.value === 0 && insectnetMinConf.value === 0) return []
-  return detections.value
-    .filter((d) => {
-      if (d.reviewer_status !== 'unreviewed') return false
-      const yoloFails = d.yolo_confidence != null && d.yolo_confidence < yoloMinConf.value
-      const insectFails =
-        d.insectnet_confidence != null && d.insectnet_confidence < insectnetMinConf.value
-      return yoloFails || insectFails
-    })
-    .map((d) => d.id)
-})
+// confirmed/corrected/unsure call when the slider moves. Shares the
+// passesSliders predicate with filteredDetections so the two views can't
+// drift.
+const belowThresholdIds = computed<number[]>(() =>
+  detections.value
+    .filter((d) => d.reviewer_status === 'unreviewed' && !passesSliders(d))
+    .map((d) => d.id),
+)
 
 async function rejectBelowThreshold() {
   if (rejectingBelow.value) return
   const ids = belowThresholdIds.value
   if (!ids.length) return
-  // Bulk action; single-step undo doesn't model multi-row reverts.
-  lastAction.value = null
   rejectingBelow.value = true
   const snapshot = new Map<number, ReviewerStatus>()
   for (const d of detections.value) {
@@ -1298,31 +1234,6 @@ async function rejectBelowThreshold() {
     }
   } finally {
     rejectingBelow.value = false
-  }
-}
-
-async function exportCsv() {
-  if (!run.value || exporting.value) return
-  exporting.value = true
-  try {
-    const res = await api(`/api/pollinator/runs/${run.value.id}/export.csv`)
-    if (!res.ok) {
-      loadError.value = `Export: HTTP ${res.status}`
-      return
-    }
-    const blob = await res.blob()
-    const url = URL.createObjectURL(blob)
-    const a = document.createElement('a')
-    a.href = url
-    a.download = `run-${run.value.id}-images.csv`
-    document.body.appendChild(a)
-    a.click()
-    a.remove()
-    URL.revokeObjectURL(url)
-  } catch (e) {
-    loadError.value = e instanceof Error ? e.message : String(e)
-  } finally {
-    exporting.value = false
   }
 }
 
@@ -1364,9 +1275,6 @@ async function submitBulk(ids: number[], status: ReviewerStatus, label: ClassNam
 }
 
 async function applyToBulk(status: ReviewerStatus, label: ClassName | null) {
-  // Single-step undo only covers single-detection actions; clear it so a
-  // post-bulk Z doesn't surprise the reviewer by un-doing one random row.
-  lastAction.value = null
   const ids = [...bulkIds.value]
   clearBulk()
   await submitBulk(ids, status, label)
@@ -1421,7 +1329,6 @@ function dismissFailedSaves() {
 // as 'corrected' so reviewer_label is always populated. Rows with no derivable
 // class are skipped and surfaced to the reviewer.
 async function bulkConfirm() {
-  lastAction.value = null
   const buckets = new Map<ClassName, number[]>()
   let skipped = 0
   for (const d of detections.value) {
@@ -1453,21 +1360,18 @@ function onBulkCorrectChange() {
 // Confirmed only when both models agreed and the user picked that class.
 // When models disagree there's no single prediction to confirm, so any pick
 // is a correction (and the label is preserved server-side).
-function confirmAs(cls: ClassName | null) {
+function confirmAs(cls: ClassName | null, advanceAfter = false) {
   if (!selected.value || cls == null) return
   const d = selected.value
   const consensus = d.yolo_class != null && d.yolo_class === d.insectnet_class ? d.yolo_class : null
-  if (consensus === cls) applyAction('confirmed', null)
-  else applyAction('corrected', cls)
+  if (consensus === cls) applyAction('confirmed', null, advanceAfter)
+  else applyAction('corrected', cls, advanceAfter)
 }
-function correctTo(cls: ClassName) {
-  applyAction('corrected', cls)
+function reject(advanceAfter = false) {
+  applyAction('rejected', null, advanceAfter)
 }
-function reject() {
-  applyAction('rejected', null)
-}
-function markUnsure() {
-  applyAction('unsure', null)
+function markUnsure(advanceAfter = false) {
+  applyAction('unsure', null, advanceAfter)
 }
 
 function nextVisibleId(currentId: number): number | null {
@@ -1556,8 +1460,11 @@ function onKeydown(e: KeyboardEvent) {
   // instead of just the focused tile. Lets the reviewer do "select 30
   // crops, press x" without reaching for the bulk action bar.
   const bulkMode = bulkIds.value.size > 0
+  // Keyboard actions auto-advance to the next tile so the reviewer can
+  // fly through a queue without touching the mouse. Mouse-driven actions
+  // (Label panel clicks, footer buttons) stay put — see applyAction.
   const classKeyAction = (cls: ClassName) =>
-    bulkMode ? applyToBulk('corrected', cls) : confirmAs(cls)
+    bulkMode ? applyToBulk('corrected', cls) : confirmAs(cls, true)
   switch (e.key) {
     case '1':
       classKeyAction('fly')
@@ -1578,25 +1485,17 @@ function onKeydown(e: KeyboardEvent) {
     case 'x':
     case 'X':
       if (bulkMode) applyToBulk('rejected', null)
-      else reject()
+      else reject(true)
       e.preventDefault()
       break
     case 'u':
     case 'U':
       if (bulkMode) applyToBulk('unsure', null)
-      else markUnsure()
+      else markUnsure(true)
       e.preventDefault()
       break
-    case 'z':
-    case 'Z':
-      // Cmd+Z / Ctrl+Z also accepted so the muscle memory works.
-      if (lastAction.value) {
-        void undoLast()
-        e.preventDefault()
-      }
-      break
     case 'Enter':
-      confirmAs(suggestedClass(selected.value))
+      confirmAs(suggestedClass(selected.value), true)
       e.preventDefault()
       break
     case 'ArrowDown':
