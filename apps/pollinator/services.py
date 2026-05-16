@@ -113,7 +113,14 @@ def _persist_image_results(
     image_stem = src_path.stem
     crop_dir.mkdir(parents=True, exist_ok=True)
 
-    for idx, d in enumerate(detections, start=1):
+    # Build the row objects in memory first so we can persist both tables
+    # with two bulk_create calls (3 SQL per image total, instead of 3 SQL
+    # per detection). Crops are rendered after bulk_create so we have the
+    # final Detection pks if anything ever wants them, and one bulk_update
+    # writes every crop FileField at the end.
+    det_objs: list[Detection] = []
+    pol_kwargs: list[dict] = []
+    for d in detections:
         bbox = d.get('bbox') or {}
         # Normalize raw model labels (e.g. InsectNet emits 'butterfly_moth')
         # to canonical pollinator classes before they reach the DB.
@@ -123,59 +130,70 @@ def _persist_image_results(
         primary_conf = (
             d.get('yolo_confidence') if yolo_class else d.get('insectnet_confidence')
         )
-
-        det = Detection.objects.create(
-            inference_run=run,
-            image=image,
-            bbox=bbox,
-            confidence=float(primary_conf or 0.0),
-            predicted_class=primary_class,
-            area=float(bbox.get('w', 0)) * float(bbox.get('h', 0)),
-            status=DetectionStatus.PENDING,
+        det_objs.append(
+            Detection(
+                inference_run=run,
+                image=image,
+                bbox=bbox,
+                confidence=float(primary_conf or 0.0),
+                predicted_class=primary_class,
+                area=float(bbox.get('w', 0)) * float(bbox.get('h', 0)),
+                status=DetectionStatus.PENDING,
+            )
         )
-        PollinatorDetection.objects.create(
-            detection=det,
-            yolo_class=yolo_class,
-            yolo_confidence=d.get('yolo_confidence'),
-            insectnet_class=insectnet_class,
-            insectnet_confidence=d.get('insectnet_confidence'),
-            binary_confidence=d.get('binary_confidence'),
-            class_probs=d.get('class_probs') or {},
-            source=d.get('source') or '',
-            merge_iou=d.get('merge_iou'),
+        pol_kwargs.append(
+            {
+                'yolo_class': yolo_class,
+                'yolo_confidence': d.get('yolo_confidence'),
+                'insectnet_class': insectnet_class,
+                'insectnet_confidence': d.get('insectnet_confidence'),
+                'binary_confidence': d.get('binary_confidence'),
+                'class_probs': d.get('class_probs') or {},
+                'source': d.get('source') or '',
+                'merge_iou': d.get('merge_iou'),
+            }
         )
-
-        # Render and save the tight bbox crop. det.pk in the filename is
-        # not used; we name by source image stem + within-image index per
-        # the user's request: e.g. WSCT0001_01.jpg.
-        try:
-            x1 = float(bbox['x1'])
-            y1 = float(bbox['y1'])
-            x2 = float(bbox['x2'])
-            y2 = float(bbox['y2'])
-        except (KeyError, TypeError, ValueError):
-            x1 = y1 = x2 = y2 = 0
-        if x2 > x1 and y2 > y1:
-            try:
-                crop_img = src_img.crop((x1, y1, x2, y2))
-                buf = io.BytesIO()
-                crop_img.save(buf, 'JPEG', quality=85)
-                relative_name = (
-                    f'runs/{run.module}/{run.pk}/crops/{image_stem}_{idx:02d}.jpg'
-                )
-                saved = default_storage.save(relative_name, ContentFile(buf.getvalue()))
-                det.crop.name = saved
-                det.save(update_fields=['crop'])
-            except Exception:
-                logger.exception(f'Failed to write crop for detection {det.pk}')
-
         if primary_class:
             by_class[primary_class] = by_class.get(primary_class, 0) + 1
         src_key = d.get('source') or ''
         if src_key:
             by_source[src_key] = by_source.get(src_key, 0) + 1
 
-    return len(detections), by_class, by_source
+    created = Detection.objects.bulk_create(det_objs)
+    PollinatorDetection.objects.bulk_create(
+        [PollinatorDetection(detection=det, **kw) for det, kw in zip(created, pol_kwargs)]
+    )
+
+    # Render crops, then one bulk_update writes every FileField name.
+    crops_to_update: list[Detection] = []
+    for idx, (det, d) in enumerate(zip(created, detections), start=1):
+        bbox = d.get('bbox') or {}
+        try:
+            x1 = float(bbox['x1'])
+            y1 = float(bbox['y1'])
+            x2 = float(bbox['x2'])
+            y2 = float(bbox['y2'])
+        except (KeyError, TypeError, ValueError):
+            continue
+        if x2 <= x1 or y2 <= y1:
+            continue
+        try:
+            crop_img = src_img.crop((x1, y1, x2, y2))
+            buf = io.BytesIO()
+            crop_img.save(buf, 'JPEG', quality=85)
+            relative_name = (
+                f'runs/{run.module}/{run.pk}/crops/{image_stem}_{idx:02d}.jpg'
+            )
+            saved = default_storage.save(relative_name, ContentFile(buf.getvalue()))
+            det.crop.name = saved
+            crops_to_update.append(det)
+        except Exception:
+            logger.exception(f'Failed to write crop for detection {det.pk}')
+
+    if crops_to_update:
+        Detection.objects.bulk_update(crops_to_update, ['crop'])
+
+    return len(created), by_class, by_source
 
 
 def _build_pipeline(run: InferenceRun):
