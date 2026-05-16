@@ -166,49 +166,73 @@
       </section>
     </div>
     <div
-  v-if="showCsvModal"
-  class="fixed inset-0 bg-black/50 flex items-center justify-center z-50"
->
-  <div class="bg-white rounded-lg shadow-lg p-6 w-full max-w-md">
-    <h2 class="text-lg font-semibold mb-4">CSV Export Options</h2>
-
-    <div class="space-y-3">
-      <label class="flex items-center gap-2 cursor-pointer">
-        <input
-          type="radio"
-          value="per_detection"
-          v-model="csvMode"
-        />
-        <span>Row per detection</span>
-      </label>
-
-      <label class="flex items-center gap-2 cursor-pointer">
-        <input
-          type="radio"
-          value="per_image"
-          v-model="csvMode"
-        />
-        <span>Row per image</span>
-      </label>
-    </div>
-
-    <div class="mt-6 flex justify-end gap-2">
-      <button
-        class="px-3 py-1.5 border rounded-md"
-        @click="showCsvModal = false"
+      v-if="showCsvModal"
+      class="fixed inset-0 bg-black/50 flex items-center justify-center z-50"
+      @click="showCsvModal = false"
+    >
+      <div
+        @click.stop
+        class="w-full max-w-md p-6 rounded-[var(--radius)] shadow-lg animate-fade-in
+              bg-surface text-foreground border border-border"
       >
-        Cancel
-      </button>
+        <h2 id="csv-modal-title" class="text-lg font-semibold mb-1 font-display">
+          CSV Export Options
+        </h2>
 
-      <button
-        class="px-3 py-1.5 bg-primary text-white rounded-md"
-        @click="confirmCsvDownload"
-      >
-        Download
-      </button>
+        <p class="text-sm text-muted-foreground mb-4">
+          Choose how you want your CSV to be structured.
+        </p>
+
+        <div class="space-y-3">
+          <label
+            class="flex items-center gap-3 cursor-pointer p-3 rounded-md border bg-muted
+                  hover:bg-primary/20 transition"
+          >
+            <input
+              type="radio"
+              value="per_detection"
+              v-model="csvMode"
+              class="accent-[var(--color-primary)]"
+            />
+            <span>Row per detection</span>
+          </label>
+
+          <label
+            class="flex items-center gap-3 cursor-pointer p-3 rounded-md border bg-muted
+                  hover:bg-primary/20 transition"
+          >
+            <input
+              type="radio"
+              value="per_image"
+              v-model="csvMode"
+              class="accent-[var(--color-primary)]"
+            />
+            <span>Row per image</span>
+          </label>
+        </div>
+
+        <div class="mt-6 flex justify-end gap-2">
+          <button
+            class="px-4 py-2 rounded-md border border-border
+                  text-muted-foreground hover:bg-muted transition"
+            @click="showCsvModal = false"
+          >
+            Cancel
+          </button>
+
+          <button
+            class="px-4 py-2 rounded-md
+                  bg-primary text-primary-foreground
+                  hover:opacity-90 transition
+                  disabled:opacity-50"
+            :disabled="!csvMode"
+            @click="confirmCsvDownload"
+          >
+            Download
+          </button>
+        </div>
+      </div>
     </div>
-  </div>
-</div>
   </div>
 </template>
 
