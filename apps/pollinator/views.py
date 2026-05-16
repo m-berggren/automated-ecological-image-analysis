@@ -200,11 +200,11 @@ class PollinatorRunExportCSVView(APIView):
             "weather",
             # Detection specific
             "detection_id",
-            "final_class",
-            "yolo_class",
-            "insectnet_class",
             "yolo_confidence",
             "insectnet_confidence",
+            "yolo_class",
+            "insectnet_class",
+            "final_class",
         ]
 
         session = run.name or f"Run #{run.pk}"
@@ -234,11 +234,11 @@ class PollinatorRunExportCSVView(APIView):
                     img.weather or '' if img else '',
                     # detection
                     d.id,
-                    final_class,
-                    pd.yolo_class if pd else None,
-                    pd.insectnet_class if pd else None,
                     pd.yolo_confidence if pd else None,
                     pd.insectnet_confidence if pd else None,
+                    pd.yolo_class if pd else None,
+                    pd.insectnet_class if pd else None,
+                    final_class,
                 ])
 
         filename = f"run-{run.pk}-detections.csv"
