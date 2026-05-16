@@ -116,6 +116,7 @@ def train_species_model(
     | None = None,  # For retraining, we should set this parameter to a path to best.pt or last.pt from a previous run. If set, it overrides pretrained_weights_path
     run_name: str
     | None = None,  # New run folder name under runs/obb/ (use e.g. f"{species_name}_ft1" to avoid overwriting)
+    progress_callback=None,
     lr0: float | None = None,  # Learning rate for the new run
     lrf: float | None = None,  # Also learning rate for the new run
 ):
@@ -139,5 +140,16 @@ def train_species_model(
         train_kwargs['lr0'] = lr0
     if lrf is not None:
         train_kwargs['lrf'] = lrf
+
+    if progress_callback:
+        def on_epoch_end(trainer):
+            progress_callback(
+                processed=trainer.epoch + 1,
+                total=trainer.epochs,
+                message=f'Epoch {trainer.epoch + 1}/{trainer.epochs} — loss {trainer.loss:.3f}',
+                level='info',
+            )
+        model.add_callback('on_train_epoch_end', on_epoch_end)
+        
     model.train(**train_kwargs)
     return os.path.join('runs', 'obb', run_name, 'weights', 'best.pt')

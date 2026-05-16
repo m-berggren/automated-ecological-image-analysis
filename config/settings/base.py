@@ -52,6 +52,7 @@ INSTALLED_APPS = [
     'apps.analysis',
     'apps.datasets',
     'apps.pollinator',
+    'apps.seeds',
     'rest_framework',
     'corsheaders',
 ]
@@ -104,7 +105,7 @@ AUTH_PASSWORD_VALIDATORS = [
 # ---------------------------------------------------------------------------
 
 LANGUAGE_CODE = 'en-us'
-TIME_ZONE = 'UTC'
+TIME_ZONE = 'Europe/Stockholm'
 USE_I18N = True
 USE_TZ = True
 

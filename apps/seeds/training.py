@@ -31,8 +31,8 @@ from apps.analysis.models import (
 from apps.datasets.models import Module
 from apps.analysis.cancellation import RunCancelled
 
-from seed_src.training import train_species_model
-from seed_src.metrics import calculate_tp_fp_fn  # for post-training evaluation
+from ml_pipelines.seed_src.train import train_species_model
+from ml_pipelines.seed_src.metrics import calculate_tp_fp_fn  # for post-training evaluation
 
 logger = logging.getLogger(__name__)
 

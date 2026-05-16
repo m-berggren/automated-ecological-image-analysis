@@ -27,10 +27,10 @@
 
           <div class="grid grid-cols-2 gap-3">
             <button
-              @click="trainingMode = 'retrain'"
+              @click="trainingMode = 'incremental'"
               :class="[
                 'rounded-lg border p-4 text-left transition-colors',
-                trainingMode === 'retrain'
+                trainingMode === 'incremental'
                   ? 'border-primary bg-primary/5'
                   : 'border-border hover:border-primary/40',
               ]"
@@ -66,7 +66,7 @@
             {{ trainingMode === 'scratch' ? '1. Choose seed type' : '1. Choose model to retrain' }}
           </div>
 
-          <!-- SCRATCH: seed type picker -->
+          <!-- Scratch seed type -->
           <template v-if="trainingMode === 'scratch'">
             <div
               class="grid grid-cols-2 min-[860px]:grid-cols-4 gap-3 min-[860px]:gap-4 pt-1 max-h-[10rem] overflow-y-auto"
@@ -137,7 +137,7 @@
             </div>
           </template>
 
-          <!-- RETRAIN: model version picker -->
+          <!-- Incremental -->
           <template v-else>
             <div v-if="!allVersions.length" class="text-sm text-muted-foreground">
               No trained models found. Train a new model first.
@@ -251,21 +251,42 @@
           </div>
 
           <!-- File list -->
+          <div v-if="uploadedFiles.length" class="mt-3">
+            <div class="flex items-center justify-between px-3 py-2 rounded-lg border border-border bg-card text-xs">
+              <div class="flex items-center gap-2">
+                <span class="font-medium text-foreground">{{ uploadedFiles.length }} files selected</span>
+                <span class="text-muted-foreground">
+                  · {{ formatFileSize(totalUploadSize) }} total
+                </span>
+              </div>
+              <button
+                class="text-muted-foreground hover:text-red-500 transition-colors"
+                @click="clearFiles"
+              >
+                Clear all
+              </button>
+            </div>
+          </div>
 
-          <ul v-if="uploadedFiles.length" class="mt-3 space-y-1 text-xs">
-            <li
-              v-for="(file, idx) in uploadedFiles"
-              :key="file.name + idx"
-              class="flex items-center gap-2 px-2 py-1 rounded border border-border bg-card"
-            >
-              <span class="font-mono flex-1 truncate">{{ file.name }}</span>
-
-              <span class="text-muted-foreground">{{ formatFileSize(file.size) }}</span>
-
-              <button class="text-red-500" @click="removeUpload(idx)">✕</button>
-            </li>
-          </ul>
-        </div>
+            <!-- Show first 3 files + overflow count -->
+            <ul class="mt-2 space-y-1 text-xs">
+              <li
+                v-for="(file, idx) in uploadedFiles.slice(0, 3)"
+                :key="file.name + idx"
+                class="flex items-center gap-2 px-2 py-1 rounded border border-border bg-card"
+              >
+                <span class="font-mono flex-1 truncate">{{ file.name }}</span>
+                <span class="text-muted-foreground shrink-0">{{ formatFileSize(file.size) }}</span>
+                <button class="text-red-500 shrink-0" @click="removeUpload(idx)">✕</button>
+              </li>
+              <li
+                v-if="uploadedFiles.length > 3"
+                class="px-2 py-1 text-muted-foreground italic"
+              >
+                + {{ uploadedFiles.length - 3 }} more files
+              </li>
+            </ul>
+          </div>
 
         <!-- Submit -->
         <div class="px-5 py-4 flex justify-end items-center gap-3">
@@ -285,11 +306,16 @@
 
       <!-- Active & Recent Jobs -->
       <section class="rounded-xl border border-border bg-card overflow-hidden shadow-md">
-        <header class="px-5 py-4 bg-primary/[0.22] border-b border-border">
-          <h2 class="font-bold text-lg tracking-tight">Active & Recent Jobs</h2>
-          <p class="text-xs text-muted-foreground mt-0.5">
-            Live training progress and recent results.
-          </p>
+        <header class="px-5 py-4 bg-primary/[0.22] border-b border-border flex items-center justify-between">
+          <div>
+            <h2 class="font-bold text-lg tracking-tight">Active & Recent Jobs</h2>
+            <p class="text-xs text-muted-foreground mt-0.5">
+              Live training progress and recent results.
+            </p>
+          </div>
+          <span class="text-xs text-muted-foreground">
+            {{ jobRows.length }} {{ jobRows.length === 1 ? 'job' : 'jobs' }}
+          </span>
         </header>
 
         <div v-if="!jobRows.length" class="px-5 py-6 text-sm text-muted-foreground">
@@ -297,21 +323,20 @@
         </div>
 
         <ul v-else class="divide-y divide-border">
-          <li v-for="job in jobRows" :key="job.id" class="px-5 py-4 space-y-2">
+          <li v-for="job in paginatedJobRows" :key="job.id" class="px-5 py-4 space-y-2">
             <!-- Top row -->
             <div class="flex items-center justify-between gap-2 flex-wrap">
               <div class="flex items-center gap-2 flex-wrap">
                 <span class="font-medium text-sm">{{ job.versionName }}</span>
                 <span class="text-xs text-muted-foreground italic">{{ job.trackLabel }}</span>
               </div>
-
-              <!-- Status badge -->
               <span
                 class="text-xs px-2 py-0.5 rounded-full font-medium"
                 :class="{
-                  'bg-blue-100 text-blue-800': job.status === 'running',
+                  'bg-blue-100 text-blue-800':   job.status === 'running',
+                  'bg-amber-100 text-amber-800': job.status === 'pending',
                   'bg-green-100 text-green-800': job.status === 'completed',
-                  'bg-red-100 text-red-800': job.status === 'failed',
+                  'bg-red-100 text-red-800':     job.status === 'failed',
                 }"
               >
                 {{
@@ -322,11 +347,8 @@
               </span>
             </div>
 
-            <!-- Progress bar (running only) -->
-            <div
-              v-if="job.status === 'running'"
-              class="w-full h-1.5 rounded-full bg-muted overflow-hidden"
-            >
+            <!-- Progress bar -->
+            <div v-if="job.status === 'running'" class="w-full h-1.5 rounded-full bg-muted overflow-hidden">
               <div
                 class="h-full bg-primary rounded-full transition-all duration-1000"
                 :style="{ width: job.progress + '%' }"
@@ -336,12 +358,10 @@
             <!-- Stats row -->
             <div class="flex gap-4 text-xs text-muted-foreground flex-wrap">
               <span v-if="job.status === 'running'">
-                Elapsed
-                <span class="font-mono text-foreground">{{ formatDuration(job.elapsed) }}</span>
+                Elapsed <span class="font-mono text-foreground">{{ formatDuration(job.elapsed) }}</span>
               </span>
               <span v-if="job.status === 'completed'">
-                Duration
-                <span class="font-mono text-foreground">{{ formatDuration(job.duration) }}</span>
+                Duration <span class="font-mono text-foreground">{{ formatDuration(job.duration) }}</span>
               </span>
               <span v-if="job.status === 'failed'" class="text-red-500">
                 {{ job.errorMessage }}
@@ -352,6 +372,57 @@
             </div>
           </li>
         </ul>
+
+        <!-- Pagination -->
+        <div
+          v-if="totalPages > 1"
+          class="px-5 py-3 border-t border-border flex items-center justify-between text-xs text-muted-foreground"
+        >
+          <span>Page {{ currentPage }} of {{ totalPages }}</span>
+          <div class="flex items-center gap-1">
+            <button
+              @click="currentPage = 1"
+              :disabled="currentPage === 1"
+              class="px-2 py-1 rounded border border-border hover:bg-muted disabled:opacity-40"
+            >
+              «
+            </button>
+            <button
+              @click="currentPage--"
+              :disabled="currentPage === 1"
+              class="px-2 py-1 rounded border border-border hover:bg-muted disabled:opacity-40"
+            >
+              ‹
+            </button>
+            <button
+              v-for="page in totalPages"
+              :key="page"
+              @click="currentPage = page"
+              class="px-2 py-1 rounded border transition-colors"
+              :class="
+                page === currentPage
+                  ? 'border-primary bg-primary/5 text-foreground'
+                  : 'border-border hover:bg-muted'
+              "
+            >
+              {{ page }}
+            </button>
+            <button
+              @click="currentPage++"
+              :disabled="currentPage === totalPages"
+              class="px-2 py-1 rounded border border-border hover:bg-muted disabled:opacity-40"
+            >
+              ›
+            </button>
+            <button
+              @click="currentPage = totalPages"
+              :disabled="currentPage === totalPages"
+              class="px-2 py-1 rounded border border-border hover:bg-muted disabled:opacity-40"
+            >
+              »
+            </button>
+          </div>
+        </div>
       </section>
     </div>
   </div>
@@ -369,13 +440,21 @@ const loadError = ref('')
 
 const tracks = ref<any[]>([])
 const trainingHistory = ref<any[]>([])
-const trainingMode = ref<'scratch' | 'retrain'>('scratch')
+const trainingMode = ref<'scratch' | 'incremental'>('scratch')
 const uploadedFiles = ref<{ name: string; size: number }[]>([])
 const fileInputRef = ref<HTMLInputElement | null>(null)
 const dragOver = ref(false)
 const formMessage = ref('')
 const now = ref(Date.now())
 let ticker: ReturnType<typeof setInterval>
+
+const currentPage = ref(1)
+const pageSize = 4
+const totalPages = computed(() => Math.ceil(jobRows.value.length / pageSize))
+
+const paginatedJobRows = computed(() =>
+  jobRows.value.slice((currentPage.value - 1) * pageSize, currentPage.value * pageSize)
+)
 
 const seedTypes = ref([
   { id: 'PEH', species: 'Pisum sativum', isCustom: false },
@@ -391,20 +470,30 @@ const newSeedSpecies = ref('')
 
 const selectedVersionId = ref<number | null>(null)
 
+const totalUploadSize = computed(() =>
+  uploadedFiles.value.reduce((sum, f) => sum + f.size, 0)
+)
+
+function clearFiles() {
+  uploadedFiles.value = []
+  actualFiles.value = []
+}
+
 // Flatten all versions from all tracks with their track label attached
 const allVersions = computed(() =>
-  tracks.value.flatMap((t) => (t.versions ?? []).map((v: any) => ({ ...v, track_label: t.label }))),
+  tracks.value.flatMap((t) =>
+    (t.versions ?? []).map((v: any) => ({
+      ...v,
+      track_label: t.label,
+      samples: v.sample_count ?? 0
+    }))
+  )
 )
 
 // Reset selection when switching mode
 watch(trainingMode, () => {
   selectedSeed.value = null
   selectedVersionId.value = null
-})
-
-const canSubmit = computed(() => {
-  if (trainingMode.value === 'scratch') return !!selectedSeed.value
-  return !!selectedVersionId.value
 })
 
 function addSeed() {
@@ -441,15 +530,25 @@ const jobRows = computed(() => {
       id: j.id,
       versionName: j.version_name,
       trackLabel: t.label,
-      status: 'running',
-      currentEpoch: j.current_epoch,
-      totalEpochs: j.total_epochs,
+      status: j.status ?? 'pending',
+      currentEpoch: j.current_epoch ?? 0,
+      totalEpochs: j.total_epochs ?? 90,
       progress,
       elapsed: elapsedSec,
-      duration: null,
-      errorMessage: null,
+      duration: j.completed_at && j.started_at
+        ? Math.round(
+            (new Date(j.completed_at).getTime() - new Date(j.started_at).getTime()) / 1000
+          )
+        : null,
+      errorMessage: j.errorMessage ?? j.error_message ?? null,
+      startedAt: (j.status === 'running' || j.status === 'pending') && j.started_at
+        ? new Date(j.started_at).toLocaleTimeString()
+        : null,
+      _sortKey: new Date(j.started_at ?? 0).getTime(),
     })
   }
+  // Sort newest jobs first
+  rows.sort((a, b) => b._sortKey - a._sortKey)
 
   for (const h of trainingHistory.value) {
     rows.push({
@@ -463,6 +562,8 @@ const jobRows = computed(() => {
       elapsed: null,
       duration: h.duration_seconds,
       errorMessage: h.error_message,
+      startedAt: null,
+      _sortKey: 0,
     })
   }
 
@@ -484,25 +585,48 @@ function formatFileSize(bytes: number) {
   return `${(bytes / 1024 ** 2).toFixed(1)} MB`
 }
 
-function startTraining() {
-  if (trainingMode.value === 'scratch') {
-    if (!selectedSeed.value) return
-    formMessage.value = `Training new model for ${selectedSeed.value}`
-    return
-  }
-  if (!selectedVersionId.value) return
-  formMessage.value = `Retraining model ${selectedVersionId.value}`
+let pollHandle: ReturnType<typeof setInterval> | null = null
+
+function startPolling(jobId: number) {
+  if (pollHandle) clearInterval(pollHandle)
+  pollHandle = setInterval(async () => {
+    try {
+      const res = await api(`/api/analysis/training/${jobId}/`)
+      if (!res.ok) return
+      const job = await res.json()
+
+      // Find and update the job in tracks
+      for (const t of tracks.value) {
+        if (t.active_job?.id === jobId) {
+          t.active_job.current_epoch = job.current_epoch ?? 0
+          t.active_job.total_epochs = job.total_epochs ?? 90
+          t.active_job.status = job.status
+          t.active_job.errorMessage = job.error_message ?? null
+          t.active_job.completed_at = job.completed_at ?? null
+        }
+      }
+
+      if (job.status === 'completed' || job.status === 'failed') {
+        clearInterval(pollHandle!)
+        pollHandle = null
+        formMessage.value = ''
+      }
+    } catch {}
+  }, 3000)
 }
 
 function triggerFilePicker() {
   fileInputRef.value?.click()
 }
 
+const actualFiles = ref<File[]>([])
+
 function onFilePicked(e: Event) {
   const files = (e.target as HTMLInputElement).files
   if (!files) return
   for (const f of Array.from(files)) {
     uploadedFiles.value.push({ name: f.name, size: f.size })
+    actualFiles.value.push(f)
   }
 }
 
@@ -511,17 +635,18 @@ function onDrop(e: DragEvent) {
   if (!e.dataTransfer?.files) return
   for (const f of Array.from(e.dataTransfer.files)) {
     uploadedFiles.value.push({ name: f.name, size: f.size })
+    actualFiles.value.push(f)
   }
 }
 
 function removeUpload(i: number) {
   uploadedFiles.value.splice(i, 1)
+  actualFiles.value.splice(i, 1)
 }
 
 onMounted(async () => {
-  ticker = setInterval(() => {
-    now.value = Date.now()
-  }, 1000)
+  ticker = setInterval(() => { now.value = Date.now() }, 1000)
+
   try {
     if (import.meta.env.DEV && route.query.preview === 'default') {
       const { default: mocks } = await import('@/mocks/seed-models.json')
@@ -529,10 +654,7 @@ onMounted(async () => {
       tracks.value = raw.tracks
       trainingHistory.value = raw.training_history ?? []
     } else {
-      const res = await api('/api/analysis/models/?module=seeds')
-      const data = await res.json()
-      tracks.value = data.tracks ?? data
-      trainingHistory.value = data.training_history ?? []
+      await loadFromApi()
     }
   } catch (e) {
     loadError.value = String(e)
@@ -541,5 +663,163 @@ onMounted(async () => {
   }
 })
 
-onUnmounted(() => clearInterval(ticker))
+async function loadFromApi() {
+  // 1. Fetch all seed model versions
+  const versionsRes = await api('/api/analysis/models/?module=seeds')
+  if (!versionsRes.ok) {
+    loadError.value = `Models: HTTP ${versionsRes.status}`
+    return
+  }
+  const versions: any[] = await versionsRes.json()
+
+  // 2. Build track map from known seed types
+  const speciesMap = new Map<string, any>()
+  for (const seed of seedTypes.value) {
+    speciesMap.set(seed.id.toLowerCase(), {
+      id: seed.id,
+      label: seed.id,
+      species: seed.species,
+      versions: [],
+      active_job: null,
+      data_pool: { total_samples: 0, new_since_active: 0 },
+    })
+  }
+
+  // 3. Slot each version into its track
+  for (const v of versions) {
+    const species = (v.parameters?.species ?? v.version_name.split('-')[0]).toLowerCase()
+    const track = speciesMap.get(species)
+    if (track) {
+      track.versions.push({
+        ...v,
+        samples: v.sample_count ?? 0,
+      })
+    }
+  }
+
+  tracks.value = Array.from(speciesMap.values())
+
+  // 4. Fetch active/pending training jobs and attach to tracks
+  const jobsRes = await api('/api/analysis/training/?module=seeds')
+  if (jobsRes.ok) {
+    const jobs: any[] = await jobsRes.json()
+    const activeJobs = jobs.filter(
+      (j) => j.status === 'running' || j.status === 'pending'
+  )
+  for (const job of activeJobs) {
+    const species = job.config?.species?.toLowerCase()
+    const track = tracks.value.find((t) => t.id.toLowerCase() === species)
+    if (track) {
+      track.active_job = {
+        id: job.id,
+        version_name: `${species}-job-${job.id}`,
+        started_at: job.started_at,
+        current_epoch: job.current_epoch,
+        total_epochs: job.total_epochs,
+        loss: job.metrics?.loss ?? 0,
+      }
+    }
+    startPolling(job.id)
+  }
+  // History
+  trainingHistory.value = jobs
+    .filter((j) => j.status === 'completed' || j.status === 'failed')
+    .map((j) => ({
+      id: j.id,
+      version_name: `${j.config?.species}-job-${j.id}`,
+      track_label: j.config?.species?.toUpperCase() ?? '?',
+      status: j.status,
+      epochs_total: j.total_epochs,
+      duration_seconds: j.completed_at && j.started_at
+        ? Math.round(
+            (new Date(j.completed_at).getTime() - new Date(j.started_at).getTime()) / 1000
+          )
+        : null,
+      error_message: j.error_message || null,
+    }))
+  }
+}
+
+async function startTraining() {
+  formMessage.value = ''
+
+  if (trainingMode.value === 'scratch' && !uploadedFiles.value.length) {
+    formMessage.value = 'Please upload training images first.'
+    return
+  }
+
+  const payload =
+    trainingMode.value === 'scratch'
+      ? {
+          species: selectedSeed.value!.toLowerCase(),
+          training_mode: 'scratch',
+          epochs: 90,
+        }
+      : {
+          species: allVersions.value
+            .find((v) => v.id === selectedVersionId.value)
+            ?.track_label.toLowerCase(),
+          training_mode: 'incremental',
+          epochs: 90,
+          source_model_id: selectedVersionId.value,
+        }
+
+  try {
+    // 1. Upload training files (for scratch mode only)
+    if (trainingMode.value === 'scratch' && actualFiles.value.length) {
+      formMessage.value = 'Uploading training data...'
+      const formData = new FormData()
+      formData.append('species', payload.species!)
+      for (const file of actualFiles.value) {
+        formData.append('files', file)
+      }
+      const uploadRes = await api('/api/seeds/training/upload-data/', {
+        method: 'POST',
+        body: formData,
+      })
+      if (!uploadRes.ok) {
+        formMessage.value = (await uploadRes.text()) || 'Upload failed'
+        return
+      }
+    }
+
+    // 2. Start training
+    formMessage.value = 'Starting training job...'
+    const res = await api('/api/seeds/training/start/', {
+      method: 'POST',
+      body: JSON.stringify(payload),
+    })
+    if (!res.ok) {
+      formMessage.value = (await res.text()) || `HTTP ${res.status}`
+      return
+    }
+    const job = await res.json()
+    formMessage.value = `Job #${job.id} started — training ${(payload.species ?? '').toUpperCase()}`
+
+    const species = payload.species?.toLowerCase()
+    const track = tracks.value.find((t) => t.id.toLowerCase() === species)
+    if (track) {
+      track.active_job = {
+        id: job.id,
+        version_name: `${species}-job-${job.id}`,
+        started_at: job.started_at ?? new Date().toISOString(),
+        current_epoch: 0,
+        total_epochs: 90,
+        status: 'pending',
+        loss: 0,
+        errorMessage: null,
+      }
+    }
+
+    startPolling(job.id)
+    currentPage.value = 1
+  } catch (e) {
+    formMessage.value = e instanceof Error ? e.message : String(e)
+  }
+}
+
+onUnmounted(() => {
+  clearInterval(ticker)
+  if (pollHandle) clearInterval(pollHandle)
+})
 </script>
