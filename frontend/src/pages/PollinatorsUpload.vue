@@ -471,62 +471,9 @@ async function handleFiles(files: File[]) {
   localFiles.value = images
 }
 
-function onPick(e: Event, _isFolder: boolean) {
-  const target = e.target as HTMLInputElement
-  if (target.files) void handleFiles(Array.from(target.files))
-  target.value = ''
+function onUploadSelect(files: File[]) {
+  void handleFiles(files)
 }
-
-async function onDrop(e: DragEvent) {
-  dragOver.value = false
-  if (!e.dataTransfer) return
-
-  // dataTransfer.files alone can't recurse into dropped folders; use the
-  // items API + webkitGetAsEntry to walk directories. Fall back to files
-  // for any environment without items support.
-  if (e.dataTransfer.items && e.dataTransfer.items.length) {
-    const entries: FileSystemEntry[] = []
-    for (const item of Array.from(e.dataTransfer.items)) {
-      const entry = item.webkitGetAsEntry?.()
-      if (entry) entries.push(entry)
-    }
-    const files: File[] = []
-    await Promise.all(entries.map((entry) => collectFiles(entry, files)))
-    if (files.length) void handleFiles(files)
-    return
-  }
-  if (e.dataTransfer.files) void handleFiles(Array.from(e.dataTransfer.files))
-}
-
-// Recursively read every file under a dropped FileSystemEntry. Handles the
-// readEntries() batch limit (typically 100 per call) by re-reading until
-// the directory yields nothing.
-async function collectFiles(entry: FileSystemEntry, out: File[]): Promise<void> {
-  if (entry.isFile) {
-    const file = await new Promise<File>((resolve, reject) => {
-      ;(entry as FileSystemFileEntry).file(resolve, reject)
-    })
-    out.push(file)
-    return
-  }
-  if (entry.isDirectory) {
-    const reader = (entry as FileSystemDirectoryEntry).createReader()
-    const children: FileSystemEntry[] = []
-    let batch: FileSystemEntry[]
-    do {
-      batch = await new Promise<FileSystemEntry[]>((resolve, reject) => {
-        reader.readEntries(resolve, reject)
-      })
-      children.push(...batch)
-    } while (batch.length > 0)
-    await Promise.all(children.map((child) => collectFiles(child, out)))
-  }
-}
-
-const folderInput = ref<HTMLInputElement | null>(null)
-onMounted(() => {
-  if (folderInput.value) folderInput.value.setAttribute('webkitdirectory', '')
-})
 
 async function startDetection() {
   if (config.value.preprocessing.use_roi) {
