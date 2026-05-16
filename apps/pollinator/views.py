@@ -247,15 +247,11 @@ class PollinatorRunExportCSVView(APIView):
         return response
 
 
-# Class -> RGB color for bbox overlays. Mirrors the frontend palette in
-# PollinatorsExport.vue / PollinatorsReview.vue.
-_CLASS_RGB = {
-    'fly': (107, 155, 210),
-    'bumblebee': (230, 169, 70),
-    'butterfly': (200, 123, 186),
-    'other': (154, 163, 171),
-}
-_EXCLUDED_RGB = (239, 68, 68)
+# Class set used for folder routing in the per-class crop ZIP. Membership
+# check only; the bbox overlay color is always red so the export matches
+# the review page's red outline.
+_CLASS_SET = {'fly', 'bumblebee', 'butterfly', 'other'}
+_BBOX_RED = (239, 68, 68)
 
 
 def _effective_class(d: Detection) -> str:
@@ -300,7 +296,7 @@ class PollinatorRunExportCropsView(APIView):
                 if not d.crop:
                     continue
                 cls = _effective_class(d) or 'other'
-                folder = cls if cls in _CLASS_RGB else 'other'
+                folder = cls if cls in _CLASS_SET else 'other'
                 arcname = f'{folder}/det_{d.pk}.jpg'
                 try:
                     with d.crop.open('rb') as fp:
@@ -322,9 +318,11 @@ class PollinatorRunExportAnnotatedView(APIView):
     """GET /api/pollinator/runs/<run_id>/export-annotated.zip
 
     ZIP of source images for the run with detection bboxes drawn on top.
-    Kept (accepted, not excluded) bboxes get the class color and a label.
-    Excluded bboxes get a red strike-through so QA can see what dropped
-    out. Rejected/unsure/unreviewed detections are not drawn at all.
+    Bboxes are red to match the red outline used in the review page so the
+    export and the review screen visually agree. Only kept detections are
+    drawn: excluded-from-export, rejected, unsure, and unreviewed
+    detections are skipped entirely so the exported image reflects exactly
+    what would land in the dataset.
     """
 
     def get(self, request: Request, run_id: int) -> FileResponse:
@@ -374,28 +372,19 @@ class PollinatorRunExportAnnotatedView(APIView):
                 draw = ImageDraw.Draw(img)
                 stroke = max(2, int(max(img.width, img.height) * 0.003))
                 for d in dets:
+                    if d.excluded_from_export:
+                        continue
                     bb = d.bbox or {}
                     try:
                         x1, y1 = int(bb['x1']), int(bb['y1'])
                         x2, y2 = int(bb['x2']), int(bb['y2'])
                     except (KeyError, TypeError, ValueError):
                         continue
-                    if d.excluded_from_export:
-                        # Red rectangle plus an X across it so the bbox
-                        # reads as "removed" even on a small thumbnail.
-                        draw.rectangle(
-                            (x1, y1, x2, y2), outline=_EXCLUDED_RGB, width=stroke
-                        )
-                        draw.line((x1, y1, x2, y2), fill=_EXCLUDED_RGB, width=stroke)
-                        draw.line((x1, y2, x2, y1), fill=_EXCLUDED_RGB, width=stroke)
-                    else:
-                        cls = _effective_class(d)
-                        color = _CLASS_RGB.get(cls, _CLASS_RGB['other'])
-                        draw.rectangle((x1, y1, x2, y2), outline=color, width=stroke)
-                        if font is not None and cls:
-                            label = cls
-                            tx, ty = x1 + 2, max(0, y1 - 14)
-                            draw.text((tx, ty), label, fill=color, font=font)
+                    draw.rectangle((x1, y1, x2, y2), outline=_BBOX_RED, width=stroke)
+                    cls = _effective_class(d)
+                    if font is not None and cls:
+                        tx, ty = x1 + 2, max(0, y1 - 14)
+                        draw.text((tx, ty), cls, fill=_BBOX_RED, font=font)
 
                 arcname = _safe_filename(src.file.name)
                 if not arcname:
