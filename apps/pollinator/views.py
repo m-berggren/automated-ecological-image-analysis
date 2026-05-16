@@ -126,13 +126,12 @@ class PollinatorRunExportCSVView(APIView):
             module=Module.POLLINATORS,
         )
 
-        mode = request.query_params.get("mode") or "per_image"
+        mode = request.query_params.get('mode') or 'per_image'
 
-        if mode == "per_detection":
+        if mode == 'per_detection':
             return self._export_per_detection(run)
 
         return self._export_per_image(run)
-
 
     def _export_per_image(self, run):
         # Pre-aggregate validated detections by image_id so we can emit one
@@ -186,35 +185,35 @@ class PollinatorRunExportCSVView(APIView):
                 status=DetectionStatus.ACCEPTED,
                 excluded_from_export=False,
             )
-            .select_related("image", "pollinator_detection")
-            .order_by("image__captured_at", "image_id", "id")
+            .select_related('image', 'pollinator_detection')
+            .order_by('image__captured_at', 'image_id', 'id')
             .iterator(chunk_size=500)
         )
 
         fields = [
             # Image Specific
-            "session",
-            "image_name",
-            "camera_name",
-            "datetime",
-            "weather",
+            'session',
+            'image_name',
+            'camera_name',
+            'datetime',
+            'weather',
             # Detection specific
-            "detection_id",
-            "yolo_confidence",
-            "insectnet_confidence",
-            "yolo_class",
-            "insectnet_class",
-            "final_class",
+            'detection_id',
+            'yolo_confidence',
+            'insectnet_confidence',
+            'yolo_class',
+            'insectnet_class',
+            'final_class',
         ]
 
-        session = run.name or f"Run #{run.pk}"
+        session = run.name or f'Run #{run.pk}'
         writer = csv.writer(_Echo())
 
         def rows():
             yield writer.writerow(fields)
 
             for d in detections:
-                pd = getattr(d, "pollinator_detection", None)
+                pd = getattr(d, 'pollinator_detection', None)
                 img = d.image
 
                 final_class = (
@@ -224,26 +223,27 @@ class PollinatorRunExportCSVView(APIView):
                     or (pd.insectnet_class if pd else None)
                 )
 
+                yield writer.writerow(
+                    [
+                        # image
+                        session,
+                        Path(img.file.name).name if img and img.file else '',
+                        _camera_name(img) if img else '',
+                        img.captured_at.isoformat() if img and img.captured_at else '',
+                        img.weather or '' if img else '',
+                        # detection
+                        d.id,
+                        pd.yolo_confidence if pd else None,
+                        pd.insectnet_confidence if pd else None,
+                        pd.yolo_class if pd else None,
+                        pd.insectnet_class if pd else None,
+                        final_class,
+                    ]
+                )
 
-                yield writer.writerow([
-                    # image
-                    session,
-                    Path(img.file.name).name if img and img.file else '',
-                    _camera_name(img) if img else '',
-                    img.captured_at.isoformat() if img and img.captured_at else '',
-                    img.weather or '' if img else '',
-                    # detection
-                    d.id,
-                    pd.yolo_confidence if pd else None,
-                    pd.insectnet_confidence if pd else None,
-                    pd.yolo_class if pd else None,
-                    pd.insectnet_class if pd else None,
-                    final_class,
-                ])
-
-        filename = f"run-{run.pk}-detections.csv"
-        response = StreamingHttpResponse(rows(), content_type="text/csv")
-        response["Content-Disposition"] = f'attachment; filename="{filename}"'
+        filename = f'run-{run.pk}-detections.csv'
+        response = StreamingHttpResponse(rows(), content_type='text/csv')
+        response['Content-Disposition'] = f'attachment; filename="{filename}"'
         return response
 
 
@@ -252,6 +252,32 @@ class PollinatorRunExportCSVView(APIView):
 # the review page's red outline.
 _CLASS_SET = {'fly', 'bumblebee', 'butterfly', 'other'}
 _BBOX_RED = (239, 68, 68)
+_ROI_COLOR = (59, 130, 246)
+
+
+def _draw_dashed_rect(
+    draw: ImageDraw.ImageDraw,
+    box: tuple[int, int, int, int],
+    color: tuple[int, int, int],
+    width: int,
+    dash: int,
+    gap: int,
+) -> None:
+    x1, y1, x2, y2 = box
+    step = max(1, dash + gap)
+
+    def segs(start: int, end: int):
+        p = start
+        while p < end:
+            yield p, min(p + dash, end)
+            p += step
+
+    for a, b in segs(x1, x2):
+        draw.line([(a, y1), (b, y1)], fill=color, width=width)
+        draw.line([(a, y2), (b, y2)], fill=color, width=width)
+    for a, b in segs(y1, y2):
+        draw.line([(x1, a), (x1, b)], fill=color, width=width)
+        draw.line([(x2, a), (x2, b)], fill=color, width=width)
 
 
 def _effective_class(d: Detection) -> str:
@@ -346,9 +372,15 @@ class PollinatorRunExportAnnotatedView(APIView):
             per_image.setdefault(d.image_id, []).append(d)
 
         try:
-            font = ImageFont.load_default()
-        except Exception:
-            font = None
+            font = ImageFont.truetype(
+                '/usr/share/fonts/liberation/LiberationSans-Bold.ttf',
+                size=32,
+            )
+        except OSError:
+            try:
+                font = ImageFont.load_default()
+            except Exception:
+                font = None
 
         buf = tempfile.SpooledTemporaryFile(max_size=64 * 1024 * 1024)
         with zipfile.ZipFile(buf, 'w', zipfile.ZIP_STORED) as zf:
@@ -383,8 +415,31 @@ class PollinatorRunExportAnnotatedView(APIView):
                     draw.rectangle((x1, y1, x2, y2), outline=_BBOX_RED, width=stroke)
                     cls = _effective_class(d)
                     if font is not None and cls:
-                        tx, ty = x1 + 2, max(0, y1 - 14)
+                        tx, ty = x1 + 2, max(0, y1 - 36)
                         draw.text((tx, ty), cls, fill=_BBOX_RED, font=font)
+
+                roi = ((run.config or {}).get('preprocessing') or {}).get('roi_bbox')
+                if isinstance(roi, (list, tuple)) and len(roi) == 4:
+                    try:
+                        rx, ry, rw, rh = (int(v) for v in roi)
+                    except (TypeError, ValueError):
+                        rx = ry = rw = rh = 0
+                    if rw > 0 and rh > 0:
+                        roi_stroke = max(2, int(max(img.width, img.height) * 0.0022))
+                        dash = roi_stroke * 4
+                        gap = max(1, int(roi_stroke * 2.5))
+                        _draw_dashed_rect(
+                            draw,
+                            (rx, ry, rx + rw, ry + rh),
+                            _ROI_COLOR,
+                            roi_stroke,
+                            dash,
+                            gap,
+                        )
+                        if font is not None:
+                            draw.text(
+                                (rx + 6, ry + 6), 'ROI', fill=_ROI_COLOR, font=font
+                            )
 
                 arcname = _safe_filename(src.file.name)
                 if not arcname:

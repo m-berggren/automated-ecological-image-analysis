@@ -20,7 +20,8 @@
       paint-order="stroke"
       stroke="white"
       :stroke-width="fontSize * 0.2"
-    >{{ label }}</text>
+      >{{ label }}</text
+    >
   </template>
 </template>
 
@@ -38,7 +39,7 @@ const props = withDefaults(
   }>(),
   {
     label: 'ROI section',
-    color: '#dc2626',
+    color: '#3b82f6',
     nonScalingStroke: false,
   },
 )

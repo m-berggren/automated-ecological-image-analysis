@@ -25,47 +25,44 @@
       >
         loading {{ loadProgress.loaded }}/{{ loadProgress.total }}…
       </span>
-<div class="ml-auto">
-  <div class="border border-border rounded-lg bg-background shadow-sm p-3 space-y-3">
+      <div class="ml-auto">
+        <div class="border border-border rounded-lg bg-background shadow-sm p-3 space-y-3">
+          <!-- Header -->
+          <div class="text-xs font-semibold text-muted-foreground uppercase tracking-wide">
+            Export as
+          </div>
 
-    <!-- Header -->
-    <div class="text-xs font-semibold text-muted-foreground uppercase tracking-wide">
-      Export as
-    </div>
+          <!-- Actions -->
+          <div class="flex gap-2">
+            <!-- CSV -->
+            <button
+              class="px-3 py-1.5 rounded-md text-sm font-medium border border-border hover:bg-muted disabled:opacity-50"
+              :disabled="downloading !== null || !run"
+              @click="showCsvModal = true"
+            >
+              {{ downloading === 'csv' ? 'Downloading…' : 'CSV' }}
+            </button>
 
-    <!-- Actions -->
-    <div class="flex gap-2">
+            <!-- Crops ZIP -->
+            <button
+              class="px-3 py-1.5 rounded-md text-sm font-medium border border-border hover:bg-muted disabled:opacity-50"
+              :disabled="downloading !== null || !run"
+              @click="downloadExport('crops')"
+            >
+              {{ downloading === 'crops' ? 'Downloading…' : 'Crops (zip)' }}
+            </button>
 
-      <!-- CSV -->
-      <button
-        class="px-3 py-1.5 rounded-md text-sm font-medium border border-border hover:bg-muted disabled:opacity-50"
-        :disabled="downloading !== null || !run"
-        @click="showCsvModal = true"
-      >
-        {{ downloading === 'csv' ? 'Downloading…' : 'CSV' }}
-      </button>
-
-      <!-- Crops ZIP -->
-      <button
-        class="px-3 py-1.5 rounded-md text-sm font-medium border border-border hover:bg-muted disabled:opacity-50"
-        :disabled="downloading !== null || !run"
-        @click="downloadExport('crops')"
-      >
-        {{ downloading === 'crops' ? 'Downloading…' : 'Crops (zip)' }}
-      </button>
-
-      <!-- Annotated ZIP -->
-      <button
-        class="px-3 py-1.5 rounded-md text-sm font-medium border border-border hover:bg-muted disabled:opacity-50"
-        :disabled="downloading !== null || !run"
-        @click="downloadExport('annotated')"
-      >
-        {{ downloading === 'annotated' ? 'Downloading…' : 'Annotated images (zip)' }}
-      </button>
-
-    </div>
-  </div>
-</div>
+            <!-- Annotated ZIP -->
+            <button
+              class="px-3 py-1.5 rounded-md text-sm font-medium border border-border hover:bg-muted disabled:opacity-50"
+              :disabled="downloading !== null || !run"
+              @click="downloadExport('annotated')"
+            >
+              {{ downloading === 'annotated' ? 'Downloading…' : 'Annotated images (zip)' }}
+            </button>
+          </div>
+        </div>
+      </div>
     </header>
 
     <div v-if="!imageCards.length" class="flex-1 p-12 text-center text-sm text-muted-foreground">
@@ -89,10 +86,13 @@
           </span>
         </header>
         <div class="grid grid-cols-1 xl:grid-cols-[2fr_1fr] gap-4 p-4">
-          <!-- Source image with all bboxes overlaid -->
+          <!-- Source image with all bboxes overlaid. Click anywhere outside
+               a bbox to open the fullscreen zoom modal. -->
           <div
             class="relative bg-background rounded-md overflow-hidden"
+            :class="card.naturalW && card.sourceUrl ? 'cursor-zoom-in' : ''"
             :style="{ aspectRatio: card.aspectRatio || 'auto' }"
+            @click="openZoom(card)"
           >
             <svg
               v-if="card.naturalW && card.sourceUrl"
@@ -108,21 +108,17 @@
                 :y="d.bbox.y1"
                 :width="d.bbox.w"
                 :height="d.bbox.h"
-                fill="#ef4444"
-                :fill-opacity="d.excluded_from_export ? 0.5 : 0"
+                fill="none"
                 stroke="#ef4444"
                 :stroke-width="
                   Math.max(2, Math.max(card.naturalW, card.naturalH) * 0.002) *
-                  (d.excluded_from_export ? 2 : 1)
+                  (d.excluded_from_export ? 0.5 : 1)
                 "
+                :stroke-opacity="d.excluded_from_export ? 0.4 : 1"
                 class="cursor-pointer"
-                @click="toggleExclude(d)"
+                @click.stop="toggleExclude(d)"
               />
-              <ROIOverlay
-                :bbox="roiBbox"
-                :image-w="card.naturalW"
-                :image-h="card.naturalH"
-              />
+              <ROIOverlay :bbox="roiBbox" :image-w="card.naturalW" :image-h="card.naturalH" />
             </svg>
             <div
               v-else
@@ -136,9 +132,11 @@
             <button
               v-for="d in card.detections"
               :key="d.id"
-              class="relative aspect-square rounded-md overflow-hidden border-2 transition-colors focus:outline-none"
+              class="relative aspect-square rounded-md overflow-hidden transition-colors focus:outline-none"
               :class="
-                d.excluded_from_export ? 'border-red-500' : 'border-transparent hover:border-border'
+                d.excluded_from_export
+                  ? 'border-2 border-red-500'
+                  : 'border-2 border-transparent hover:border-border'
               "
               :title="`${classLabel(effective(d))} · ${(d.confidence ?? 0).toFixed(2)}`"
               @click="toggleExclude(d)"
@@ -152,14 +150,8 @@
               />
               <div
                 v-if="d.excluded_from_export"
-                class="absolute inset-0 bg-red-500/40 flex items-center justify-center text-white text-2xl font-bold"
-              >
-                ✗
-              </div>
-              <div
-                class="absolute bottom-0 left-0 right-0 h-1.5"
-                :style="{ backgroundColor: strokeFor(d) }"
-              />
+                class="absolute inset-0 bg-red-500/15 flex items-center justify-center text-white text-2xl font-bold"
+              ></div>
             </button>
           </div>
         </div>
@@ -172,8 +164,7 @@
     >
       <div
         @click.stop
-        class="w-full max-w-md p-6 rounded-[var(--radius)] shadow-lg animate-fade-in
-              bg-surface text-foreground border border-border"
+        class="w-full max-w-md p-6 rounded-[var(--radius)] shadow-lg animate-fade-in bg-surface text-foreground border border-border"
       >
         <h2 id="csv-modal-title" class="text-lg font-semibold mb-1 font-display">
           CSV Export Options
@@ -185,8 +176,7 @@
 
         <div class="space-y-3">
           <label
-            class="flex items-center gap-3 cursor-pointer p-3 rounded-md border bg-muted
-                  hover:bg-primary/20 transition"
+            class="flex items-center gap-3 cursor-pointer p-3 rounded-md border bg-muted hover:bg-primary/20 transition"
           >
             <input
               type="radio"
@@ -198,8 +188,7 @@
           </label>
 
           <label
-            class="flex items-center gap-3 cursor-pointer p-3 rounded-md border bg-muted
-                  hover:bg-primary/20 transition"
+            class="flex items-center gap-3 cursor-pointer p-3 rounded-md border bg-muted hover:bg-primary/20 transition"
           >
             <input
               type="radio"
@@ -213,18 +202,14 @@
 
         <div class="mt-6 flex justify-end gap-2">
           <button
-            class="px-4 py-2 rounded-md border border-border
-                  text-muted-foreground hover:bg-muted transition"
+            class="px-4 py-2 rounded-md border border-border text-muted-foreground hover:bg-muted transition"
             @click="showCsvModal = false"
           >
             Cancel
           </button>
 
           <button
-            class="px-4 py-2 rounded-md
-                  bg-primary text-primary-foreground
-                  hover:opacity-90 transition
-                  disabled:opacity-50"
+            class="px-4 py-2 rounded-md bg-primary text-primary-foreground hover:opacity-90 transition disabled:opacity-50"
             :disabled="!csvMode"
             @click="confirmCsvDownload"
           >
@@ -233,6 +218,68 @@
         </div>
       </div>
     </div>
+
+    <!-- Fullscreen read-only zoom for a card's source image. Wheel-zooms
+         around the cursor; click-and-drag pans. ESC or backdrop closes. -->
+    <dialog
+      ref="zoomDialog"
+      class="m-0 p-0 w-screen h-screen max-w-none max-h-none bg-black/95 backdrop:bg-black/95"
+      @close="onZoomClose"
+      @click.self="closeZoom"
+    >
+      <div
+        v-if="zoomedCard && zoomedCard.sourceUrl && zoomedCard.naturalW"
+        class="w-screen h-screen relative select-none overflow-hidden"
+        @wheel.prevent="onZoomWheel"
+        @mousedown="onPanStart"
+        @mousemove="onPanMove"
+        @mouseup="onPanEnd"
+        @mouseleave="onPanEnd"
+        :style="{ cursor: panning ? 'grabbing' : 'grab' }"
+      >
+        <svg
+          :viewBox="`0 0 ${zoomedCard.naturalW} ${zoomedCard.naturalH}`"
+          preserveAspectRatio="xMidYMid meet"
+          class="w-full h-full"
+        >
+          <g :transform="`translate(${zoom.tx} ${zoom.ty}) scale(${zoom.scale})`">
+            <image
+              :href="zoomedCard.sourceUrl"
+              :width="zoomedCard.naturalW"
+              :height="zoomedCard.naturalH"
+            />
+            <rect
+              v-for="d in zoomedCard.detections"
+              :key="d.id"
+              :x="d.bbox.x1"
+              :y="d.bbox.y1"
+              :width="d.bbox.w"
+              :height="d.bbox.h"
+              fill="none"
+              stroke="#ef4444"
+              :stroke-width="d.excluded_from_export ? 1 : 2"
+              :stroke-opacity="d.excluded_from_export ? 0.4 : 1"
+              vector-effect="non-scaling-stroke"
+            />
+            <ROIOverlay
+              :bbox="roiBbox"
+              :image-w="zoomedCard.naturalW"
+              :image-h="zoomedCard.naturalH"
+              non-scaling-stroke
+            />
+          </g>
+        </svg>
+        <button
+          class="absolute top-4 right-4 px-3 py-1.5 rounded-md bg-white/10 text-white text-sm hover:bg-white/20"
+          @click.stop="closeZoom"
+        >
+          Close (Esc)
+        </button>
+        <div class="absolute bottom-4 left-1/2 -translate-x-1/2 text-white/60 text-xs font-mono">
+          scroll to zoom · drag to pan · {{ Math.round(zoom.scale * 100) }}%
+        </div>
+      </div>
+    </dialog>
   </div>
 </template>
 
@@ -319,10 +366,6 @@ function classLabel(cls: ClassName | null): string {
 
 function effective(d: Detection): ClassName | null {
   return d.reviewer_label ?? d.predicted_class ?? d.yolo_class ?? d.insectnet_class ?? null
-}
-
-function strokeFor(d: Detection): string {
-  return CLASS_COLORS[effective(d) ?? 'other']
 }
 
 const roiBbox = computed<[number, number, number, number] | null>(() => {
@@ -515,5 +558,83 @@ async function downloadExport(kind: DownloadKind, mode?: 'per_image' | 'per_dete
   } finally {
     downloading.value = null
   }
+}
+
+// Fullscreen zoom modal. Mirrors the pattern used in PollinatorsReview:
+// state lives in viewBox units; the SVG <g> is translated then scaled, so
+// the wheel-around-cursor math converts client coords into viewBox coords
+// before applying. Read-only — exclusion is toggled on the small card.
+const zoomDialog = ref<HTMLDialogElement | null>(null)
+const zoomedCard = ref<ImageCard | null>(null)
+const zoom = ref({ scale: 1, tx: 0, ty: 0 })
+const panning = ref(false)
+const panStart = ref({ x: 0, y: 0, tx: 0, ty: 0 })
+
+function openZoom(card: ImageCard) {
+  if (!card.sourceUrl || !card.naturalW) return
+  zoomedCard.value = card
+  zoom.value = { scale: 1, tx: 0, ty: 0 }
+  zoomDialog.value?.showModal()
+}
+
+function closeZoom() {
+  zoomDialog.value?.close()
+}
+
+function onZoomClose() {
+  panning.value = false
+  zoomedCard.value = null
+}
+
+function onZoomWheel(e: WheelEvent) {
+  if (!zoomedCard.value) return
+  const target = e.currentTarget as HTMLElement
+  const rect = target.getBoundingClientRect()
+  const sx = zoomedCard.value.naturalW
+  const sy = zoomedCard.value.naturalH
+  const fit = Math.min(rect.width / sx, rect.height / sy)
+  const offX = (rect.width - sx * fit) / 2
+  const offY = (rect.height - sy * fit) / 2
+  const vx = (e.clientX - rect.left - offX) / fit
+  const vy = (e.clientY - rect.top - offY) / fit
+
+  const factor = e.deltaY < 0 ? 1.2 : 1 / 1.2
+  const next = Math.max(1, Math.min(20, zoom.value.scale * factor))
+  if (next === zoom.value.scale) return
+  const k = next / zoom.value.scale
+  zoom.value = {
+    scale: next,
+    tx: vx - k * (vx - zoom.value.tx),
+    ty: vy - k * (vy - zoom.value.ty),
+  }
+}
+
+function onPanStart(e: MouseEvent) {
+  if (e.button !== 0) return
+  panning.value = true
+  panStart.value = {
+    x: e.clientX,
+    y: e.clientY,
+    tx: zoom.value.tx,
+    ty: zoom.value.ty,
+  }
+}
+
+function onPanMove(e: MouseEvent) {
+  if (!panning.value || !zoomedCard.value) return
+  const target = e.currentTarget as HTMLElement
+  const rect = target.getBoundingClientRect()
+  const sx = zoomedCard.value.naturalW
+  const sy = zoomedCard.value.naturalH
+  const fit = Math.min(rect.width / sx, rect.height / sy)
+  zoom.value = {
+    ...zoom.value,
+    tx: panStart.value.tx + (e.clientX - panStart.value.x) / fit,
+    ty: panStart.value.ty + (e.clientY - panStart.value.y) / fit,
+  }
+}
+
+function onPanEnd() {
+  panning.value = false
 }
 </script>
