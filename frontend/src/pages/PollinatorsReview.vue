@@ -54,6 +54,7 @@
               <option v-for="cls in CLASSES" :key="cls" :value="cls">
                 {{ classLabel(cls) }}
               </option>
+              <option value="background">Background</option>
             </select>
           </div>
           <!-- Single minimum-confidence slider. Filters on the strongest
@@ -609,7 +610,7 @@ const run = ref<ReviewBundle['run'] | null>(null)
 const detections = ref<Detection[]>([])
 const selectedId = ref<number | null>(null)
 const statusFilter = ref<StatusFilter>('pending')
-type ClassFilter = ClassName | 'all'
+type ClassFilter = ClassName | 'background' | 'all'
 const classFilter = ref<ClassFilter>('all')
 // Single confidence slider. Filters on the strongest model score per
 // detection so it always does something regardless of which branch fired.
@@ -712,14 +713,20 @@ const filteredDetections = computed(() => {
   } else if (statusFilter.value === 'unsure') {
     list = list.filter((d) => d.reviewer_status === 'unsure')
   }
-  // Class filter. Reviewed detections (confirmed/corrected) are bound to
-  // the reviewer's call — match strictly on that label so a tile corrected
-  // to butterfly stops appearing under Class=Fly. Unreviewed / unsure /
-  // rejected still match any signal so the reviewer can hunt by detector
-  // output when nothing has been settled yet.
+  // Class filter.
+  //   Background    → only rejected rows (rejected = background label).
+  //   Fly/Bee/etc.  → reviewer's call wins. Confirmed/corrected match strictly
+  //                   on reviewer_label. Rejected rows are excluded entirely
+  //                   even if the original model thought they were that
+  //                   class — the reviewer overruled that prediction.
+  //                   Unreviewed/unsure still match any signal so the
+  //                   reviewer can hunt by detector output when nothing has
+  //                   been settled yet.
   if (classFilter.value !== 'all') {
     const cls = classFilter.value
     list = list.filter((d) => {
+      if (cls === 'background') return d.reviewer_status === 'rejected'
+      if (d.reviewer_status === 'rejected') return false
       if (d.reviewer_status === 'confirmed' || d.reviewer_status === 'corrected') {
         return (d.reviewer_label ?? d.predicted_class) === cls
       }
@@ -759,7 +766,12 @@ const groupedDetections = computed(() => {
   // unclassified split: everything that matched is a candidate for *this*
   // class. Background still gets pulled aside so duplicate-spotting in
   // Class=Fly doesn't count rejected things.
-  const collapseToClass = classFilter.value !== 'all' ? classFilter.value : null
+  // Class=Background is handled via the existing rejected → background
+  // bucket above, so we don't need a collapse rule for it.
+  const collapseToClass: ClassName | null =
+    classFilter.value !== 'all' && classFilter.value !== 'background'
+      ? classFilter.value
+      : null
   for (const d of filteredDetections.value) {
     if (d.reviewer_status === 'rejected') {
       background.push(d)
