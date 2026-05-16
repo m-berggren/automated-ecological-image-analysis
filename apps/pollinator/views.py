@@ -202,11 +202,9 @@ class PollinatorRunExportCSVView(APIView):
             "detection_id",
             "final_class",
             "yolo_class",
-            "yolo_confidence",
             "insectnet_class",
+            "yolo_confidence",
             "insectnet_confidence",
-            "binary_confidence",
-            "final_confidence",
         ]
 
         session = run.name or f"Run #{run.pk}"
@@ -238,11 +236,9 @@ class PollinatorRunExportCSVView(APIView):
                     d.id,
                     final_class,
                     pd.yolo_class if pd else None,
-                    pd.yolo_confidence if pd else None,
                     pd.insectnet_class if pd else None,
+                    pd.yolo_confidence if pd else None,
                     pd.insectnet_confidence if pd else None,
-                    pd.binary_confidence if pd else None,
-                    d.confidence,
                 ])
 
         filename = f"run-{run.pk}-detections.csv"
