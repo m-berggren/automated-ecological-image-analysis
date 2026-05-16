@@ -103,66 +103,27 @@ class BinaryClassifier:
         self.model = model.to(self.device)
         self.transform = _make_transform(self.img_size)
 
-    def predict(self, image_path: Union[str, Path], threshold: float = 0.5) -> tuple:
+    def predict(
+        self,
+        image: Union[str, Path, Image.Image],
+        threshold: float = 0.5,
+    ) -> tuple:
         """
-        Classify a single crop image.
+        Classify a single crop.
 
         Args:
-            image_path: Path to .jpg/.png crop file.
-            threshold:  Minimum insect probability to classify as insect.
-                        Lower = higher recall; higher = higher precision.
+            image:     Crop file path, or an in-memory PIL.Image.
+            threshold: Minimum insect probability to classify as insect.
 
         Returns:
-            (label, confidence)
-            label:      "insect" or "background"
-            confidence: probability of insect class (0-1)
+            (label, confidence): label is "insect" or "background";
+            confidence is the insect-class probability (0-1).
         """
-        img = Image.open(image_path).convert('RGB')
-        x = self.transform(img).unsqueeze(0).to(self.device)
+        pil = image if isinstance(image, Image.Image) else Image.open(image)
+        pil = pil.convert('RGB')
+        x = self.transform(pil).unsqueeze(0).to(self.device)
         with torch.no_grad():
             probs = torch.softmax(self.model(x), dim=1)[0]
         insect_prob = float(probs[1])
         label = 'insect' if insect_prob >= threshold else 'background'
         return label, insect_prob
-
-    def predict_batch(self, image_paths: list, threshold: float = 0.5) -> list:
-        """
-        Classify a batch of crop images.
-
-        Args:
-            image_paths: List of paths to crop images.
-            threshold:   Minimum insect probability to classify as insect.
-                         Lower = higher recall; higher = higher precision.
-
-        Returns:
-            List of dicts with keys:
-                path, label, confidence, is_insect
-        """
-        results = []
-        for p in image_paths:
-            try:
-                img = Image.open(p).convert('RGB')
-                x = self.transform(img).unsqueeze(0).to(self.device)
-                with torch.no_grad():
-                    probs = torch.softmax(self.model(x), dim=1)[0]
-                insect_prob = float(probs[1])
-                is_insect = insect_prob >= threshold
-                results.append(
-                    {
-                        'path': str(p),
-                        'label': 'insect' if is_insect else 'background',
-                        'confidence': insect_prob,
-                        'is_insect': is_insect,
-                    }
-                )
-            except Exception as e:
-                logger.warning(f'Failed to classify {p}: {e}')
-                results.append(
-                    {
-                        'path': str(p),
-                        'label': 'error',
-                        'confidence': 0.0,
-                        'is_insect': False,
-                    }
-                )
-        return results

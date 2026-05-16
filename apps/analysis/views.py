@@ -20,6 +20,7 @@ from .engulfment import apply_engulfment_exclusions
 from .models import (
     Detection,
     InferenceRun,
+    JobStatus,
     ModelArtifact,
     ModelArtifactKind,
     ModelVersion,
@@ -388,13 +389,197 @@ class ModelVersionListCreateView(generics.ListAPIView):
         )
 
 
+class InferenceRunDraftView(APIView):
+    """POST /api/analysis/runs/draft/
+
+    Body: {module, name?, config}. Atomically creates a paired
+    InferenceRun (status=pending) and Upload (status=draft) so the frontend
+    can transmit images directly into ``media/runs/<module>/<run_id>/images/``
+    via the existing /api/datasets/images/ endpoint.
+
+    Returns {run_id, upload_id} so the upload page knows where to attach
+    each file.
+    """
+
+    def post(self, request: Request) -> Response:
+        from apps.datasets.models import Module, Upload, UploadStatus
+
+        module = (request.data.get('module') or '').strip()
+        if module not in Module.values:
+            return Response(
+                {'detail': f'module must be one of {Module.values}'},
+                status=status.HTTP_400_BAD_REQUEST,
+            )
+        name = (request.data.get('name') or '').strip()
+        config = request.data.get('config') or {}
+        if not isinstance(config, dict):
+            return Response(
+                {'detail': 'config must be an object'},
+                status=status.HTTP_400_BAD_REQUEST,
+            )
+
+        with transaction.atomic():
+            upload = Upload.objects.create(
+                name=name,
+                module=module,
+                status=UploadStatus.DRAFT,
+                uploaded_by=request.user if request.user.is_authenticated else None,
+            )
+            run = InferenceRun.objects.create(
+                module=module,
+                name=name,
+                upload=upload,
+                config=config,
+                initiated_by=request.user if request.user.is_authenticated else None,
+            )
+        return Response(
+            {
+                'run_id': run.pk,
+                'upload_id': upload.pk,
+                'run': InferenceRunDetailSerializer(run).data,
+            },
+            status=status.HTTP_201_CREATED,
+        )
+
+
+class InferenceRunStartView(APIView):
+    """POST /api/analysis/runs/<id>/start/
+
+    Body: {start_at_image?, config?}. Spawns the worker for a draft run.
+    Both fields are merged into the run's frozen config. Refuses to start
+    a run that isn't ``pending`` or that has no images attached.
+    """
+
+    def post(self, request: Request, pk: int) -> Response:
+        from apps.datasets.models import UploadStatus
+
+        try:
+            run = InferenceRun.objects.select_related('upload').get(pk=pk)
+        except InferenceRun.DoesNotExist:
+            return Response(
+                {'error': 'Run not found'}, status=status.HTTP_404_NOT_FOUND
+            )
+        if run.status != JobStatus.PENDING:
+            return Response(
+                {
+                    'error': (
+                        f'Cannot start a run in status={run.status}; only '
+                        f'pending runs can be started.'
+                    )
+                },
+                status=status.HTTP_409_CONFLICT,
+            )
+        if run.upload is None or not run.upload.images.exists():
+            return Response(
+                {'error': 'Run has no uploaded images.'},
+                status=status.HTTP_409_CONFLICT,
+            )
+
+        merged_config = dict(run.config or {})
+        body_config = request.data.get('config')
+        if isinstance(body_config, dict):
+            merged_config.update(body_config)
+        if 'start_at_image' in request.data:
+            try:
+                merged_config['start_at_image'] = max(
+                    1, int(request.data['start_at_image'])
+                )
+            except (TypeError, ValueError):
+                return Response(
+                    {'error': 'start_at_image must be an integer >= 1'},
+                    status=status.HTTP_400_BAD_REQUEST,
+                )
+        run.config = merged_config
+        run.image_count = run.upload.images.count()
+        run.save(update_fields=['config', 'image_count'])
+
+        if run.upload.status == UploadStatus.DRAFT:
+            run.upload.status = UploadStatus.READY
+            run.upload.save(update_fields=['status'])
+
+        transaction.on_commit(lambda: spawn_inference_pipeline(run))
+        return Response(InferenceRunDetailSerializer(run).data)
+
+
+class InferenceRunPauseView(APIView):
+    """POST /api/analysis/runs/<id>/pause/
+
+    Flips status to PAUSED. The running worker's next between-image check
+    sees this and raises RunPaused, exiting cleanly. processed_image_count
+    is left intact so a subsequent resume picks up right after the last
+    persisted image.
+    """
+
+    def post(self, request: Request, pk: int) -> Response:
+        try:
+            run = InferenceRun.objects.get(pk=pk)
+        except InferenceRun.DoesNotExist:
+            return Response(
+                {'error': 'Run not found'}, status=status.HTTP_404_NOT_FOUND
+            )
+        if run.status != JobStatus.RUNNING:
+            return Response(
+                {
+                    'error': (
+                        f'Only running jobs can be paused; this one is {run.status}.'
+                    )
+                },
+                status=status.HTTP_409_CONFLICT,
+            )
+        run.status = JobStatus.PAUSED
+        run.save(update_fields=['status'])
+        return Response(InferenceRunDetailSerializer(run).data)
+
+
+class InferenceRunResumeView(APIView):
+    """POST /api/analysis/runs/<id>/resume/
+
+    Re-spawns the worker for a paused run. The pipeline reads
+    ``processed_image_count`` and resumes at the next image. Optional
+    ``start_at_image`` in the body bumps the floor higher (useful if the
+    operator wants to skip ahead past the original pause point).
+    """
+
+    def post(self, request: Request, pk: int) -> Response:
+        try:
+            run = InferenceRun.objects.get(pk=pk)
+        except InferenceRun.DoesNotExist:
+            return Response(
+                {'error': 'Run not found'}, status=status.HTTP_404_NOT_FOUND
+            )
+        if run.status != JobStatus.PAUSED:
+            return Response(
+                {
+                    'error': (
+                        f'Only paused jobs can be resumed; this one is {run.status}.'
+                    )
+                },
+                status=status.HTTP_409_CONFLICT,
+            )
+        if 'start_at_image' in request.data:
+            try:
+                merged = dict(run.config or {})
+                merged['start_at_image'] = max(1, int(request.data['start_at_image']))
+                run.config = merged
+            except (TypeError, ValueError):
+                return Response(
+                    {'error': 'start_at_image must be an integer >= 1'},
+                    status=status.HTTP_400_BAD_REQUEST,
+                )
+        run.status = JobStatus.PENDING
+        run.save(update_fields=['status', 'config'])
+        transaction.on_commit(lambda: spawn_inference_pipeline(run))
+        return Response(InferenceRunDetailSerializer(run).data)
+
+
 class InferenceRunListCreateView(generics.ListCreateAPIView):
     """GET  /api/analysis/runs/?module=<module>  list runs (newest first).
     POST /api/analysis/runs/                   create a new run (status=pending).
 
-    image_count is snapshotted from the upload at submission time so the
-    progress denominator stays stable if images are added to the upload
-    after the run is queued.
+    The legacy POST creates a run bound to an existing Upload (used by
+    'Re-run with same config'). New uploads should use /draft/ instead so
+    the Upload + Run are paired 1:1 and images land under
+    media/runs/<module>/<run_id>/images/.
     """
 
     pagination_class = None
@@ -457,13 +642,11 @@ class InferenceRunDetailView(generics.RetrieveDestroyAPIView):
     DELETE /api/analysis/runs/<id>/  remove the run and everything tied to it.
 
     DB cascade handles Detection and PollinatorDetection (via FK on_delete).
-    The on-disk run output dir (MEDIA_ROOT/runs/<id>/, holding crops,
-    yolo_crops, preprocessing, results.json) is removed explicitly because
-    Django's storage backend never auto-deletes ImageField files. Source
-    images are left alone — they live on the Upload and can be reused by
-    other runs.
+    The on-disk run dir (MEDIA_ROOT/runs/<module>/<id>/, holding the
+    source images and per-detection crops) is removed explicitly because
+    Django's storage backend never auto-deletes ImageField files.
 
-    Refuses to delete an in-flight run (pending/running) to keep the
+    Refuses to delete an in-flight run (pending/running/paused) to keep the
     worker from racing the delete; cancel it first.
     """
 
@@ -472,9 +655,7 @@ class InferenceRunDetailView(generics.RetrieveDestroyAPIView):
     lookup_field = 'pk'
 
     def perform_destroy(self, instance: InferenceRun) -> None:
-        from apps.analysis.models import JobStatus
-
-        if instance.status in (JobStatus.PENDING, JobStatus.RUNNING):
+        if instance.status in (JobStatus.PENDING, JobStatus.RUNNING, JobStatus.PAUSED):
             raise serializers.ValidationError(
                 {
                     'error': (
@@ -486,7 +667,9 @@ class InferenceRunDetailView(generics.RetrieveDestroyAPIView):
         # Delete the on-disk output directory if it exists. Wrap in try/
         # except so DB cleanup still runs even if the filesystem step
         # fails (e.g., perms, partial dir).
-        run_dir = Path(settings.MEDIA_ROOT) / 'runs' / str(instance.pk)
+        run_dir = (
+            Path(settings.MEDIA_ROOT) / 'runs' / instance.module / str(instance.pk)
+        )
         if run_dir.exists():
             import shutil
 
@@ -608,9 +791,7 @@ class TrainingJobDetailView(generics.RetrieveAPIView):
 def _cancel_job_row(job, detail_serializer) -> Response:
     """Shared cancel handler for InferenceRun and TrainingJob. Flips status
     to CANCELLED only when the job is still in-flight; refuses otherwise."""
-    from apps.analysis.models import JobStatus
-
-    if job.status not in (JobStatus.PENDING, JobStatus.RUNNING):
+    if job.status not in (JobStatus.PENDING, JobStatus.RUNNING, JobStatus.PAUSED):
         return Response(
             {
                 'error': (

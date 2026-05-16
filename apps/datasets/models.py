@@ -75,7 +75,16 @@ class Upload(models.Model):
 
 
 def image_upload_path(instance: 'ImageAsset', filename: str) -> str:
-    return f'images/{instance.module}/{filename}'
+    """Source images live under the run they were uploaded for.
+
+    Uploads are created paired 1:1 with an InferenceRun in the new flow
+    (PollinatorsUpload posts /api/analysis/runs/draft/ before transmitting
+    files), so we can name the on-disk folder by run id. The upload still
+    holds the FK because that's the column ImageAsset.upload points at.
+    """
+    run = instance.upload.inference_runs.first() if instance.upload_id else None
+    run_id = run.pk if run is not None else 'orphan'
+    return f'runs/{instance.module}/{run_id}/images/{filename}'
 
 
 class ImageAsset(models.Model):

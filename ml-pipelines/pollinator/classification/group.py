@@ -105,21 +105,21 @@ class GroupClassifier:
         self.model = model.to(self.device)
         self.transform = _make_transform(self.img_size)
 
-    def predict(self, image_path: Union[str, Path]) -> tuple:
+    def predict(self, image: Union[str, Path, Image.Image]) -> tuple:
         """
         Classify a single confirmed insect crop.
 
         Args:
-            image_path: Path to .jpg/.png crop file.
+            image: Crop file path, or an in-memory PIL.Image.
 
         Returns:
-            (label, confidence, all_probs)
-            label:      pollinator category name
-            confidence: probability of predicted class (0-1)
-            all_probs:  dict of {class_name: probability}
+            (label, confidence, all_probs):
+            label is the pollinator category name; confidence is the top
+            class probability (0-1); all_probs is {class_name: probability}.
         """
-        img = Image.open(image_path).convert('RGB')
-        x = self.transform(img).unsqueeze(0).to(self.device)
+        pil = image if isinstance(image, Image.Image) else Image.open(image)
+        pil = pil.convert('RGB')
+        x = self.transform(pil).unsqueeze(0).to(self.device)
         with torch.no_grad():
             probs = torch.softmax(self.model(x), dim=1)[0]
         idx = probs.argmax().item()
@@ -127,38 +127,3 @@ class GroupClassifier:
         conf = float(probs[idx])
         all_probs = {c: float(probs[i]) for i, c in enumerate(self.classes)}
         return label, conf, all_probs
-
-    def predict_batch(self, image_paths: list) -> list:
-        """
-        Classify a batch of confirmed insect crops.
-
-        Args:
-            image_paths: List of paths to crop images.
-
-        Returns:
-            List of dicts with keys:
-                path, label, confidence, all_probs
-        """
-        results = []
-        for p in image_paths:
-            try:
-                label, conf, all_probs = self.predict(p)
-                results.append(
-                    {
-                        'path': str(p),
-                        'label': label,
-                        'confidence': conf,
-                        'all_probs': all_probs,
-                    }
-                )
-            except Exception as e:
-                logger.warning(f'Failed to classify {p}: {e}')
-                results.append(
-                    {
-                        'path': str(p),
-                        'label': 'error',
-                        'confidence': 0.0,
-                        'all_probs': {},
-                    }
-                )
-        return results

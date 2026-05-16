@@ -221,9 +221,9 @@
       @select="onUploadSelect"
     />
 
-    <!-- Selection summary + start. Uploads are deferred to the upcoming
-         pipeline rework (separate branch); for now Detect counts the
-         picked files but does not transmit them. -->
+    <!-- Selection summary + start. Images stay in the browser until the
+         user clicks "Start detection"; we then create the run, transmit
+         the files, and route to the Detect page. -->
     <section class="rounded-xl border border-border bg-surface">
       <header class="flex items-center justify-between px-5 py-3">
         <div class="text-sm">
@@ -234,6 +234,7 @@
               {{ formatBytes(totalPickedBytes) }}
             </span>
             <button
+              v-if="!submitting"
               class="ml-3 text-xs text-muted-foreground hover:text-red-600"
               @click="clearPicked"
             >
@@ -246,37 +247,22 @@
         </div>
         <div class="flex items-center gap-2">
           <button
-            :disabled="!pickedFiles.length"
-            :title="pickedFiles.length ? '' : 'Pick at least one image first'"
+            :disabled="!canStart"
+            :title="startDisabledReason"
             class="px-3 py-1.5 rounded-md text-sm font-medium bg-primary text-primary-foreground hover:bg-primary/90 disabled:opacity-50 disabled:cursor-not-allowed"
             @click="startDetection"
           >
-            Start detection
+            {{
+              submitting ? `Uploading ${uploadedCount}/${pickedFiles.length}…` : 'Start detection'
+            }}
           </button>
         </div>
       </header>
-
-      <ul v-if="recentFailures.length" class="max-h-60 overflow-auto divide-y divide-border">
-        <li
-          v-for="item in recentFailures"
-          :key="item.id"
-          class="flex items-center gap-3 px-5 py-2 text-sm"
-        >
-          <XCircle class="w-4 h-4 shrink-0 text-red-600" />
-          <span class="truncate flex-1">{{ item.file.name }}</span>
-          <span class="text-xs text-red-600 truncate max-w-[260px]">{{ item.error }}</span>
-          <button
-            class="text-xs px-2 py-0.5 rounded border border-border hover:bg-muted"
-            @click="onRetry(item.id)"
-          >
-            Retry
-          </button>
-        </li>
-      </ul>
-      <p v-else class="px-5 py-3 text-xs text-muted-foreground">
-        No failures. (Per-file list hidden at this scale — failures will appear here as they
-        happen.)
-      </p>
+      <div v-if="submitting" class="px-5 pb-3">
+        <div class="h-1.5 rounded-full bg-muted overflow-hidden">
+          <div class="h-full bg-primary transition-all" :style="{ width: uploadPercent + '%' }" />
+        </div>
+      </div>
     </section>
 
     <p v-if="error" class="text-sm text-red-600">{{ error }}</p>
@@ -294,6 +280,7 @@
 
 <script setup lang="ts">
 import { computed, onMounted, ref } from 'vue'
+import { useRouter } from 'vue-router'
 import PageHeader from '@/components/PageHeader.vue'
 import PollinatorsStepper from '@/components/PollinatorsStepper.vue'
 import UploadDropZone, { type UploadTab } from '@/components/UploadDropZone.vue'
@@ -319,9 +306,9 @@ const localFiles = ref<File[]>([])
 const showRoiModal = ref(false)
 const previewUrl = ref<string | null>(null)
 
-const router = useRouter()
 const creatingUpload = ref(false)
 
+const router = useRouter()
 const uploadActiveTab = ref('files')
 const uploadTabs: UploadTab[] = [
   {
@@ -345,9 +332,9 @@ const showAdvanced = ref(false)
 
 const runName = ref('')
 
-// Picked files stay in memory only — uploads are deferred to the upcoming
-// pipeline rework. Counting + size summary is enough for now.
 const pickedFiles = ref<File[]>([])
+const submitting = ref(false)
+const uploadedCount = ref(0)
 
 const detectorModels = ref<ModelVersion[]>([])
 const binaryModels = ref<ModelVersion[]>([])
@@ -369,7 +356,6 @@ interface PipelineConfig {
     skip_foggy: boolean
     enable_large_motion: boolean
   }
-  start_at_image: number
 }
 
 interface RoiBBox {
@@ -395,10 +381,36 @@ const config = ref<PipelineConfig>({
     skip_foggy: true,
     enable_large_motion: true,
   },
-  start_at_image: 1,
 })
 
 const totalPickedBytes = computed(() => pickedFiles.value.reduce((sum, f) => sum + f.size, 0))
+
+const uploadPercent = computed(() => {
+  if (!pickedFiles.value.length) return 0
+  return Math.round((uploadedCount.value / pickedFiles.value.length) * 100)
+})
+
+const canStart = computed(() => {
+  if (submitting.value) return false
+  if (!pickedFiles.value.length) return false
+  if (!config.value.yolo.model_version_id) return false
+  if (!config.value.binary_classifier.model_version_id) return false
+  if (!config.value.group_classifier.model_version_id) return false
+  return true
+})
+
+const startDisabledReason = computed(() => {
+  if (submitting.value) return 'Upload in progress'
+  if (!pickedFiles.value.length) return 'Pick at least one image first'
+  if (
+    !config.value.yolo.model_version_id ||
+    !config.value.binary_classifier.model_version_id ||
+    !config.value.group_classifier.model_version_id
+  ) {
+    return 'All three models must be selected'
+  }
+  return ''
+})
 
 function formatBytes(bytes: number): string {
   if (bytes < 1024) return `${bytes} B`
@@ -409,6 +421,8 @@ function formatBytes(bytes: number): string {
 
 function clearPicked() {
   pickedFiles.value = []
+  uploadedCount.value = 0
+  error.value = ''
 }
 
 onMounted(async () => {
@@ -442,133 +456,86 @@ function onUploadSelect(files: File[]) {
   pickedFiles.value = pickedFiles.value.concat(images)
 }
 
-function onUploadSelect(files: File[]) {
-  void handleFiles(files)
+// Cap concurrent uploads so 12k-image batches don't open 12k sockets and
+// trip browser / server connection limits. 6 in flight is a good balance
+// for HTTP/1.1 servers and stays comfortably below typical Chrome caps.
+const UPLOAD_CONCURRENCY = 6
+
+async function uploadOne(file: File, uploadId: number): Promise<void> {
+  const form = new FormData()
+  form.append('file', file)
+  form.append('module', 'pollinators')
+  form.append('purpose', 'inference')
+  form.append('upload', String(uploadId))
+  const res = await api('/api/datasets/images/', {
+    method: 'POST',
+    body: form,
+  })
+  if (!res.ok) {
+    let detail = `HTTP ${res.status}`
+    try {
+      const body = await res.json()
+      detail = body.detail || body.error || JSON.stringify(body)
+    } catch {}
+    throw new Error(`Upload failed for ${file.name}: ${detail}`)
+  }
+  uploadedCount.value += 1
+}
+
+async function uploadAll(uploadId: number): Promise<void> {
+  const queue = [...pickedFiles.value]
+  const workers: Promise<void>[] = []
+  for (let i = 0; i < Math.min(UPLOAD_CONCURRENCY, queue.length); i++) {
+    workers.push(
+      (async () => {
+        while (queue.length) {
+          const file = queue.shift()
+          if (!file) return
+          await uploadOne(file, uploadId)
+        }
+      })(),
+    )
+  }
+  await Promise.all(workers)
 }
 
 async function startDetection() {
-  if (config.value.preprocessing.use_roi) {
-    const roi = await openRoiModal()
-
-    if (!roi) {
-      error.value = 'ROI selection was cancelled.'
-      return
-    }
-  }
-
+  if (!canStart.value) return
   error.value = ''
-  if (!uploadId.value) {
-    error.value = 'No upload in progress.'
-    return
-  }
-  if (!config.value.yolo.model_version_id) {
-    error.value = 'Pick a YOLO model.'
-    return
-  }
-  if (!config.value.binary_classifier.model_version_id) {
-    error.value = 'Pick an EfficientNet model.'
-    return
-  }
-  if (!config.value.group_classifier.model_version_id) {
-    error.value = 'Pick an InsectNet model.'
-    return
-  }
-  starting.value = true
+  uploadedCount.value = 0
+  submitting.value = true
   try {
-    const res = await api('/api/analysis/runs/', {
+    const draftRes = await api('/api/analysis/runs/draft/', {
       method: 'POST',
       body: JSON.stringify({
         module: 'pollinators',
-        upload: uploadId.value,
         name: runName.value,
-        config: fixROIFormat(config.value),
+        config: config.value,
       }),
     })
-    if (!res.ok) {
-      error.value = (await res.text()) || `HTTP ${res.status}`
-      return
+    if (!draftRes.ok) {
+      const body = await draftRes.text()
+      throw new Error(`Could not create run draft: ${body || draftRes.status}`)
     }
-    const run = await res.json()
-    router.push(`/pollinators/runs/${run.id}/detect`)
+    const draft = await draftRes.json()
+    const runId: number = draft.run_id
+    const uploadId: number = draft.upload_id
+
+    await uploadAll(uploadId)
+
+    const startRes = await api(`/api/analysis/runs/${runId}/start/`, {
+      method: 'POST',
+      body: JSON.stringify({}),
+    })
+    if (!startRes.ok) {
+      const body = await startRes.text()
+      throw new Error(`Could not start run: ${body || startRes.status}`)
+    }
+    await router.push(`/pollinators/runs/${runId}/detect`)
   } catch (e) {
     error.value = e instanceof Error ? e.message : String(e)
   } finally {
-    starting.value = false
-  }
-}
-
-const roiResolver = ref<((roi: RoiBBox | null) => void) | null>(null)
-
-// Choses the current selected manual roi image and makes the ROI drawing modal appear
-function openRoiModal() {
-  return new Promise((resolve) => {
-    if (!localFiles.value.length) {
-      resolve(null)
-      return
-    }
-
-    const index = (config.value.start_at_image || 1) - 1
-
-    if (index < 0 || index >= localFiles.value.length) {
-      resolve(null)
-      return
-    }
-
-    const file = localFiles.value[index]
-
-    // clean up old URL
-    if (previewUrl.value) {
-      URL.revokeObjectURL(previewUrl.value)
-    }
-
-    previewUrl.value = URL.createObjectURL(file)
-    showRoiModal.value = true
-
-    roiResolver.value = resolve
-  })
-}
-
-// Makes the modal disappear and clears up the old image URL
-function closeRoiModal() {
-  showRoiModal.value = false
-
-  if (previewUrl.value) {
-    URL.revokeObjectURL(previewUrl.value)
-    previewUrl.value = null
-  }
-
-  if (roiResolver.value) {
-    roiResolver.value(null)
-    roiResolver.value = null
-  }
-}
-
-function onSaveRoi(roi: any) {
-  config.value.preprocessing.roi_bbox = roi
-
-  if (roiResolver.value) {
-    roiResolver.value(roi)
-    roiResolver.value = null
-  }
-
-  closeRoiModal()
-}
-
-// Changes the format of the config ROI to what the backend expects
-function fixROIFormat(cfg: PipelineConfig) {
-  return {
-    ...cfg,
-    preprocessing: {
-      ...cfg.preprocessing,
-      roi_bbox: cfg.preprocessing.roi_bbox
-        ? [
-            cfg.preprocessing.roi_bbox.x,
-            cfg.preprocessing.roi_bbox.y,
-            cfg.preprocessing.roi_bbox.width,
-            cfg.preprocessing.roi_bbox.height,
-          ]
-        : null,
-    },
+    submitting.value = false
   }
 }
 </script>

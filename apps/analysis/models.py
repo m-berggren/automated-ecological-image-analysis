@@ -160,6 +160,7 @@ class ModelArtifact(models.Model):
 class JobStatus(models.TextChoices):
     PENDING = 'pending', 'Pending'
     RUNNING = 'running', 'Running'
+    PAUSED = 'paused', 'Paused'
     COMPLETED = 'completed', 'Completed'
     FAILED = 'failed', 'Failed'
     CANCELLED = 'cancelled', 'Cancelled'

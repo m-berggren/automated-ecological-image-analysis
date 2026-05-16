@@ -8,10 +8,7 @@
 
     <template v-else-if="run">
       <!-- Status card -->
-      <section
-        class="rounded-xl border bg-surface p-5"
-        :class="statusBorderClass"
-      >
+      <section class="rounded-xl border bg-surface p-5" :class="statusBorderClass">
         <div class="flex items-center gap-3 mb-3">
           <span
             class="text-xs font-semibold uppercase tracking-wide px-2 py-0.5 rounded-full"
@@ -39,14 +36,13 @@
             <span class="text-muted-foreground font-normal">({{ percent }}%)</span>
           </div>
           <div class="mt-2 h-2 rounded-full bg-muted overflow-hidden">
-            <div
-              class="h-full bg-primary transition-all"
-              :style="{ width: percent + '%' }"
-            />
+            <div class="h-full bg-primary transition-all" :style="{ width: percent + '%' }" />
           </div>
           <div class="mt-2 text-xs text-muted-foreground">
-            <template v-if="run.status === 'completed'">
-              Completed in {{ elapsedHuman }}
+            <template v-if="run.status === 'completed'"> Completed in {{ elapsedHuman }} </template>
+            <template v-else-if="run.status === 'paused'">
+              Paused at image {{ run.processed_image_count.toLocaleString() }}. Adjust the start
+              image below and resume.
             </template>
             <template v-else>
               {{ elapsedHuman }} elapsed
@@ -55,14 +51,50 @@
           </div>
         </div>
 
+        <!-- Start-at-image: editable while the run hasn't begun (or is
+             paused), shown read-only once the worker is chewing through
+             images. -->
+        <div
+          v-if="run.status === 'pending' || run.status === 'paused'"
+          class="mt-4 flex items-center gap-3 text-sm"
+        >
+          <label class="text-muted-foreground">Start at image</label>
+          <input
+            v-model.number="startAtImage"
+            type="number"
+            min="1"
+            :max="run.image_count || undefined"
+            class="w-24 px-2 py-1 rounded border border-border bg-background text-sm font-mono"
+          />
+          <span class="text-xs text-muted-foreground">
+            1-based index into the sorted upload. Useful for skipping ahead.
+          </span>
+        </div>
+
         <div class="mt-4 flex gap-2">
+          <button
+            v-if="run.status === 'running'"
+            class="text-sm px-3 py-1.5 rounded-md border border-border hover:bg-muted disabled:opacity-50"
+            :disabled="actionInFlight"
+            @click="onPause"
+          >
+            {{ actionInFlight ? 'Pausing…' : 'Pause' }}
+          </button>
+          <button
+            v-if="run.status === 'paused'"
+            class="text-sm px-3 py-1.5 rounded-md border border-border hover:bg-muted disabled:opacity-50"
+            :disabled="actionInFlight"
+            @click="onResume"
+          >
+            {{ actionInFlight ? 'Resuming…' : 'Resume' }}
+          </button>
           <button
             v-if="canCancel"
             class="text-sm px-3 py-1.5 rounded-md border border-border hover:bg-muted disabled:opacity-50"
-            :disabled="cancelling"
+            :disabled="actionInFlight"
             @click="onCancel"
           >
-            {{ cancelling ? 'Cancelling…' : 'Cancel run' }}
+            {{ actionInFlight ? 'Cancelling…' : 'Cancel run' }}
           </button>
           <RouterLink
             v-if="canOpenReview"
@@ -74,11 +106,15 @@
           <button
             v-if="run.status === 'failed'"
             class="ml-auto text-sm px-3 py-1.5 rounded-md border border-border hover:bg-muted disabled:opacity-50"
-            :disabled="rerunning || run.upload == null || !run.module"
-            :title="run.upload == null || !run.module ? 'Original upload missing from this run record' : ''"
+            :disabled="actionInFlight || run.upload == null || !run.module"
+            :title="
+              run.upload == null || !run.module
+                ? 'Original upload missing from this run record'
+                : ''
+            "
             @click="onRerun"
           >
-            {{ rerunning ? 'Restarting…' : 'Re-run with same config' }}
+            {{ actionInFlight ? 'Restarting…' : 'Re-run with same config' }}
           </button>
         </div>
       </section>
@@ -95,29 +131,23 @@
           <div>
             <div class="text-xs text-muted-foreground mb-2">By class</div>
             <ul class="space-y-1 text-sm">
-              <li
-                v-for="row in classRows"
-                :key="row.label"
-                class="flex items-center gap-2"
-              >
+              <li v-for="row in classRows" :key="row.label" class="flex items-center gap-2">
                 <span
                   class="w-2 h-2 rounded-full shrink-0"
                   :style="{ backgroundColor: row.color }"
                 />
                 <span class="flex-1">{{ row.label }}</span>
                 <span class="font-medium">{{ row.count.toLocaleString() }}</span>
-                <span class="text-xs text-muted-foreground w-10 text-right">{{ row.percent }}%</span>
+                <span class="text-xs text-muted-foreground w-10 text-right"
+                  >{{ row.percent }}%</span
+                >
               </li>
             </ul>
           </div>
           <div>
             <div class="text-xs text-muted-foreground mb-2">By source</div>
             <ul class="space-y-1 text-sm">
-              <li
-                v-for="row in sourceRows"
-                :key="row.label"
-                class="flex items-center gap-2"
-              >
+              <li v-for="row in sourceRows" :key="row.label" class="flex items-center gap-2">
                 <span class="flex-1">{{ row.label }}</span>
                 <span class="font-medium">{{ row.count.toLocaleString() }}</span>
               </li>
@@ -161,7 +191,8 @@
         <pre
           v-if="showConfig"
           class="border-t border-border px-5 py-3 text-xs overflow-x-auto bg-background"
-        >{{ JSON.stringify(run.config, null, 2) }}</pre>
+          >{{ JSON.stringify(run.config, null, 2) }}</pre
+        >
       </section>
     </template>
   </div>
@@ -175,7 +206,7 @@ import PollinatorsStepper from '@/components/PollinatorsStepper.vue'
 import { api } from '@/api'
 import { confirm } from '@/lib/confirm'
 
-type RunStatus = 'pending' | 'running' | 'completed' | 'failed' | 'cancelled'
+type RunStatus = 'pending' | 'running' | 'paused' | 'completed' | 'failed' | 'cancelled'
 type PreviewMode = 'queued' | 'running' | 'completed' | 'failed'
 
 interface ActivityEntry {
@@ -241,7 +272,6 @@ const SOURCE_LABELS: Record<string, string> = {
 const route = useRoute()
 const router = useRouter()
 const run = ref<RunDetail | null>(null)
-const rerunning = ref(false)
 const loading = ref(true)
 const loadError = ref('')
 const showConfig = ref(false)
@@ -268,7 +298,8 @@ onMounted(async () => {
   }
   void loadRun()
   pollHandle = setInterval(() => {
-    if (run.value && (run.value.status === 'pending' || run.value.status === 'running')) {
+    const s = run.value?.status
+    if (s === 'pending' || s === 'running' || s === 'paused') {
       void loadRun()
     }
   }, 3000)
@@ -322,13 +353,22 @@ async function loadRun() {
       return
     }
     const data = await res.json()
-    run.value = {
+    const next: RunDetail = {
       processed_image_count: 0,
       failed_image_count: 0,
       detections_by_class: {},
       detections_by_source: {},
       activity_log: [],
       ...data,
+    }
+    run.value = next
+    // Keep the start-at-image input in sync with the server's view of
+    // config so a Resume always reflects the latest checkpoint.
+    const cfgStart = (next.config as Record<string, unknown>)?.start_at_image
+    if (typeof cfgStart === 'number') {
+      startAtImage.value = cfgStart
+    } else {
+      startAtImage.value = Math.max(1, (next.processed_image_count || 0) + 1)
     }
   } catch (e) {
     loadError.value = e instanceof Error ? e.message : String(e)
@@ -354,21 +394,39 @@ const headerSubtitle = computed(() => {
 
 const statusLabel = computed(() => {
   switch (run.value?.status) {
-    case 'pending': return 'Queued'
-    case 'running': return 'Running'
-    case 'completed': return 'Completed'
-    case 'failed': return 'Failed'
-    default: return ''
+    case 'pending':
+      return 'Queued'
+    case 'running':
+      return 'Running'
+    case 'paused':
+      return 'Paused'
+    case 'completed':
+      return 'Completed'
+    case 'failed':
+      return 'Failed'
+    case 'cancelled':
+      return 'Cancelled'
+    default:
+      return ''
   }
 })
 
 const statusBadgeClass = computed(() => {
   switch (run.value?.status) {
-    case 'pending': return 'bg-muted text-muted-foreground'
-    case 'running': return 'bg-blue-100 text-blue-700'
-    case 'completed': return 'bg-green-100 text-green-700'
-    case 'failed': return 'bg-red-100 text-red-700'
-    default: return 'bg-muted text-muted-foreground'
+    case 'pending':
+      return 'bg-muted text-muted-foreground'
+    case 'running':
+      return 'bg-blue-100 text-blue-700'
+    case 'paused':
+      return 'bg-amber-100 text-amber-700'
+    case 'completed':
+      return 'bg-green-100 text-green-700'
+    case 'failed':
+      return 'bg-red-100 text-red-700'
+    case 'cancelled':
+      return 'bg-muted text-muted-foreground'
+    default:
+      return 'bg-muted text-muted-foreground'
   }
 })
 
@@ -380,10 +438,7 @@ const statusBorderClass = computed(() => {
 
 const percent = computed(() => {
   if (!run.value || run.value.image_count === 0) return 0
-  return Math.min(
-    100,
-    Math.round((run.value.processed_image_count / run.value.image_count) * 100),
-  )
+  return Math.min(100, Math.round((run.value.processed_image_count / run.value.image_count) * 100))
 })
 
 const elapsedSeconds = computed(() => {
@@ -410,7 +465,10 @@ const timingLine = computed(() => {
 })
 
 const canCancel = computed(
-  () => run.value?.status === 'pending' || run.value?.status === 'running',
+  () =>
+    run.value?.status === 'pending' ||
+    run.value?.status === 'running' ||
+    run.value?.status === 'paused',
 )
 const canOpenReview = computed(
   () =>
@@ -461,10 +519,48 @@ function logLevelClass(level: ActivityEntry['level']): string {
   return ''
 }
 
-const cancelling = ref(false)
+// One in-flight flag covers Pause / Resume / Cancel / Re-run so the buttons
+// can't double-fire while a request is on the wire.
+const actionInFlight = ref(false)
+const startAtImage = ref(1)
+
+async function callAction(path: string, body?: Record<string, unknown>) {
+  if (!run.value || actionInFlight.value) return
+  if (previewMode.value) return
+  actionInFlight.value = true
+  try {
+    const res = await api(`/api/analysis/runs/${run.value.id}/${path}/`, {
+      method: 'POST',
+      body: JSON.stringify(body ?? {}),
+    })
+    if (!res.ok) {
+      let detail = `HTTP ${res.status}`
+      try {
+        const errBody = await res.json()
+        detail = errBody.error || errBody.detail || detail
+      } catch {}
+      loadError.value = `${path} failed: ${detail}`
+      return
+    }
+    const data = await res.json()
+    run.value = { ...run.value, ...data }
+  } catch (e) {
+    loadError.value = e instanceof Error ? e.message : String(e)
+  } finally {
+    actionInFlight.value = false
+  }
+}
+
+async function onPause() {
+  await callAction('pause')
+}
+
+async function onResume() {
+  await callAction('resume', { start_at_image: Math.max(1, startAtImage.value || 1) })
+}
 
 async function onCancel() {
-  if (!run.value || cancelling.value) return
+  if (!run.value || actionInFlight.value) return
   if (previewMode.value) {
     run.value.status = 'cancelled'
     run.value.error_message = 'Cancelled by user.'
@@ -473,44 +569,24 @@ async function onCancel() {
   const ok = await confirm({
     title: 'Cancel run',
     message:
-      'Cancel this run?\nThe worker stops at the next checkpoint and partial results are discarded.',
+      'Cancel this run?\nThe worker stops at the next checkpoint and partial results are kept.',
     confirmLabel: 'Cancel run',
     cancelLabel: 'Keep running',
     variant: 'danger',
   })
   if (!ok) return
-  cancelling.value = true
-  try {
-    const res = await api(`/api/analysis/runs/${run.value.id}/cancel/`, {
-      method: 'POST',
-    })
-    if (!res.ok) {
-      let detail = `HTTP ${res.status}`
-      try {
-        const body = await res.json()
-        detail = body.error || body.detail || detail
-      } catch {}
-      loadError.value = `Cancel failed: ${detail}`
-      return
-    }
-    const data = await res.json()
-    run.value = { ...run.value, ...data }
-  } catch (e) {
-    loadError.value = e instanceof Error ? e.message : String(e)
-  } finally {
-    cancelling.value = false
-  }
+  await callAction('cancel')
 }
 
 async function onRerun() {
-  if (!run.value || rerunning.value) return
+  if (!run.value || actionInFlight.value) return
   if (previewMode.value) return
   const r = run.value
   if (r.upload == null || !r.module) {
     loadError.value = 'Cannot restart: original upload or module missing from this run.'
     return
   }
-  rerunning.value = true
+  actionInFlight.value = true
   try {
     const res = await api('/api/analysis/runs/', {
       method: 'POST',
@@ -532,12 +608,11 @@ async function onRerun() {
       return
     }
     const newRun = await res.json()
-    await router.push(`/pollinators/runs/${newRun.id}`)
+    await router.push(`/pollinators/runs/${newRun.id}/detect`)
   } catch (e) {
     loadError.value = e instanceof Error ? e.message : String(e)
   } finally {
-    rerunning.value = false
+    actionInFlight.value = false
   }
 }
-
 </script>
