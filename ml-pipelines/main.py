@@ -2,22 +2,30 @@ import json
 import os
 from collections import defaultdict
 
-from seed_src.metrics import calculate_precision_recall_f1_score, calculate_tp_fp_fn
-from seed_src.train import train_species_model
-from seed_src.utils import (
+from seed_src.inference.inference import run_sahi
+from seed_src.training.train import train_species_model
+from seed_src.utils.helpers import (
+    get_next_run_name,
     load_ground_truth,
     load_model,
-    run_sahi,
     update_class_labels,
+    verify_and_route_data,
+)
+from seed_src.utils.label_extractor import LabelExtractor
+from seed_src.utils.metrics import (
+    calculate_precision_recall_f1_score,
+    calculate_tp_fp_fn,
 )
 
 # -------------------------
 # SETTINGS
 # -------------------------
+BASE_PATH = '../data/seed'
+
 PREPARE_LABELS = True  # Set to True to run the label update on newly added label files
 RETRAIN = False  # Set to True to train a new model from scratch, False to use existing weights
-TRAINING_MODE = 'finetune'  # This we can set to either 'fresh' (train from scratch) or 'finetune' (incremental training)
-FINETUNE_WEIGHTS = {  # Per-species checkpoint to fine-tune from (best.pt or last.pt). Only used if TRAIN_MODE == 'finetune'
+TRAINING_MODE = 'finetune'  # Set to 'fresh' to train from scratch, set to 'finetune' for incremental training
+FINETUNE_WEIGHTS = {  # Per-species checkpoint to fine-tune from, only used if TRAIN_MODE == 'finetune'
     'cat': os.path.abspath(
         os.path.join('runs', 'obb', 'cat', 'weights', 'best.pt')
     ),  # Might need to update these paths later
@@ -27,30 +35,25 @@ FINETUNE_WEIGHTS = {  # Per-species checkpoint to fine-tune from (best.pt or las
     ),
     'vau': os.path.abspath(os.path.join('runs', 'obb', 'vau', 'weights', 'best.pt')),
 }
-FINETUNE_RUN_SUFFIX = (
-    ''  # Suffix for the new run directory. A bit clunky now so will update later
-)
-# Optional: lower LR for fine-tuning (set to None to use Ultralytics defaults)
-FINETUNE_LR0 = 0.001  # example learning rate, potentially the user should be able to specify/tune this tune (or set to None to use Ultralytics defaults)
-FINETUNE_LRF = 0.01  # example learning rate, same note as LR0
-FINETUNE_EPOCHS = 45  # example, user should definitely be able to specify this (probably will be set to less than a full fresh run)
+FINETUNE_LR0 = 0.001
+FINETUNE_LRF = 0.01
+FINETUNE_EPOCHS = 45  # User should be able to specify this
 
 SPECIES_LIST = [
-    'cat',
-    'peh',
-    'phyca',
-    'vau',
-]  # Removed the rest of the species temporarily so I can test incremental training on PEH where we had new images
-# The above is potentially a clunky solution
+    d.replace('_model', '')
+    for d in os.listdir(BASE_PATH)
+    if os.path.isdir(os.path.join(BASE_PATH, d)) and d.endswith('_model')
+]
+# Dynamic updates based on what is found in the base directory (looking files ending in '_model')
 
 CONFIG_MAP = {
-    s: f'../data/seed/{s}_model/{s}.yaml' for s in SPECIES_LIST
+    s: os.path.join(BASE_PATH, f'{s}_model', f'{s}.yaml') for s in SPECIES_LIST
 }  # Map species to their specific yaml files
 
 # -------------------------
-# LABEL PREPARATION
+# LABEL.TXT PREPARATION
 # -------------------------
-SPECIES_IDS = {'cat': 0, 'peh': 0, 'phyca': 0, 'vau': 0}
+SPECIES_IDS = {s: 0 for s in SPECIES_LIST}
 SPLITS = ['train', 'val']
 BASE_PATH = '../data/seed'
 
@@ -70,7 +73,6 @@ if PREPARE_LABELS:
     prepare_data_labels()
     print(f'Class labels prepared')
 
-
 # -------------------------
 # TRAIN
 # -------------------------
@@ -78,43 +80,61 @@ if PREPARE_LABELS:
 best_model_paths = {}
 
 for species in SPECIES_LIST:
-    expected_path = os.path.join(
-        'runs', 'obb', f'{species}{FINETUNE_RUN_SUFFIX}', 'weights', 'best.pt'
-    )  # Might need to update this path later
+    expected_path = os.path.join('runs', 'obb', 'species', 'weights', 'best.pt')
 
     if RETRAIN:
+        run_name = get_next_run_name(species)
         print(f'Training started on {species}...')
         if TRAINING_MODE == 'finetune':
-            ckpt = FINETUNE_WEIGHTS[species]
-            if not os.path.isfile(ckpt):
+            ckpt = FINETUNE_WEIGHTS.get(species)
+            if ckpt and os.path.isfile(ckpt):
+                pass  # If species-specific weights exist, proceed with the incremental training as intended
+            else:
                 raise FileNotFoundError(f'Fine-tune checkpoint missing: {ckpt}')
             out_pt = train_species_model(
                 species,
                 CONFIG_MAP[species],
                 epochs=FINETUNE_EPOCHS,
                 finetune_from=ckpt,
-                run_name=f'{species}{FINETUNE_RUN_SUFFIX}',
+                run_name=run_name,
                 lr0=FINETUNE_LR0,
                 lrf=FINETUNE_LRF,
             )
             best_model_paths[species] = os.path.abspath(out_pt)
         else:
-            new_pt = train_species_model(species, CONFIG_MAP[species])
+            new_pt = train_species_model(
+                species, CONFIG_MAP[species], run_name=run_name
+            )
             best_model_paths[species] = os.path.abspath(new_pt)
-    else:
+    else:  # If not retraining, finds the latest model path per species
+        target_dir = os.path.join('runs', 'obb')
+        existing = (
+            [d for d in os.listdir(target_dir) if d.startswith(species)]
+            if os.path.exists(target_dir)
+            else []
+        )
+        if existing:
+            # Sort by: base name first, then base2, base3, and so on
+            latest_run = sorted(existing, key=lambda x: (len(x), x))[-1]
+            expected_path = os.path.join(
+                'runs', 'obb', latest_run, 'weights', 'best.pt'
+            )
+        else:
+            expected_path = os.path.join('runs', 'obb', species, 'weights', 'best.pt')
+
         best_model_paths[species] = expected_path
 
         if not os.path.exists(best_model_paths[species]):
-            print(f'No model found at {expected_path} → training new one')
-            new_pt = train_species_model(species, CONFIG_MAP[species])
-            best_model_paths[species] = os.path.abspath(new_pt)
+            print(
+                f'No model found at {expected_path}. Train a new model for {species}.'
+            )
+
     print(f'Using model: {best_model_paths[species]}')
 
 
 # -------------------------
 # LOAD MODEL
 # -------------------------
-# model = load_model(best_model_path)
 models = {s: load_model(path) for s, path in best_model_paths.items()}
 
 
@@ -123,7 +143,12 @@ models = {s: load_model(path) for s, path in best_model_paths.items()}
 # -------------------------
 VAL_BASE = '../data/seed'
 
+# Extract seed species (from image name or handwritten label)
+ocr_tool = LabelExtractor(gpu=False)
+verify_and_route_data(VAL_BASE, SPECIES_LIST, ocr_tool)
+
 image_paths = []
+
 
 for species in SPECIES_LIST:
     species_dir = os.path.join(VAL_BASE, f'{species}_model', 'val', 'images')
@@ -157,13 +182,13 @@ for species in SPECIES_LIST:
         # Run inference using the specific species model
         result = run_sahi(img_path, current_model)
 
-        # Debug image output to see what the model catches, classification, confidence score
-        output_filename = f'debug_{img_name}'
+        # Prediction image output to see what the model catches
+        output_filename = f'predicted_{img_name}'
         result.export_visuals(
-            export_dir='debug_outputs/',
-            file_name=img_name,
-            hide_labels=True,  # Removes class names
-            hide_conf=True,  # Removes confidence scores
+            export_dir='seed_src/prediction_images/',
+            file_name=img_name.split('.')[0],
+            hide_labels=True,  # Removes class names from image
+            hide_conf=True,  # Removes confidence scores from image
         )
 
         preds = []
@@ -210,14 +235,14 @@ for species in SPECIES_LIST:
         tp, fp, fn = calculate_tp_fp_fn(preds, gt_boxes, iou_threshold=0.3)
 
         # Save the preds to a json file for testing the seed size calculations
-        export_dir = 'predictions/'
+        export_dir = 'seed_src/predictions/'
         os.makedirs(export_dir, exist_ok=True)
         file_path = os.path.join(export_dir, f'{img_name.split(".")[0]}_preds.json')
 
         with open(file_path, 'w') as f:
             json.dump(preds, f)
 
-        # Detailed per-image logging (for debug to make our lives easier, pls don't remove for now)
+        # Detailed per-image logging
         num_preds = len(preds)
         num_gts = len(gt_boxes)
         print(f'  - Found {num_preds} predictions and {num_gts} ground truths.')
@@ -237,6 +262,8 @@ for species in SPECIES_LIST:
 # -------------------------
 # RESULTS
 # -------------------------
+
+
 print('\n==== PER SPECIES RESULTS ====\n')
 
 for species, r in results.items():
