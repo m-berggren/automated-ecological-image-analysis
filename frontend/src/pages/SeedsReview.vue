@@ -1,428 +1,300 @@
 <template>
-  <PageHeader :title="headerTitle" subtitle="Confirm or reject seed detections" />
+  <PageHeader :title="headerTitle" subtitle="Select a healthy active seed as the reference seed" />
+
   <SeedsStepper current="review" :runId="run?.id" />
 
-  <div v-if="loading" class="flex-1 p-8 text-sm text-muted-foreground">Loading…</div>
-  <div v-else-if="loadError" class="flex-1 p-8 text-sm text-red-600">{{ loadError }}</div>
+  <!-- Loading -->
+  <div v-if="loading" class="flex-1 flex items-center justify-center text-sm text-muted-foreground">
+    Loading...
+  </div>
 
-  <div v-else class="flex-1 flex flex-col-reverse lg:flex-row min-h-0">
-    <!-- Left: grid of detections -->
-    <section
-      class="w-full lg:w-[480px] shrink-0 border-t lg:border-t-0 lg:border-r border-border flex flex-col bg-surface max-h-[55vh] lg:max-h-none"
-    >
-      <div class="px-4 py-3 border-b border-border space-y-2">
-        <div class="flex items-center gap-2 text-xs">
-          <label class="text-muted-foreground">Show</label>
-          <select
-            v-model="statusFilter"
-            class="px-2 py-1 rounded border border-border bg-background"
-          >
-            <option value="unreviewed">Unreviewed</option>
-            <option value="all">All</option>
-            <option value="reviewed">Reviewed</option>
-          </select>
+  <!-- Error -->
+  <div v-else-if="loadError" class="flex-1 flex items-center justify-center text-sm text-red-600">
+    {{ loadError }}
+  </div>
+
+  <!-- Main layout -->
+  <div v-else-if="currentImage" class="flex-1 flex flex-col min-h-0 bg-background">
+    <!-- Instructions -->
+    <section class="border-b border-border bg-surface px-6 py-5">
+      <div class="max-w-5xl">
+        <h2 class="text-lg font-semibold">Select a reference active seed</h2>
+
+        <p class="mt-2 text-sm text-muted-foreground leading-relaxed">
+          Click on one healthy active seed in the image. This seed will be used as the reference
+          example for determining which detected seeds are active versus aborted.
+        </p>
+
+        <div class="mt-4 flex flex-wrap items-center gap-3 text-sm">
+          <div class="px-3 py-1 rounded-full bg-muted text-muted-foreground">
+            {{ detections.length }} detected seeds
+          </div>
+
+          <div v-if="selectedReference" class="px-3 py-1 rounded-full bg-green-100 text-green-700">
+            Reference seed selected
+          </div>
         </div>
-        <div class="text-xs text-muted-foreground flex items-center justify-between">
-          <span>{{ filteredDetections.length }} of {{ detections.length }} detections</span>
+      </div>
+    </section>
+
+    <!-- Image review area -->
+    <section class="flex-1 overflow-auto p-6">
+      <div class="mx-auto max-w-7xl">
+        <div class="relative overflow-hidden rounded-2xl border border-border bg-black/5 shadow-sm">
+          <!-- Image -->
+          <img
+            :src="currentImage.image_url"
+            :alt="currentImage.filename"
+            class="w-full h-auto select-none"
+            draggable="false"
+          />
+
+          <!-- Bounding boxes -->
           <button
-            class="text-primary hover:underline"
-            :disabled="!filteredDetections.length"
-            @click="selectAllVisible"
+            v-for="detection in detections"
+            :key="detection.id"
+            type="button"
+            class="absolute rounded-sm border-2 transition-all duration-150"
+            :class="
+              selectedReferenceId === detection.id
+                ? 'border-green-500 ring-4 ring-green-500/30 z-10'
+                : 'border-primary hover:border-green-400 hover:bg-green-500/10'
+            "
+            :style="boxStyle(detection)"
+            @click="selectReference(detection.id)"
           >
-            Select all
+            <span class="sr-only"> Select seed {{ detection.id }} </span>
           </button>
         </div>
       </div>
-
-      <!-- Bulk action bar -->
-      <div
-        v-if="bulkIds.size > 0"
-        class="px-4 py-2 border-b border-border bg-primary/5 flex items-center gap-2 text-xs"
-      >
-        <span class="font-medium">{{ bulkIds.size }} selected</span>
-        <button
-          class="px-2 py-1 rounded bg-primary text-primary-foreground hover:bg-primary/90"
-          @click="bulkConfirm"
-        >
-          Confirm
-        </button>
-        <button class="px-2 py-1 rounded border border-border hover:bg-muted" @click="bulkReject">
-          Reject
-        </button>
-        <button class="ml-auto text-muted-foreground hover:text-foreground" @click="clearBulk">
-          Clear
-        </button>
-      </div>
-
-      <div class="flex-1 overflow-auto">
-        <div class="grid grid-cols-5 gap-1 p-2">
-          <div
-            v-for="d in filteredDetections"
-            :key="d.id"
-            class="rounded-md overflow-hidden border-2 transition-all"
-            :class="[
-              selectedId === d.id
-                ? 'border-primary ring-2 ring-primary'
-                : 'border-transparent hover:border-border',
-              d.reviewer_status !== 'unreviewed' ? 'opacity-50' : '',
-            ]"
-          >
-            <div
-              :data-detection-id="d.id"
-              role="button"
-              tabindex="0"
-              class="relative aspect-square cursor-pointer focus:outline-none bg-eco-mint/30 flex items-center justify-center"
-              @click="selectedId = d.id"
-              @keydown.enter.prevent="selectedId = d.id"
-            >
-              <span class="text-2xl opacity-40">🌱</span>
-              <span
-                class="absolute top-1 left-1 w-2 h-2 rounded-full"
-                :class="statusDotClass(d.reviewer_status)"
-              />
-              <span class="absolute bottom-1 right-1 text-[9px] font-mono text-muted-foreground/70">
-                {{ d.confidence.toFixed(2) }}
-              </span>
-            </div>
-            <div
-              role="checkbox"
-              :aria-checked="bulkIds.has(d.id)"
-              tabindex="0"
-              class="h-5 flex items-center justify-center text-xs cursor-pointer transition-colors"
-              :class="
-                bulkIds.has(d.id)
-                  ? 'bg-primary text-primary-foreground'
-                  : 'bg-surface text-muted-foreground hover:bg-muted'
-              "
-              @click="toggleBulk(d.id)"
-              @keydown.space.prevent="toggleBulk(d.id)"
-            >
-              <span v-if="bulkIds.has(d.id)">✓</span>
-            </div>
-          </div>
-        </div>
-        <div
-          v-if="!filteredDetections.length"
-          class="p-8 text-center text-sm text-muted-foreground"
-        >
-          No detections match the current filter.
-        </div>
-      </div>
     </section>
 
-    <!-- Right: detail pane -->
-    <section class="flex-1 flex flex-col min-w-0">
-      <div v-if="!selected" class="m-auto text-sm text-muted-foreground">
-        Select a detection on the left to review it.
-      </div>
-      <template v-else>
-        <header class="px-5 py-3 border-b border-border bg-surface text-sm flex items-center gap-3">
-          <span class="font-medium">Detection #{{ selected.id }}</span>
-          <span class="text-muted-foreground font-mono text-xs truncate">
-            {{ selected.source_image_filename }}
-          </span>
-          <span
-            class="ml-auto text-xs px-2 py-0.5 rounded-full shrink-0"
-            :class="statusBadgeClass(selected.reviewer_status)"
-          >
-            {{ statusLabel(selected.reviewer_status) }}
-          </span>
-        </header>
+    <!-- Footer -->
+    <footer class="border-t border-border bg-surface px-6 py-4">
+      <div class="flex items-center justify-between gap-4">
+        <!-- Left -->
+        <div class="text-sm text-muted-foreground">
+          <template v-if="selectedReference">
+            Selected reference seed:
+            <span class="font-medium text-foreground"> #{{ selectedReference.id }} </span>
+          </template>
 
-        <div class="flex-1 overflow-auto">
-          <!-- Crop preview -->
-          <div
-            class="aspect-video flex items-center justify-center text-7xl bg-eco-mint/20 relative"
-          >
-            <span class="opacity-30">🌱</span>
-          </div>
-
-          <!-- Stats -->
-          <div class="px-5 py-4 border-b border-border space-y-3">
-            <div class="text-[11px] font-semibold uppercase tracking-wider text-muted-foreground">
-              Detection details
-            </div>
-            <dl class="grid grid-cols-2 gap-x-6 gap-y-2 text-sm">
-              <div>
-                <dt class="text-xs text-muted-foreground">Confidence</dt>
-                <dd class="font-mono font-medium">{{ selected.confidence.toFixed(3) }}</dd>
-              </div>
-              <div>
-                <dt class="text-xs text-muted-foreground">Area (px²)</dt>
-                <dd class="font-mono font-medium">{{ selected.area.toLocaleString() }}</dd>
-              </div>
-              <div v-if="selected.length_mm">
-                <dt class="text-xs text-muted-foreground">Length</dt>
-                <dd class="font-mono font-medium">{{ selected.length_mm.toFixed(1) }} mm</dd>
-              </div>
-              <div v-if="selected.width_mm">
-                <dt class="text-xs text-muted-foreground">Width</dt>
-                <dd class="font-mono font-medium">{{ selected.width_mm.toFixed(1) }} mm</dd>
-              </div>
-              <div v-if="selected.viability_status">
-                <dt class="text-xs text-muted-foreground">Viability</dt>
-                <dd
-                  class="font-medium"
-                  :class="
-                    selected.viability_status === 'Active' ? 'text-green-600' : 'text-red-500'
-                  "
-                >
-                  {{ selected.viability_status }}
-                </dd>
-              </div>
-            </dl>
-          </div>
+          <template v-else> Select one healthy seed to continue. </template>
         </div>
 
-        <!-- Action bar -->
-        <footer
-          class="border-t border-border bg-surface px-5 py-3 flex items-center justify-between"
-        >
-          <span class="text-[11px] text-muted-foreground font-mono hidden md:block">
-            ↵ confirm · x reject · ↑↓ navigate
-          </span>
-          <div class="flex gap-2 ml-auto">
-            <button
-              class="px-3 py-1.5 rounded-md text-sm font-medium border border-border hover:bg-muted"
-              @click="reject"
-            >
-              Reject
-            </button>
-            <button
-              class="px-3 py-1.5 rounded-md text-sm font-medium bg-primary text-primary-foreground hover:bg-primary/90"
-              @click="confirm"
-            >
-              Confirm seed
-            </button>
-          </div>
-        </footer>
-      </template>
-    </section>
+        <!-- Right -->
+        <div class="flex items-center gap-3">
+          <button
+            v-if="selectedReference"
+            type="button"
+            class="px-4 py-2 rounded-md border border-border hover:bg-muted transition-colors"
+            @click="clearReference"
+          >
+            Reselect
+          </button>
+
+          <button
+            type="button"
+            class="px-4 py-2 rounded-md bg-primary text-primary-foreground hover:bg-primary/90 disabled:opacity-50 disabled:cursor-not-allowed"
+            :disabled="!selectedReference"
+            @click="proceedToCalculation"
+          >
+            Continue
+          </button>
+        </div>
+      </div>
+    </footer>
   </div>
 </template>
 
 <script setup lang="ts">
-import { computed, nextTick, onMounted, onUnmounted, ref, watch } from 'vue'
-import { useRoute } from 'vue-router'
+import { computed, onMounted, ref } from 'vue'
+import { useRoute, useRouter } from 'vue-router'
+
 import PageHeader from '@/components/PageHeader.vue'
 import SeedsStepper from '@/components/SeedsStepper.vue'
+
 import { api } from '@/api'
 
-type ReviewerStatus = 'unreviewed' | 'confirmed' | 'rejected'
-
+//Types
 interface Detection {
   id: number
+
   confidence: number
-  area: number
-  length_mm?: number
-  width_mm?: number
-  viability_status?: 'Active' | 'Aborted'
-  reviewer_status: ReviewerStatus
-  source_image_filename: string
+
+  /*
+    Note to self: check that boundingboxes are normalized correctly in backend
+  */
+
+  bbox_x: number
+  bbox_y: number
+  bbox_width: number
+  bbox_height: number
+}
+
+interface ReviewImage {
+  id: number
+
+  filename: string
+  image_url: string
 }
 
 interface ReviewBundle {
-  run: { id: number; name: string; status: string; detection_count: number }
+  run: {
+    id: number
+    name: string
+    status: string
+  }
+
+  image: ReviewImage
+
   detections: Detection[]
 }
 
+//Routing
 const route = useRoute()
+const router = useRouter()
+
+//State
 const loading = ref(true)
 const loadError = ref('')
-const run = ref<ReviewBundle['run'] | null>(null)
-const detections = ref<Detection[]>([])
-const selectedId = ref<number | null>(null)
-const statusFilter = ref<'unreviewed' | 'all' | 'reviewed'>('unreviewed')
-const bulkIds = ref<Set<number>>(new Set())
 
-const previewMode = computed<string | null>(() => {
+const run = ref<ReviewBundle['run'] | null>(null)
+
+const currentImage = ref<ReviewImage | null>(null)
+
+const detections = ref<Detection[]>([])
+
+const selectedReferenceId = ref<number | null>(null)
+
+//Computation
+const previewMode = computed(() => {
   const value = route.query.preview
+
   return typeof value === 'string' ? value : null
 })
 
+const headerTitle = computed(() =>
+  run.value ? `Seed Reference Review · ${run.value.name}` : 'Seed Reference Review',
+)
+
+const selectedReference = computed(() =>
+  detections.value.find((detection) => detection.id === selectedReferenceId.value),
+)
+
+//Actual lifecycle of the page
 onMounted(async () => {
   if (previewMode.value) {
-    const bundle = await loadPreview(previewMode.value)
+    const bundle = await loadPreview()
+
     if (bundle) {
       run.value = bundle.run
+      currentImage.value = bundle.image
       detections.value = bundle.detections
+
       loading.value = false
+
       return
     }
   }
+
   await loadFromApi()
 })
 
-async function loadPreview(_mode: string): Promise<ReviewBundle | null> {
-  if (!import.meta.env.DEV) return null
-  const { default: mocks } = await import('@/mocks/seed-detections.json')
-  const bundle = (mocks as Record<string, ReviewBundle | undefined>).default
-  if (!bundle) return null
-  return JSON.parse(JSON.stringify(bundle))
+//Preview section using mock data for easier visualization of UI before its all connected. (remove later prob)
+async function loadPreview(): Promise<ReviewBundle | null> {
+  if (!import.meta.env.DEV) {
+    return null
+  }
+
+  const { default: mock } = await import('@/mocks/seed-reference-review.json')
+
+  return JSON.parse(JSON.stringify(mock))
 }
 
+//API loading
 async function loadFromApi() {
-  const id = route.params.id as string
+  const id = route.params.id
+
   try {
-    const [runRes, detRes] = await Promise.all([
-      api(`/api/analysis/runs/${id}/`),
-      api(`/api/analysis/runs/${id}/detections/`),
-    ])
-    if (!runRes.ok) {
-      loadError.value = `Run: HTTP ${runRes.status}`
+    const response = await api(`/api/analysis/runs/${id}/reference-review/`)
+
+    if (!response.ok) {
+      loadError.value = `HTTP ${response.status}`
+
       return
     }
-    if (!detRes.ok) {
-      loadError.value = `Detections: HTTP ${detRes.status}`
-      return
-    }
-    run.value = await runRes.json()
-    detections.value = await detRes.json()
-  } catch (e) {
-    loadError.value = e instanceof Error ? e.message : String(e)
+
+    const data: ReviewBundle = await response.json()
+
+    run.value = data.run
+    currentImage.value = data.image
+    detections.value = data.detections
+  } catch (error) {
+    loadError.value = error instanceof Error ? error.message : String(error)
   } finally {
     loading.value = false
   }
 }
 
-const headerTitle = computed(() =>
-  run.value ? `Review · ${run.value.name || `Run #${run.value.id}`}` : 'Review',
-)
+//Seed reference selection section
+function selectReference(id: number) {
+  selectedReferenceId.value = id
+}
 
-const filteredDetections = computed(() => {
-  let list = detections.value
-  if (statusFilter.value === 'unreviewed')
-    list = list.filter((d) => d.reviewer_status === 'unreviewed')
-  else if (statusFilter.value === 'reviewed')
-    list = list.filter((d) => d.reviewer_status !== 'unreviewed')
-  return [...list].sort((a, b) => a.confidence - b.confidence)
-})
+function clearReference() {
+  selectedReferenceId.value = null
+}
 
-const selected = computed(() => detections.value.find((d) => d.id === selectedId.value) ?? null)
-
-watch(
-  filteredDetections,
-  (list) => {
-    if (selectedId.value && !list.find((d) => d.id === selectedId.value)) {
-      selectedId.value = list[0]?.id ?? null
-    } else if (!selectedId.value && list.length) {
-      selectedId.value = list[0].id
-    }
-  },
-  { immediate: true },
-)
-
-watch(selectedId, async (id) => {
-  if (id == null) return
-  await nextTick()
-  document
-    .querySelector(`[data-detection-id="${id}"]`)
-    ?.scrollIntoView({ block: 'nearest', behavior: 'smooth' })
-})
-
-function statusDotClass(s: ReviewerStatus): string {
-  switch (s) {
-    case 'confirmed':
-      return 'bg-green-500'
-    case 'rejected':
-      return 'bg-red-500'
-    default:
-      return 'bg-muted-foreground/40'
+//Styling of the selected boundingbox
+function boxStyle(detection: Detection) {
+  return {
+    left: `${detection.bbox_x}%`,
+    top: `${detection.bbox_y}%`,
+    width: `${detection.bbox_width}%`,
+    height: `${detection.bbox_height}%`,
   }
 }
-function statusBadgeClass(s: ReviewerStatus): string {
-  switch (s) {
-    case 'confirmed':
-      return 'bg-green-100 text-green-700'
-    case 'rejected':
-      return 'bg-red-100 text-red-700'
-    default:
-      return 'bg-muted text-muted-foreground'
-  }
-}
-function statusLabel(s: ReviewerStatus): string {
-  return s[0].toUpperCase() + s.slice(1)
-}
 
-function applyAction(status: ReviewerStatus) {
-  if (!selected.value) return
-  selected.value.reviewer_status = status
-  advanceToNext()
-}
-
-function confirm() {
-  applyAction('confirmed')
-}
-function reject() {
-  applyAction('rejected')
-}
-
-function toggleBulk(id: number) {
-  const next = new Set(bulkIds.value)
-  if (next.has(id)) next.delete(id)
-  else next.add(id)
-  bulkIds.value = next
-}
-function clearBulk() {
-  bulkIds.value = new Set()
-}
-function selectAllVisible() {
-  bulkIds.value = new Set(filteredDetections.value.map((d) => d.id))
-}
-function bulkConfirm() {
-  for (const d of detections.value) {
-    if (bulkIds.value.has(d.id)) d.reviewer_status = 'confirmed'
-  }
-  clearBulk()
-}
-function bulkReject() {
-  for (const d of detections.value) {
-    if (bulkIds.value.has(d.id)) d.reviewer_status = 'rejected'
-  }
-  clearBulk()
-}
-
-function advanceToNext() {
-  const list = filteredDetections.value
-  const idx = list.findIndex((d) => d.id === selectedId.value)
-  if (idx >= 0 && idx + 1 < list.length) selectedId.value = list[idx + 1].id
-}
-
-function navigate(delta: number) {
-  const list = filteredDetections.value
-  const idx = list.findIndex((d) => d.id === selectedId.value)
-  if (idx < 0) return
-  const next = list[Math.max(0, Math.min(list.length - 1, idx + delta))]
-  if (next) selectedId.value = next.id
-}
-
-function onKeydown(e: KeyboardEvent) {
-  if (!selected.value) return
-  if (e.target instanceof HTMLElement && ['INPUT', 'SELECT', 'TEXTAREA'].includes(e.target.tagName))
+//Function to proceed to calculations with reference seed (Needs implementation in backend)
+async function proceedToCalculation() {
+  if (!selectedReferenceId.value) {
     return
-  switch (e.key) {
-    case 'Enter':
-      confirm()
-      e.preventDefault()
-      break
-    case 'x':
-    case 'X':
-      reject()
-      e.preventDefault()
-      break
-    case 'ArrowDown':
-    case 'j':
-      navigate(1)
-      e.preventDefault()
-      break
-    case 'ArrowUp':
-    case 'k':
-      navigate(-1)
-      e.preventDefault()
-      break
+  }
+
+  const id = route.params.id
+
+  try {
+    const response = await api(`/api/analysis/runs/${id}/reference-seed/`, {
+      method: 'POST',
+
+      headers: {
+        'Content-Type': 'application/json',
+      },
+
+      body: JSON.stringify({
+        reference_detection_id: selectedReferenceId.value,
+
+        image_id: currentImage.value?.id,
+      }),
+    })
+
+    if (!response.ok) {
+      throw new Error(`HTTP ${response.status}`)
+    }
+
+    //Redirect to next review page after selecting a reference seed.
+    router.push({
+      name: 'seed-count-review',
+
+      params: {
+        id,
+      },
+    })
+  } catch (error) {
+    console.error(error)
+
+    alert('Failed to calculate active seeds.')
   }
 }
-
-onMounted(() => window.addEventListener('keydown', onKeydown))
-onUnmounted(() => window.removeEventListener('keydown', onKeydown))
 </script>
