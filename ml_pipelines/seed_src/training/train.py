@@ -20,6 +20,16 @@ def train_species_model(
     run_name = run_name or species_name
     weights = finetune_from if finetune_from else pretrained_weights_path
     model = YOLO(weights)
+    if progress_callback:
+        def on_epoch_end(trainer):
+            progress_callback(
+                processed=trainer.epoch + 1,
+                total=trainer.epochs,
+                message=f'Epoch {trainer.epoch + 1}/{trainer.epochs} — loss {trainer.loss:.3f}',
+                level='info',
+            )
+        model.add_callback('on_train_epoch_end', on_epoch_end)
+        
     train_kwargs = dict(
         data=data_yaml_path,
         epochs=epochs,
@@ -38,15 +48,5 @@ def train_species_model(
     if lrf is not None:
         train_kwargs['lrf'] = lrf
     model.train(**train_kwargs)
-
-    if progress_callback:
-        def on_epoch_end(trainer):
-            progress_callback(
-                processed=trainer.epoch + 1,
-                total=trainer.epochs,
-                message=f'Epoch {trainer.epoch + 1}/{trainer.epochs} — loss {trainer.loss:.3f}',
-                level='info',
-            )
-        model.add_callback('on_train_epoch_end', on_epoch_end)
 
     return os.path.join('runs', 'obb', run_name, 'weights', 'best.pt')

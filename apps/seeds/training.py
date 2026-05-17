@@ -17,6 +17,7 @@ import logging
 import threading
 import time
 from pathlib import Path
+import os
 
 from django.conf import settings
 from django.db import close_old_connections, transaction
@@ -31,8 +32,8 @@ from apps.analysis.models import (
 from apps.datasets.models import Module
 from apps.analysis.cancellation import RunCancelled
 
-from ml_pipelines.seed_src.train import train_species_model
-from ml_pipelines.seed_src.metrics import calculate_tp_fp_fn  # for post-training evaluation
+from ml_pipelines.seed_src.training.train import train_species_model
+from ml_pipelines.seed_src.utils.metrics import calculate_tp_fp_fn  # for post-training evaluation
 
 logger = logging.getLogger(__name__)
 
@@ -43,8 +44,14 @@ _ACTIVITY_LOG_CAP = 200
 # Config
 # ──────────────────────────────────────────────────────────────────────────
 
-BASE_DATA = Path('../data/seed')
-SPECIES_LIST = ['cat', 'peh', 'phyca', 'vau']
+BASE_DATA = settings.BASE_DIR / 'data' / 'seed'
+
+# Dynamically discover species from existing folders
+SPECIES_LIST = [
+    d.replace('_model', '')
+    for d in os.listdir(BASE_DATA)
+    if os.path.isdir(BASE_DATA / d) and d.endswith('_model')
+] if BASE_DATA.exists() else []
 
 CONFIG_MAP = {s: str(BASE_DATA / f'{s}_model' / f'{s}.yaml') for s in SPECIES_LIST}
 
@@ -150,7 +157,10 @@ def run_training_job(job: TrainingJob) -> None:
             finetune_from = None
 
         # Resolve dataset YAML (pre-built slicing pipeline)
-        data_yaml_path = CONFIG_MAP[species]
+        data_yaml_path = str(BASE_DATA / f'{species}_model' / f'{species}.yaml')
+
+        if not Path(data_yaml_path).exists():
+            raise FileNotFoundError(f'Dataset YAML not found: {data_yaml_path}')
 
         progress_cb = _make_progress_callback(job.pk)
 

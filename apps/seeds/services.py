@@ -7,7 +7,9 @@ from pathlib import Path
 
 logger = logging.getLogger(__name__)
 
-BASE_DATA = Path('../data/seed')
+def _base_data() -> Path:
+    from django.conf import settings
+    return settings.BASE_DIR / 'data' / 'seed'
 
 
 def bootstrap_species_dataset(species: str) -> Path:
@@ -21,6 +23,7 @@ def bootstrap_species_dataset(species: str) -> Path:
 
     Returns the path to the YAML file.
     """
+    BASE_DATA = _base_data()
     species = species.lower()
     species_dir = BASE_DATA / f'{species}_model'
 
@@ -35,7 +38,7 @@ def bootstrap_species_dataset(species: str) -> Path:
 
     yaml_path = species_dir / f'{species}.yaml'
     yaml_path.write_text(
-        f'path: ../data/seed/{species}_model\n'
+        f'path: {species_dir}\n'
         f'train: train_sliced\n'
         f'val: val/images\n'
         f'\n'
@@ -49,4 +52,4 @@ def bootstrap_species_dataset(species: str) -> Path:
 
 def species_dataset_exists(species: str) -> bool:
     """Check if a species dataset folder already exists."""
-    return (BASE_DATA / f'{species.lower()}_model').exists()
+    return (_base_data() / f'{species.lower()}_model').exists()
