@@ -27,7 +27,7 @@ runs/
 sahi_results/
 prediction_images/
 predictions/
-debug_outputs/
+ml-pipelines/debug_outputs/
 
 # Django
 db.sqlite3
