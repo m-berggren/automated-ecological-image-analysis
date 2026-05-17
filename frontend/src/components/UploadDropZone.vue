@@ -23,8 +23,8 @@
     </div>
 
     <div
-      class="relative rounded-xl border-2 border-dashed p-6 text-center transition-colors select-none"
-      :class="boxClass"
+      class="relative rounded-xl border-2 border-dashed text-center transition-colors select-none"
+      :class="[boxClass, compact ? 'p-3' : 'p-6']"
       role="button"
       tabindex="0"
       @click="triggerActive"
@@ -35,11 +35,18 @@
       @drop.prevent="onDrop"
     >
       <slot name="body" :has-files="hasFiles" :active="active">
-        <UploadCloud class="w-10 h-10 mx-auto text-muted-foreground" />
-        <p class="mt-3 text-sm font-medium">
+        <UploadCloud
+          :class="compact ? 'w-6 h-6' : 'w-10 h-10'"
+          class="mx-auto text-muted-foreground"
+        />
+        <p :class="compact ? 'mt-1 text-xs' : 'mt-3 text-sm'" class="font-medium">
           {{ activePlaceholder }}
         </p>
-        <p v-if="activeHelper" class="text-xs text-muted-foreground mt-1">
+        <p
+          v-if="activeHelper"
+          :class="compact ? 'text-[11px] mt-0.5' : 'text-xs mt-1'"
+          class="text-muted-foreground"
+        >
           {{ activeHelper }}
         </p>
       </slot>
@@ -84,6 +91,9 @@ const props = withDefaults(
     placeholder?: string
     helper?: string
     disabled?: boolean
+    // Reduces padding, icon, and text sizes for use inside dialogs where
+    // vertical space is tight. Callsites without this prop are unchanged.
+    compact?: boolean
   }>(),
   {
     activeTab: undefined,
@@ -91,6 +101,7 @@ const props = withDefaults(
     placeholder: 'Drop files here or click to browse',
     helper: '',
     disabled: false,
+    compact: false,
   },
 )
 

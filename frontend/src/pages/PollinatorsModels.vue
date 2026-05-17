@@ -135,10 +135,7 @@
                           Parameters
                         </div>
                         <dl class="text-xs grid grid-cols-[auto_1fr] gap-x-4 gap-y-1">
-                          <template
-                            v-for="[key, value] in visibleParams(v.parameters)"
-                            :key="key"
-                          >
+                          <template v-for="[key, value] in visibleParams(v.parameters)" :key="key">
                             <dt class="text-muted-foreground">{{ key }}</dt>
                             <dd class="font-mono">{{ formatParam(value) }}</dd>
                           </template>
@@ -231,14 +228,20 @@
       class="fixed inset-0 z-50 flex items-center justify-center bg-black/40 p-4"
       @click.self="uploadOpen = false"
     >
-      <div class="bg-card border border-border rounded-xl shadow-xl w-full max-w-md">
-        <header class="px-5 py-3 border-b border-border flex items-center justify-between">
+      <!-- max-h-[90vh] + flex column keeps the footer (Cancel/Upload) glued
+           to the bottom no matter how big the body grows. The body scrolls
+           internally instead of pushing the buttons off-screen on smaller
+           laptops. -->
+      <div
+        class="bg-card border border-border rounded-xl shadow-xl w-full max-w-md max-h-[90vh] flex flex-col"
+      >
+        <header class="px-5 py-2 border-b border-border flex items-center justify-between shrink-0">
           <h3 class="font-semibold">Upload existing model</h3>
           <button class="text-muted-foreground hover:text-foreground" @click="uploadOpen = false">
             ✕
           </button>
         </header>
-        <div class="p-5 space-y-3 text-sm">
+        <div class="px-5 py-3 space-y-2 text-sm overflow-y-auto">
           <label class="block">
             <span class="text-xs font-medium text-muted-foreground">Kind</span>
             <select
@@ -281,6 +284,7 @@
             </span>
             <UploadDropZone
               class="mt-1"
+              compact
               v-model:active-tab="uploadMode"
               :tabs="modelUploadTabs"
               :has-files="uploadHasFiles"
@@ -292,28 +296,32 @@
             >
               {{ uploadFile.name }} · {{ formatFileSize(uploadFile.size) }}
             </p>
+            <!-- Folder preview. Plain text rows rather than nested boxes:
+                 enough info to know we picked the right folder, without
+                 the visual noise that dominated the dialog. Artifact list
+                 caps at ~5 rows with internal scroll for big folders. -->
             <div
               v-if="uploadMode === 'folder' && uploadFolderFiles.length"
-              class="mt-2 rounded border border-border bg-muted/30 p-2 text-[11px] space-y-1"
+              class="mt-2 text-[11px] space-y-1"
             >
               <div>
-                <span class="font-medium">Weights:</span>
-                <span v-if="folderPreview.weightsLabel" class="ml-1 font-mono">
+                <span class="text-muted-foreground">Weights: </span>
+                <span v-if="folderPreview.weightsLabel" class="font-mono">
                   {{ folderPreview.weightsLabel }}
                 </span>
-                <span v-else class="ml-1 text-red-600">
+                <span v-else class="text-red-600">
                   not found (need weights/best.pt or weights/last.pt)
                 </span>
               </div>
-              <div>
-                <span class="font-medium">
+              <div v-if="folderPreview.recognised.length">
+                <span class="text-muted-foreground">
                   Artifacts ({{ folderPreview.recognised.length }}):
                 </span>
-                <span v-if="folderPreview.recognised.length" class="ml-1 font-mono">
-                  {{ folderPreview.recognised.join(', ') }}
-                </span>
-                <span v-else class="ml-1 text-muted-foreground">none recognised</span>
+                <div class="mt-0.5 max-h-32 overflow-y-auto font-mono leading-snug pl-2">
+                  <div v-for="name in folderPreview.recognised" :key="name">{{ name }}</div>
+                </div>
               </div>
+              <div v-else class="text-muted-foreground">Artifacts: none recognised.</div>
               <div v-if="folderPreview.skipped > 0" class="text-muted-foreground">
                 {{ folderPreview.skipped }} other file(s) will be ignored.
               </div>
@@ -321,7 +329,9 @@
           </div>
           <p v-if="uploadError" class="text-xs text-red-600">{{ uploadError }}</p>
         </div>
-        <footer class="px-5 py-3 border-t border-border flex items-center justify-end gap-2">
+        <footer
+          class="px-5 py-3 border-t border-border flex items-center justify-end gap-2 shrink-0"
+        >
           <button
             class="px-3 py-1.5 rounded-md text-sm font-medium text-muted-foreground hover:bg-muted"
             :disabled="uploadSubmitting"
@@ -440,9 +450,7 @@ const deletingId = ref<number | null>(null)
 // expose as `yolo_epochs`.
 const HIDDEN_PARAM_KEYS = new Set(['yolo_model', 'yolo_data'])
 
-function visibleParams(
-  params: Record<string, unknown>,
-): Array<[string, unknown]> {
+function visibleParams(params: Record<string, unknown>): Array<[string, unknown]> {
   const hasYoloEpochs = 'yolo_epochs' in params
   return Object.entries(params).filter(([key]) => {
     if (HIDDEN_PARAM_KEYS.has(key)) return false
@@ -481,7 +489,7 @@ const modelUploadTabs: UploadTab[] = [
     label: 'Training run folder',
     mode: 'folder',
     placeholder: 'Drop an Ultralytics run folder or click to browse',
-    helper: 'Server takes weights/best.pt (or last.pt) and ingests recognised additional files.',
+    helper: 'Server takes weights/best.pt and ingests recognised additional files.',
   },
 ]
 
