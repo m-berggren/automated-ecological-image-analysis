@@ -49,7 +49,7 @@ def analyze_seed_confidence(predictions, risk_threshold=0.20):
 
 # Testing that this works on our predictions, will probably change later once we have done the integration steps
 if __name__ == '__main__':
-    prediction_files_dir = '../ml-pipelines/predictions'
+    prediction_files_dir = 'seed_src/predictions'
     for file_name in os.listdir(prediction_files_dir):
         file_path = os.path.join(prediction_files_dir, file_name)
         try:
