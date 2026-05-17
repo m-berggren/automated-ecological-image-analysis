@@ -123,6 +123,12 @@
           />
         </label>
       </div>
+      <div
+        v-if="startAtImageOutOfRange"
+        class="text-xs text-red-600"
+      >
+        “Start at image” is outside the uploaded range (max {{ localFiles.length }}).
+      </div>
 
       <!-- Advanced -->
       <button
@@ -302,16 +308,22 @@
           </button>
         </li>
       </ul>
-      <p
-        v-else-if="uploader && uploader.items.length"
-        class="px-5 py-3 text-xs text-muted-foreground"
-      >
+      <p v-else class="px-5 py-3 text-xs text-muted-foreground">
         No failures. (Per-file list hidden at this scale — failures will appear here as they
         happen.)
       </p>
     </section>
 
     <p v-if="error" class="text-sm text-red-600">{{ error }}</p>
+    <!-- The ROI drawer modal -->
+    <div>
+      <ROIDrawer
+        v-if="showRoiModal"
+        :image-url="previewUrl"
+        @close="closeRoiModal"
+        @confirm="onSaveRoi"
+      />
+    </div>
   </div>
 </template>
 
@@ -323,6 +335,7 @@ import PollinatorsStepper from '@/components/PollinatorsStepper.vue'
 import { createUploader, type UploadItem } from '@/lib/uploader'
 import { api } from '@/api'
 import { UploadCloud, XCircle } from 'lucide-vue-next'
+import ROIDrawer from '@/components/ROIDrawer.vue'
 
 interface ModelVersion {
   id: number
@@ -331,6 +344,16 @@ interface ModelVersion {
   version_name: string
   is_active: boolean
 }
+
+const startAtImageOutOfRange = computed(() => {
+  if (!localFiles.value.length) return false
+  const idx = (config.value.start_at_image || 1) - 1
+  return idx < 0 || idx >= localFiles.value.length
+})
+
+const localFiles = ref<File[]>([])
+const showRoiModal = ref(false)
+const previewUrl = ref<string | null>(null)
 
 const router = useRouter()
 const dragOver = ref(false)
@@ -355,6 +378,7 @@ interface PipelineConfig {
   group_classifier: { model_version_id: number | null; confidence: number }
   preprocessing: {
     use_roi: boolean
+    roi_bbox: null | RoiBBox
     crop_pad_frac: number
     background_sample_size: number
     min_contour_area: number
@@ -367,12 +391,20 @@ interface PipelineConfig {
   start_at_image: number
 }
 
+interface RoiBBox {
+  x: number
+  y: number
+  width: number
+  height: number
+}
+
 const config = ref<PipelineConfig>({
   yolo: { model_version_id: null, confidence: 0.6 },
   binary_classifier: { model_version_id: null, confidence: 0.5 },
   group_classifier: { model_version_id: null, confidence: 0.6 },
   preprocessing: {
     use_roi: false,
+    roi_bbox: null,
     crop_pad_frac: 0.3,
     background_sample_size: 100,
     min_contour_area: 400,
@@ -455,6 +487,7 @@ async function handleFiles(files: File[]) {
   const id = await ensureUpload()
   if (!id || !uploader.value) return
   uploader.value.enqueue(images)
+  localFiles.value = images
 }
 
 function onPick(e: Event, _isFolder: boolean) {
@@ -515,6 +548,17 @@ onMounted(() => {
 })
 
 async function startDetection() {
+  if(config.value.preprocessing.use_roi) {
+    const roi = await openRoiModal()
+
+  if (!roi) {
+    error.value = 'ROI selection was cancelled.'
+    return
+  }
+  }
+
+
+
   error.value = ''
   if (!uploadId.value) {
     error.value = 'No upload in progress.'
@@ -540,7 +584,7 @@ async function startDetection() {
         module: 'pollinators',
         upload: uploadId.value,
         name: runName.value,
-        config: config.value,
+        config: fixROIFormat(config.value),
       }),
     })
     if (!res.ok) {
@@ -555,4 +599,82 @@ async function startDetection() {
     starting.value = false
   }
 }
+
+const roiResolver = ref<((roi: RoiBBox | null) => void) | null>(null)
+
+// Choses the current selected manual roi image and makes the ROI drawing modal appear
+function openRoiModal() {
+  return new Promise((resolve) => {
+    if (!localFiles.value.length) {
+      resolve(null)
+      return
+    }
+
+    const index = (config.value.start_at_image || 1) - 1
+
+    if (index < 0 || index >= localFiles.value.length) {
+      resolve(null)
+      return
+    }
+
+    const file = localFiles.value[index]
+
+    // clean up old URL
+    if (previewUrl.value) {
+      URL.revokeObjectURL(previewUrl.value)
+    }
+
+    previewUrl.value = URL.createObjectURL(file)
+    showRoiModal.value = true
+
+    roiResolver.value = resolve
+
+  })
+}
+
+// Makes the modal disappear and clears up the old image URL
+function closeRoiModal() {
+  showRoiModal.value = false
+
+  if (previewUrl.value) {
+    URL.revokeObjectURL(previewUrl.value)
+    previewUrl.value = null
+  }
+
+  if (roiResolver.value) {
+    roiResolver.value(null)
+    roiResolver.value = null
+  }
+}
+
+function onSaveRoi(roi: any) {
+  config.value.preprocessing.roi_bbox = roi
+
+  if (roiResolver.value) {
+    roiResolver.value(roi)
+    roiResolver.value = null
+  }
+
+  closeRoiModal()
+}
+
+// Changes the format of the config ROI to what the backend expects
+function fixROIFormat(cfg: PipelineConfig) {
+  return {
+    ...cfg,
+    preprocessing: {
+      ...cfg.preprocessing,
+      roi_bbox: cfg.preprocessing.roi_bbox
+        ? [
+            cfg.preprocessing.roi_bbox.x,
+            cfg.preprocessing.roi_bbox.y,
+            cfg.preprocessing.roi_bbox.width,
+            cfg.preprocessing.roi_bbox.height,
+          ]
+        : null,
+    },
+  }
+}
+
+
 </script>

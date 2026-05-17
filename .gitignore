@@ -25,7 +25,7 @@ ml-pipelines/notebooks/seed-counting/.ipynb_checkpoints/
 # YOLO outputs
 runs/
 sahi_results/
-debug_outputs/
+prediction_images/
 predictions/
 
 # Django

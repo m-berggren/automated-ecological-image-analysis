@@ -8,7 +8,7 @@ from shapely.geometry import Polygon, box
 # -------------------------
 BASE_PATH = '../data/seed'
 SPECIES_LIST = ['cat', 'peh', 'phyca', 'vau']
-SPLITS = ['train', 'val']
+SPLITS = ['train']
 
 SLICE_SIZE = 768
 OVERLAP = 0.2  # 20% overlap between slices
