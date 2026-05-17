@@ -190,7 +190,7 @@
 </template>
 
 <script setup lang="ts">
-import { computed, nextTick, onMounted, ref } from 'vue'
+import { computed, nextTick, onMounted, onUnmounted, ref } from 'vue'
 import { RouterLink, useRoute } from 'vue-router'
 import PageHeader from '@/components/PageHeader.vue'
 import CsvExportDialog, { type CsvExportMode } from '@/components/CsvExportDialog.vue'
@@ -398,6 +398,14 @@ const previewMode = computed<string | null>(() => {
   return typeof value === 'string' ? value : null
 })
 
+// Poll the runs list every 5 s while the user has the page open so
+// processed_image_count and status changes show up without a manual
+// refresh. Preview mode (mocked data) doesn't poll — the bundle is
+// static. Background polls reuse loadFromApi but skip the loading
+// spinner so the table doesn't flash on each tick.
+let pollHandle: ReturnType<typeof setInterval> | null = null
+const REFRESH_MS = 5000
+
 onMounted(async () => {
   if (previewMode.value) {
     const bundle = await loadPreview(previewMode.value)
@@ -409,6 +417,13 @@ onMounted(async () => {
     }
   }
   await loadFromApi()
+  pollHandle = setInterval(() => {
+    void loadFromApi({ silent: true })
+  }, REFRESH_MS)
+})
+
+onUnmounted(() => {
+  if (pollHandle) clearInterval(pollHandle)
 })
 
 async function loadPreview(_mode: string): Promise<ListBundle | null> {
@@ -440,26 +455,26 @@ function resolveBundle(raw: { uploads: UploadMock[]; runs: RunMock[] }): ListBun
   }
 }
 
-async function loadFromApi() {
+async function loadFromApi({ silent = false }: { silent?: boolean } = {}) {
   try {
     const [runsRes, uploadsRes] = await Promise.all([
       api('/api/analysis/runs/?module=pollinators'),
       api('/api/datasets/uploads/?module=pollinators'),
     ])
     if (!runsRes.ok) {
-      loadError.value = `Runs: HTTP ${runsRes.status}`
+      if (!silent) loadError.value = `Runs: HTTP ${runsRes.status}`
       return
     }
     if (!uploadsRes.ok) {
-      loadError.value = `Uploads: HTTP ${uploadsRes.status}`
+      if (!silent) loadError.value = `Uploads: HTTP ${uploadsRes.status}`
       return
     }
     runs.value = await runsRes.json()
     uploads.value = await uploadsRes.json()
   } catch (e) {
-    loadError.value = e instanceof Error ? e.message : String(e)
+    if (!silent) loadError.value = e instanceof Error ? e.message : String(e)
   } finally {
-    loading.value = false
+    if (!silent) loading.value = false
   }
 }
 

@@ -3,6 +3,8 @@ from django.urls import path
 from .views import (
     DetectionBulkView,
     DetectionExclusionView,
+    InferenceRunAbortView,
+    InferenceRunActiveView,
     InferenceRunCancelView,
     InferenceRunDetailView,
     InferenceRunDraftView,
@@ -37,8 +39,10 @@ urlpatterns = [
     ),
     path('runs/', InferenceRunListCreateView.as_view(), name='run-list-create'),
     path('runs/draft/', InferenceRunDraftView.as_view(), name='run-draft'),
+    path('runs/active/', InferenceRunActiveView.as_view(), name='run-active'),
     path('runs/<int:pk>/', InferenceRunDetailView.as_view(), name='run-detail'),
     path('runs/<int:pk>/start/', InferenceRunStartView.as_view(), name='run-start'),
+    path('runs/<int:pk>/abort/', InferenceRunAbortView.as_view(), name='run-abort'),
     path('runs/<int:pk>/pause/', InferenceRunPauseView.as_view(), name='run-pause'),
     path(
         'runs/<int:pk>/resume/',

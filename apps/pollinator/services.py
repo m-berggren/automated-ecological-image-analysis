@@ -268,7 +268,13 @@ def run_inference_pipeline(run: InferenceRun) -> None:
         if upload is None:
             raise ValueError('Run has no upload; cannot determine image set')
 
-        images = list(upload.images.all().order_by('id'))
+        # Order by EXIF capture time so the per-image loop matches the
+        # camera's chronological sequence (background-subtraction needs
+        # adjacent frames in time, not adjacent uploads). id is a stable
+        # tiebreaker for images whose EXIF is missing or duplicated.
+        images = list(
+            upload.images.all().order_by('captured_at', 'id'),
+        )
         if not images:
             raise ValueError('Upload has no images to process')
 

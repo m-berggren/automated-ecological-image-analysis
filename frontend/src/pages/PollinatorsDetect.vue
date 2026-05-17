@@ -7,6 +7,27 @@
     <div v-else-if="loadError" class="text-sm text-red-600">{{ loadError }}</div>
 
     <template v-else-if="run">
+      <!-- GPU-busy banner: another pollinator run is currently RUNNING,
+           so Start / Resume of this one is locked. Only shown when the
+           active run is a different row than the one we're looking at. -->
+      <div
+        v-if="blockingRun && blockingRun.id !== run.id"
+        class="rounded-md border border-amber-300 bg-amber-50 text-amber-800 text-sm px-4 py-2 flex items-center justify-between"
+      >
+        <span>
+          <span class="font-medium">Pipeline busy:</span>
+          run #{{ blockingRun.id }}{{ blockingRun.name ? ` "${blockingRun.name}"` : '' }} is
+          currently running ({{ blockingRun.processed_image_count.toLocaleString() }} /
+          {{ blockingRun.image_count.toLocaleString() }}). You can't start or resume another
+          run until it finishes or is paused.
+        </span>
+        <RouterLink
+          :to="`/pollinators/runs/${blockingRun.id}/detect`"
+          class="ml-3 shrink-0 text-xs underline hover:no-underline"
+        >
+          Open it →
+        </RouterLink>
+      </div>
       <!-- Status card -->
       <section class="rounded-xl border bg-surface p-5" :class="statusBorderClass">
         <div class="flex items-center gap-3 mb-3">
@@ -82,8 +103,9 @@
           </button>
           <button
             v-if="run.status === 'paused'"
-            class="text-sm px-3 py-1.5 rounded-md border border-border hover:bg-muted disabled:opacity-50"
-            :disabled="actionInFlight"
+            class="text-sm px-3 py-1.5 rounded-md border border-border hover:bg-muted disabled:opacity-50 disabled:cursor-not-allowed"
+            :disabled="actionInFlight || resumeBlocked"
+            :title="resumeBlocked ? `Blocked by run #${blockingRun?.id}` : ''"
             @click="onResume"
           >
             {{ actionInFlight ? 'Resuming…' : 'Resume' }}
@@ -296,12 +318,16 @@ onMounted(async () => {
       return
     }
   }
-  void loadRun()
+  void loadRun().then(() => loadActive())
   pollHandle = setInterval(() => {
     const s = run.value?.status
     if (s === 'pending' || s === 'running' || s === 'paused') {
       void loadRun()
     }
+    // Always poll active-run state so a blocking run finishing elsewhere
+    // unblocks Resume here on the next tick, even when our own run is
+    // sitting idle in paused.
+    void loadActive()
   }, 3000)
 })
 
@@ -524,6 +550,35 @@ function logLevelClass(level: ActivityEntry['level']): string {
 const actionInFlight = ref(false)
 const startAtImage = ref(1)
 
+// Tracks the run currently RUNNING in this module (if any). Polled
+// alongside loadRun() so the banner / Resume-disabled state stays fresh.
+interface BlockingRun {
+  id: number
+  name: string
+  status: RunStatus
+  image_count: number
+  processed_image_count: number
+}
+const blockingRun = ref<BlockingRun | null>(null)
+const resumeBlocked = computed(
+  () =>
+    !!blockingRun.value && !!run.value && blockingRun.value.id !== run.value.id,
+)
+
+async function loadActive() {
+  if (!run.value?.module) return
+  try {
+    const res = await api(
+      `/api/analysis/runs/active/?module=${encodeURIComponent(run.value.module)}`,
+    )
+    if (!res.ok) return
+    const data = await res.json()
+    blockingRun.value = data.active ?? null
+  } catch (e) {
+    console.warn('Failed to fetch active-run state', e)
+  }
+}
+
 async function callAction(path: string, body?: Record<string, unknown>) {
   if (!run.value || actionInFlight.value) return
   if (previewMode.value) return
@@ -540,10 +595,16 @@ async function callAction(path: string, body?: Record<string, unknown>) {
         detail = errBody.error || errBody.detail || detail
       } catch {}
       loadError.value = `${path} failed: ${detail}`
+      // A 409 here is almost always "someone else is RUNNING"; refresh
+      // the banner so the user sees who's blocking them.
+      if (res.status === 409) void loadActive()
       return
     }
     const data = await res.json()
     run.value = { ...run.value, ...data }
+    // Pause/Resume/Cancel each change who occupies the GPU. Refresh
+    // the banner so the disabled state of other tabs settles fast.
+    void loadActive()
   } catch (e) {
     loadError.value = e instanceof Error ? e.message : String(e)
   } finally {

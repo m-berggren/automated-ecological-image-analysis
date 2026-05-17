@@ -442,12 +442,51 @@ class InferenceRunDraftView(APIView):
         )
 
 
+def _busy_run_for_module(
+    module: str, exclude_pk: int | None = None
+) -> InferenceRun | None:
+    """Return the currently-running inference run for a module, if any.
+
+    PAUSED and PENDING don't count: a paused run isn't consuming the GPU,
+    and pending means the worker hasn't claimed it yet. Only RUNNING is
+    a hard mutual-exclusion signal.
+    """
+    qs = InferenceRun.objects.filter(module=module, status=JobStatus.RUNNING)
+    if exclude_pk is not None:
+        qs = qs.exclude(pk=exclude_pk)
+    return qs.first()
+
+
+class InferenceRunActiveView(APIView):
+    """GET /api/analysis/runs/active/?module=<module>
+
+    Returns the run currently RUNNING in the given module, or ``null``.
+    Used by the Detect page to surface a banner and disable Start/Resume
+    while another run is in flight, since only one run per module may
+    occupy the GPU at a time.
+    """
+
+    def get(self, request: Request) -> Response:
+        module = request.query_params.get('module', '').strip()
+        if not module:
+            return Response(
+                {'error': 'module query param required'},
+                status=status.HTTP_400_BAD_REQUEST,
+            )
+        active = _busy_run_for_module(module)
+        if active is None:
+            return Response({'active': None})
+        return Response({'active': InferenceRunDetailSerializer(active).data})
+
+
 class InferenceRunStartView(APIView):
     """POST /api/analysis/runs/<id>/start/
 
     Body: {start_at_image?, config?}. Spawns the worker for a draft run.
     Both fields are merged into the run's frozen config. Refuses to start
-    a run that isn't ``pending`` or that has no images attached.
+    a run that isn't ``pending``, that has no images attached, or when
+    another run is already RUNNING in the same module (one GPU, one
+    pipeline at a time).
     """
 
     def post(self, request: Request, pk: int) -> Response:
@@ -466,6 +505,19 @@ class InferenceRunStartView(APIView):
                         f'Cannot start a run in status={run.status}; only '
                         f'pending runs can be started.'
                     )
+                },
+                status=status.HTTP_409_CONFLICT,
+            )
+        busy = _busy_run_for_module(run.module, exclude_pk=run.pk)
+        if busy is not None:
+            return Response(
+                {
+                    'error': (
+                        f'Another {run.module} run is already running '
+                        f'(#{busy.pk} "{busy.name or ""}"). Pause or wait for it '
+                        f'to finish before starting this one.'
+                    ),
+                    'blocking_run_id': busy.pk,
                 },
                 status=status.HTTP_409_CONFLICT,
             )
@@ -556,6 +608,19 @@ class InferenceRunResumeView(APIView):
                 },
                 status=status.HTTP_409_CONFLICT,
             )
+        busy = _busy_run_for_module(run.module, exclude_pk=run.pk)
+        if busy is not None:
+            return Response(
+                {
+                    'error': (
+                        f'Another {run.module} run is already running '
+                        f'(#{busy.pk} "{busy.name or ""}"). Pause or wait for it '
+                        f'to finish before resuming this one.'
+                    ),
+                    'blocking_run_id': busy.pk,
+                },
+                status=status.HTTP_409_CONFLICT,
+            )
         if 'start_at_image' in request.data:
             try:
                 merged = dict(run.config or {})
@@ -570,6 +635,70 @@ class InferenceRunResumeView(APIView):
         run.save(update_fields=['status', 'config'])
         transaction.on_commit(lambda: spawn_inference_pipeline(run))
         return Response(InferenceRunDetailSerializer(run).data)
+
+
+class InferenceRunAbortView(APIView):
+    """POST /api/analysis/runs/<id>/abort/
+
+    Tear down a draft run that the user walked away from before clicking
+    Start. Deletes the run, the paired Upload (cascading the uploaded
+    ImageAssets), and any on-disk files written under
+    ``media/runs/<module>/<run_id>/``.
+
+    Only valid on a run that hasn't begun: status == pending and
+    started_at is null. Refuses anything else so an in-flight worker
+    can't be rug-pulled. CSRF-exempt by being a token-authed POST; safe
+    to send via ``navigator.sendBeacon`` from a beforeunload handler.
+    """
+
+    def post(self, request: Request, pk: int) -> Response:
+        from apps.datasets.models import Upload
+
+        try:
+            run = InferenceRun.objects.select_related('upload').get(pk=pk)
+        except InferenceRun.DoesNotExist:
+            # Already gone — treat as success so a duplicate beacon doesn't
+            # surface as an error in the UI.
+            return Response(status=status.HTTP_204_NO_CONTENT)
+
+        if run.status != JobStatus.PENDING or run.started_at is not None:
+            return Response(
+                {
+                    'error': (
+                        f'Cannot abort: run is {run.status} (started_at='
+                        f'{run.started_at}). Use cancel/pause for in-flight runs.'
+                    )
+                },
+                status=status.HTTP_409_CONFLICT,
+            )
+
+        upload: Upload | None = run.upload
+        run_dir = Path(settings.MEDIA_ROOT) / 'runs' / run.module / str(run.pk)
+
+        # PROTECT on InferenceRun.upload means we delete the run first, then
+        # the upload (which cascades ImageAsset + their files via the
+        # FileField storage backend).
+        run.delete()
+        if upload is not None:
+            for img in upload.images.all():
+                if img.file:
+                    try:
+                        img.file.delete(save=False)
+                    except Exception:
+                        logger.exception(
+                            f'Failed to remove image file for ImageAsset {img.pk}'
+                        )
+            upload.delete()
+
+        if run_dir.exists():
+            import shutil
+
+            try:
+                shutil.rmtree(run_dir)
+            except OSError:
+                logger.exception(f'Failed to remove {run_dir}; continuing')
+
+        return Response(status=status.HTTP_204_NO_CONTENT)
 
 
 class InferenceRunListCreateView(generics.ListCreateAPIView):
