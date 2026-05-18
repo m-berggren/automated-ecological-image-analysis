@@ -1,15 +1,23 @@
 import csv
+import io
+import logging
+import tempfile
+import zipfile
 from collections import Counter
 from pathlib import Path
 
 from django.db import transaction
 from django.db.models import QuerySet
-from django.http import StreamingHttpResponse
+from django.http import FileResponse, StreamingHttpResponse
 from django.shortcuts import get_object_or_404
+from PIL import Image, ImageDraw, ImageFont
 from rest_framework import generics, serializers, status
+from rest_framework.pagination import PageNumberPagination
 from rest_framework.request import Request
 from rest_framework.response import Response
 from rest_framework.views import APIView
+
+logger = logging.getLogger(__name__)
 
 from apps.analysis.models import (
     Detection,
@@ -118,18 +126,22 @@ class PollinatorRunExportCSVView(APIView):
             module=Module.POLLINATORS,
         )
 
+        mode = request.query_params.get('mode') or 'per_image'
+
+        if mode == 'per_detection':
+            return self._export_per_detection(run)
+
+        return self._export_per_image(run)
+
+    def _export_per_image(self, run):
         # Pre-aggregate validated detections by image_id so we can emit one
         # streamed row per image without a per-image DB hit.
         counts_by_image: dict[int, dict[str, int]] = {}
-        validated = (
-            Detection.objects
-            .filter(
-                inference_run=run,
-                status=DetectionStatus.ACCEPTED,
-                excluded_from_export=False,
-            )
-            .values_list('image_id', 'predicted_class', 'reviewer_label')
-        )
+        validated = Detection.objects.filter(
+            inference_run=run,
+            status=DetectionStatus.ACCEPTED,
+            excluded_from_export=False,
+        ).values_list('image_id', 'predicted_class', 'reviewer_label')
         for image_id, predicted, reviewer in validated:
             effective = (reviewer or predicted or '').lower()
             bucket = _CLASS_TO_LAB.get(effective, effective)
@@ -155,7 +167,9 @@ class PollinatorRunExportCSVView(APIView):
             yield writer.writerow(_CSV_FIELDS)
             for img in images:
                 row = _build_image_row(
-                    img, counts_by_image.get(img.id, {}), session,
+                    img,
+                    counts_by_image.get(img.id, {}),
+                    session,
                 )
                 yield writer.writerow([row[k] for k in _CSV_FIELDS])
 
@@ -164,17 +178,317 @@ class PollinatorRunExportCSVView(APIView):
         response['Content-Disposition'] = f'attachment; filename="{filename}"'
         return response
 
+    def _export_per_detection(self, run):
+        detections = (
+            Detection.objects.filter(
+                inference_run=run,
+                status=DetectionStatus.ACCEPTED,
+                excluded_from_export=False,
+            )
+            .select_related('image', 'pollinator_detection')
+            .order_by('image__captured_at', 'image_id', 'id')
+            .iterator(chunk_size=500)
+        )
+
+        fields = [
+            # Image Specific
+            'session',
+            'image_name',
+            'camera_name',
+            'datetime',
+            'weather',
+            # Detection specific
+            'detection_id',
+            'yolo_confidence',
+            'insectnet_confidence',
+            'yolo_class',
+            'insectnet_class',
+            'final_class',
+        ]
+
+        session = run.name or f'Run #{run.pk}'
+        writer = csv.writer(_Echo())
+
+        def rows():
+            yield writer.writerow(fields)
+
+            for d in detections:
+                pd = getattr(d, 'pollinator_detection', None)
+                img = d.image
+
+                final_class = (
+                    d.reviewer_label
+                    or d.predicted_class
+                    or (pd.yolo_class if pd else None)
+                    or (pd.insectnet_class if pd else None)
+                )
+
+                yield writer.writerow(
+                    [
+                        # image
+                        session,
+                        Path(img.file.name).name if img and img.file else '',
+                        _camera_name(img) if img else '',
+                        img.captured_at.isoformat() if img and img.captured_at else '',
+                        img.weather or '' if img else '',
+                        # detection
+                        d.id,
+                        pd.yolo_confidence if pd else None,
+                        pd.insectnet_confidence if pd else None,
+                        pd.yolo_class if pd else None,
+                        pd.insectnet_class if pd else None,
+                        final_class,
+                    ]
+                )
+
+        filename = f'run-{run.pk}-detections.csv'
+        response = StreamingHttpResponse(rows(), content_type='text/csv')
+        response['Content-Disposition'] = f'attachment; filename="{filename}"'
+        return response
+
+
+# Class set used for folder routing in the per-class crop ZIP. Membership
+# check only; the bbox overlay color is always red so the export matches
+# the review page's red outline.
+_CLASS_SET = {'fly', 'bumblebee', 'butterfly', 'other'}
+_BBOX_RED = (239, 68, 68)
+_ROI_COLOR = (59, 130, 246)
+
+
+def _draw_dashed_rect(
+    draw: ImageDraw.ImageDraw,
+    box: tuple[int, int, int, int],
+    color: tuple[int, int, int],
+    width: int,
+    dash: int,
+    gap: int,
+) -> None:
+    x1, y1, x2, y2 = box
+    step = max(1, dash + gap)
+
+    def segs(start: int, end: int):
+        p = start
+        while p < end:
+            yield p, min(p + dash, end)
+            p += step
+
+    for a, b in segs(x1, x2):
+        draw.line([(a, y1), (b, y1)], fill=color, width=width)
+        draw.line([(a, y2), (b, y2)], fill=color, width=width)
+    for a, b in segs(y1, y2):
+        draw.line([(x1, a), (x1, b)], fill=color, width=width)
+        draw.line([(x2, a), (x2, b)], fill=color, width=width)
+
+
+def _effective_class(d: Detection) -> str:
+    return (d.reviewer_label or d.predicted_class or '').lower()
+
+
+def _safe_filename(name: str) -> str:
+    """Strip path separators / control chars from a filename so the ZIP
+    arcname can't escape its target folder. Falls back to the name's
+    basename when present."""
+    base = Path(name).name or 'file'
+    return ''.join(c for c in base if c.isprintable() and c not in ('/', '\\'))
+
+
+class PollinatorRunExportCropsView(APIView):
+    """GET /api/pollinator/runs/<run_id>/export-crops.zip
+
+    ZIP of accepted, not-excluded crop images for the run. Folder per
+    class: fly/, bumblebee/, butterfly/, other/. Detections without a
+    persisted crop file are skipped silently (the run completed before
+    crops were written, or PIL failed to render that one).
+    """
+
+    def get(self, request: Request, run_id: int) -> FileResponse:
+        run = get_object_or_404(
+            InferenceRun.objects.all(),
+            pk=run_id,
+            module=Module.POLLINATORS,
+        )
+        qs = Detection.objects.filter(
+            inference_run=run,
+            status=DetectionStatus.ACCEPTED,
+            excluded_from_export=False,
+        ).select_related('image')
+
+        # SpooledTemporaryFile keeps small ZIPs in memory and spills to disk
+        # past the threshold. STORED (no recompression) since JPEGs don't
+        # benefit from DEFLATE.
+        buf = tempfile.SpooledTemporaryFile(max_size=64 * 1024 * 1024)
+        with zipfile.ZipFile(buf, 'w', zipfile.ZIP_STORED) as zf:
+            for d in qs.iterator(chunk_size=200):
+                if not d.crop:
+                    continue
+                cls = _effective_class(d) or 'other'
+                folder = cls if cls in _CLASS_SET else 'other'
+                arcname = f'{folder}/det_{d.pk}.jpg'
+                try:
+                    with d.crop.open('rb') as fp:
+                        zf.writestr(arcname, fp.read())
+                except Exception:
+                    logger.exception(
+                        f'Skipped crop for detection {d.pk} in run {run.pk} '
+                        f'export-crops.zip'
+                    )
+        buf.seek(0)
+        response = FileResponse(buf, content_type='application/zip')
+        response['Content-Disposition'] = (
+            f'attachment; filename="run-{run.pk}-crops.zip"'
+        )
+        return response
+
+
+class PollinatorRunExportAnnotatedView(APIView):
+    """GET /api/pollinator/runs/<run_id>/export-annotated.zip
+
+    ZIP of source images for the run with detection bboxes drawn on top.
+    Bboxes are red to match the red outline used in the review page so the
+    export and the review screen visually agree. Only kept detections are
+    drawn: excluded-from-export, rejected, unsure, and unreviewed
+    detections are skipped entirely so the exported image reflects exactly
+    what would land in the dataset.
+    """
+
+    def get(self, request: Request, run_id: int) -> FileResponse:
+        run = get_object_or_404(
+            InferenceRun.objects.all(),
+            pk=run_id,
+            module=Module.POLLINATORS,
+        )
+
+        # Group accepted detections (kept and excluded) by image so we open
+        # each source image once.
+        per_image: dict[int, list[Detection]] = {}
+        for d in (
+            Detection.objects.filter(
+                inference_run=run,
+                status=DetectionStatus.ACCEPTED,
+            )
+            .select_related('image')
+            .iterator(chunk_size=500)
+        ):
+            per_image.setdefault(d.image_id, []).append(d)
+
+        try:
+            font = ImageFont.truetype(
+                '/usr/share/fonts/liberation/LiberationSans-Bold.ttf',
+                size=32,
+            )
+        except OSError:
+            try:
+                font = ImageFont.load_default()
+            except Exception:
+                font = None
+
+        buf = tempfile.SpooledTemporaryFile(max_size=64 * 1024 * 1024)
+        with zipfile.ZipFile(buf, 'w', zipfile.ZIP_STORED) as zf:
+            seen_arcnames: set[str] = set()
+            for image_id, dets in per_image.items():
+                first = dets[0]
+                src = first.image
+                if not (src and src.file):
+                    continue
+                try:
+                    with src.file.open('rb') as fp:
+                        img = Image.open(fp)
+                        img.load()
+                    img = img.convert('RGB')
+                except Exception:
+                    logger.exception(
+                        f'Skipped image {image_id} in run {run.pk} export-annotated.zip'
+                    )
+                    continue
+
+                draw = ImageDraw.Draw(img)
+                stroke = max(2, int(max(img.width, img.height) * 0.003))
+                for d in dets:
+                    if d.excluded_from_export:
+                        continue
+                    bb = d.bbox or {}
+                    try:
+                        x1, y1 = int(bb['x1']), int(bb['y1'])
+                        x2, y2 = int(bb['x2']), int(bb['y2'])
+                    except (KeyError, TypeError, ValueError):
+                        continue
+                    draw.rectangle((x1, y1, x2, y2), outline=_BBOX_RED, width=stroke)
+                    cls = _effective_class(d)
+                    if font is not None and cls:
+                        tx, ty = x1 + 2, max(0, y1 - 36)
+                        draw.text((tx, ty), cls, fill=_BBOX_RED, font=font)
+
+                roi = ((run.config or {}).get('preprocessing') or {}).get('roi_bbox')
+                if isinstance(roi, (list, tuple)) and len(roi) == 4:
+                    try:
+                        rx, ry, rw, rh = (int(v) for v in roi)
+                    except (TypeError, ValueError):
+                        rx = ry = rw = rh = 0
+                    if rw > 0 and rh > 0:
+                        roi_stroke = max(2, int(max(img.width, img.height) * 0.0022))
+                        dash = roi_stroke * 4
+                        gap = max(1, int(roi_stroke * 2.5))
+                        _draw_dashed_rect(
+                            draw,
+                            (rx, ry, rx + rw, ry + rh),
+                            _ROI_COLOR,
+                            roi_stroke,
+                            dash,
+                            gap,
+                        )
+                        if font is not None:
+                            draw.text(
+                                (rx + 6, ry + 6), 'ROI', fill=_ROI_COLOR, font=font
+                            )
+
+                arcname = _safe_filename(src.file.name)
+                if not arcname:
+                    arcname = f'image_{image_id}.jpg'
+                base_arcname = arcname
+                # Disambiguate collisions (same basename, different uploads).
+                suffix = 1
+                while arcname in seen_arcnames:
+                    stem = Path(base_arcname).stem
+                    ext = Path(base_arcname).suffix or '.jpg'
+                    arcname = f'{stem}_{suffix}{ext}'
+                    suffix += 1
+                seen_arcnames.add(arcname)
+
+                out = io.BytesIO()
+                img.save(out, 'JPEG', quality=88)
+                zf.writestr(arcname, out.getvalue())
+
+        buf.seek(0)
+        response = FileResponse(buf, content_type='application/zip')
+        response['Content-Disposition'] = (
+            f'attachment; filename="run-{run.pk}-annotated.zip"'
+        )
+        return response
+
+
+class _DetectionPagination(PageNumberPagination):
+    """1000 detections per page by default, capped at 5000. Big enough that
+    the Review/Export pages can paint the first batch fast, small enough
+    that a 12k-image upload doesn't try to ship a single multi-MB JSON.
+    The frontend keeps requesting `next` until exhausted."""
+
+    page_size = 1000
+    page_size_query_param = 'page_size'
+    max_page_size = 5000
+
 
 class PollinatorDetectionListView(generics.ListAPIView):
-    """GET /api/pollinator/runs/<run_id>/detections/
+    """GET /api/pollinator/runs/<run_id>/detections/?page=&page_size=
 
-    Lists pollinator detections for a run. Filters by module so a non-
-    pollinator run id returns an empty list rather than raising on the
-    missing pollinator_detection relation in the serializer.
+    Lists pollinator detections for a run. Paginated (1000 per page by
+    default) so the review UI can stream batches instead of waiting on a
+    single huge response. Filters by module so a non-pollinator run id
+    returns an empty list rather than raising on the missing
+    pollinator_detection relation in the serializer.
     """
 
     serializer_class = PollinatorDetectionSerializer
-    pagination_class = None
+    pagination_class = _DetectionPagination
 
     def get_queryset(self) -> QuerySet[Detection]:
         return _POLLINATOR_DETECTION_QS.filter(

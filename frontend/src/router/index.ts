@@ -14,8 +14,6 @@ import PollinatorsReview from '@/pages/PollinatorsReview.vue'
 import PollinatorsExport from '@/pages/PollinatorsExport.vue'
 import PollinatorsModels from '@/pages/PollinatorsModels.vue'
 import PollinatorsTraining from '@/pages/PollinatorsTraining.vue'
-import Pollen from '@/pages/Pollen.vue'
-import Flowers from '@/pages/Flowers.vue'
 import NotFound from '@/pages/NotFound.vue'
 import Signup from '@/pages/Signup.vue'
 import Signin from '@/pages/Signin.vue'
@@ -47,8 +45,6 @@ const router = createRouter({
         { path: 'pollinators/runs/:id/export', component: PollinatorsExport },
         { path: 'pollinators/training', component: PollinatorsTraining },
         { path: 'pollinators/models', component: PollinatorsModels },
-        { path: 'pollen', component: Pollen },
-        { path: 'flowers', component: Flowers },
       ],
     },
     { path: '/:pathMatch(.*)*', component: NotFound },

@@ -4,7 +4,7 @@ from apps.analysis.models import Detection, ModelVersion, TrainingJob
 from apps.analysis.serializers import BaseDetectionReadSerializer
 from apps.datasets.models import Module
 
-from .training import PER_TRACK_DEFAULTS, POLLINATOR_CLASSES
+from .training import PER_TRACK_DEFAULTS, POLLINATOR_CLASSES, canonical_class
 
 
 class PollinatorDetectionSerializer(BaseDetectionReadSerializer):
@@ -20,6 +20,9 @@ class PollinatorDetectionSerializer(BaseDetectionReadSerializer):
     # as null so the frontend's `class != null` checks actually mean
     # "the branch fired" — otherwise hasDisagreement reads '' !== 'fly' as a
     # class disagreement when really only YOLO ran.
+    # predicted_class also runs through canonical_class so any legacy row
+    # stored before ingestion normalization still emits a canonical label.
+    predicted_class = serializers.SerializerMethodField()
     yolo_class = serializers.SerializerMethodField()
     yolo_confidence = serializers.FloatField(
         source='pollinator_detection.yolo_confidence',
@@ -64,13 +67,23 @@ class PollinatorDetectionSerializer(BaseDetectionReadSerializer):
             'merge_iou',
         )
 
+    def get_predicted_class(self, obj: Detection) -> str:
+        return canonical_class(obj.predicted_class)
+
+    # Both class getters run through canonical_class as a safety net for
+    # any legacy rows stored before ingestion normalization landed. New
+    # rows are already canonical (see apps/pollinator/services.py).
     def get_yolo_class(self, obj: Detection) -> str | None:
         pd = getattr(obj, 'pollinator_detection', None)
-        return (pd.yolo_class or None) if pd else None
+        if not pd:
+            return None
+        return canonical_class(pd.yolo_class) or None
 
     def get_insectnet_class(self, obj: Detection) -> str | None:
         pd = getattr(obj, 'pollinator_detection', None)
-        return (pd.insectnet_class or None) if pd else None
+        if not pd:
+            return None
+        return canonical_class(pd.insectnet_class) or None
 
 
 # ──────────────────────────────────────────────────────────────────────────

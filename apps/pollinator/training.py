@@ -75,6 +75,31 @@ PER_TRACK_DEFAULTS: dict = {
 
 POLLINATOR_CLASSES = ['bumblebee', 'fly', 'butterfly', 'other']
 
+# Aliases for class labels emitted by ML models trained on a different
+# vocabulary. Ingestion (services.py) and the read serializers route
+# every class label through canonical_class() so the rest of the system
+# only sees the canonical names in POLLINATOR_CLASSES. Add entries here
+# when wiring in a model whose label space drifts.
+POLLINATOR_CLASS_ALIASES: dict[str, str] = {
+    # The group classifier was trained on a merged butterfly+moth class.
+    'butterfly_moth': 'butterfly',
+}
+
+
+def canonical_class(label: str | None) -> str:
+    """Normalize a raw model label to a canonical pollinator class.
+
+    Returns '' for empty/None input so callers can do ``canonical or None``
+    without an extra guard. Unknown labels pass through unchanged (they
+    won't match POLLINATOR_CLASSES downstream and will be filtered out
+    of the training pool, which is the right behavior — surfacing them
+    rather than silently coercing).
+    """
+    if not label:
+        return ''
+    lower = label.lower()
+    return POLLINATOR_CLASS_ALIASES.get(lower, lower)
+
 
 # Tile training defaults. Source images are sliced into overlapping tiles
 # before YOLO training so small pollinators stay at native pixel scale.

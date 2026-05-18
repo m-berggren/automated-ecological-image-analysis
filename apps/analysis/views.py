@@ -16,6 +16,7 @@ from rest_framework.views import APIView
 from apps.datasets.models import UploadStatus
 from apps.pollinator.services import spawn_inference_pipeline
 
+from .engulfment import apply_engulfment_exclusions
 from .models import (
     Detection,
     InferenceRun,
@@ -203,8 +204,12 @@ class ModelVersionListCreateView(generics.ListAPIView):
     pagination_class = None
     parser_classes = [MultiPartParser, FormParser, JSONParser]
 
+    # Flip back to True to restore staff-only model upload (frontend has the
+    # mirror flag REQUIRE_STAFF_FOR_UPLOAD in PollinatorsModels.vue).
+    REQUIRE_STAFF_FOR_UPLOAD = False
+
     def get_permissions(self):
-        if self.request.method == 'POST':
+        if self.request.method == 'POST' and self.REQUIRE_STAFF_FOR_UPLOAD:
             return [IsAdminUser()]
         return super().get_permissions()
 
@@ -518,8 +523,28 @@ class DetectionExclusionView(APIView):
                 status=status.HTTP_400_BAD_REQUEST,
             )
         d.excluded_from_export = excluded
-        d.save(update_fields=['excluded_from_export'])
+        d.export_exclusion_user_set = True
+        d.save(update_fields=['excluded_from_export', 'export_exclusion_user_set'])
         return Response({'id': d.pk, 'excluded_from_export': excluded})
+
+
+class InferenceRunRecomputeExclusionsView(APIView):
+    """POST /api/analysis/runs/<id>/recompute-exclusions/
+
+    Re-runs engulfment auto-exclude over the run's detections. Safe to call
+    on completed runs; add-only (a manually-cleared exclusion stays cleared
+    only until this is invoked, then any qualifying engulfing bbox is
+    re-marked). Returns the number of rows newly excluded.
+    """
+
+    def post(self, request: Request, pk: int) -> Response:
+        if not InferenceRun.objects.filter(pk=pk).exists():
+            return Response(
+                {'error': 'Run not found'},
+                status=status.HTTP_404_NOT_FOUND,
+            )
+        excluded = apply_engulfment_exclusions(pk)
+        return Response({'excluded': excluded})
 
 
 class DetectionBulkView(APIView):
@@ -637,6 +662,99 @@ class TrainingJobCancelView(APIView):
                 status=status.HTTP_404_NOT_FOUND,
             )
         return _cancel_job_row(job, TrainingJobDetailSerializer)
+
+
+class ModelVersionDetailView(generics.RetrieveDestroyAPIView):
+    """GET    /api/analysis/models/<pk>/   read one model version.
+    DELETE /api/analysis/models/<pk>/   remove the version + its weights.
+
+    Refuses to delete a model that any InferenceRun depends on (FK is
+    PROTECTed) or that is referenced from a pollinator run's config JSON
+    (no FK, but the run still expects those weights to exist). Removes
+    the on-disk weights file and cascades ModelArtifact rows + their
+    files via Django's storage backend.
+    """
+
+    queryset = ModelVersion.objects.all()
+    serializer_class = ModelVersionSerializer
+    lookup_field = 'pk'
+
+    # Mirrors the upload gate in ModelVersionListCreateView. Set both to
+    # True to restore staff-only model management.
+    REQUIRE_STAFF_FOR_DELETE = False
+
+    def get_permissions(self):
+        if self.request.method == 'DELETE' and self.REQUIRE_STAFF_FOR_DELETE:
+            return [IsAdminUser()]
+        return super().get_permissions()
+
+    def perform_destroy(self, instance: ModelVersion) -> None:
+        from apps.datasets.models import Module
+
+        # Direct FK reference (seeds runs use this).
+        protected_runs = list(
+            InferenceRun.objects.filter(model_version=instance).values_list(
+                'pk',
+                flat=True,
+            )[:5]
+        )
+        # Pollinator runs stash model ids inside config JSON instead.
+        pollinator_run_ids = []
+        if instance.module == Module.POLLINATORS:
+            kind_to_key = {
+                'detector': 'yolo',
+                'binary_classifier': 'binary_classifier',
+                'group_classifier': 'group_classifier',
+            }
+            key = kind_to_key.get(instance.kind)
+            if key is not None:
+                for run_id, config in InferenceRun.objects.filter(
+                    module=Module.POLLINATORS,
+                ).values_list('pk', 'config'):
+                    if not isinstance(config, dict):
+                        continue
+                    section = config.get(key)
+                    if (
+                        isinstance(section, dict)
+                        and section.get('model_version_id') == instance.pk
+                    ):
+                        pollinator_run_ids.append(run_id)
+                        if len(pollinator_run_ids) >= 5:
+                            break
+        blocking = sorted(set(protected_runs) | set(pollinator_run_ids))
+        if blocking:
+            raise serializers.ValidationError(
+                {
+                    'error': (
+                        f'Model is used by {len(blocking)} run(s) '
+                        f'(e.g. {blocking[:5]}). Delete those runs first.'
+                    ),
+                },
+            )
+
+        weights_path = (
+            Path(instance.model_file_path) if instance.model_file_path else None
+        )
+
+        # Delete artifact files explicitly; FK cascade removes the rows but
+        # not the underlying storage objects.
+        for artifact in instance.artifacts.all():
+            if artifact.file:
+                try:
+                    artifact.file.delete(save=False)
+                except Exception:
+                    logger.exception(
+                        f'Failed to delete artifact file for ModelArtifact '
+                        f'{artifact.pk}; continuing with DB delete'
+                    )
+
+        super().perform_destroy(instance)
+
+        if weights_path and weights_path.exists():
+            try:
+                weights_path.unlink()
+            except OSError:
+                logger.exception(f'Failed to remove weights file at {weights_path}')
 
 
 class ModelVersionSetActiveView(APIView):

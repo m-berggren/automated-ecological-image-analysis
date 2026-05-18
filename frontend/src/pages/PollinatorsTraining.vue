@@ -133,60 +133,30 @@
             </div>
           </div>
 
-          <!-- Add data drop zone. Visual states:
-               - empty: dashed border, neutral
-               - drag-over: primary tint
-               - files present (and not dragging): green border + tinted bg -->
-          <div
-            class="mt-3 rounded-lg border-2 border-dashed p-5 text-center cursor-pointer transition-colors hover:bg-muted/20"
-            :class="dropZoneClass"
-            @dragover.prevent="dragOver = true"
-            @dragleave.prevent="dragOver = false"
-            @drop.prevent="onDrop"
-            @click="triggerFilePicker"
+          <!-- Add data drop zone. Tabs swap between file/folder modes;
+               the box highlights green (theme primary) when files exist. -->
+          <UploadDropZone
+            class="mt-3"
+            v-model:active-tab="trainingUploadTab"
+            :tabs="trainingUploadTabs"
+            :has-files="uploadedFiles.length > 0"
+            @select="onTrainingUploadSelect"
           >
-            <div class="text-sm font-medium">
-              <template v-if="uploadedFiles.length">
-                {{ uploadedFiles.length }} file{{ uploadedFiles.length === 1 ? '' : 's' }} added —
-                drop more or add from
-                <button class="text-primary hover:underline" @click.stop="triggerFilePicker">
-                  files
-                </button>
-                /
-                <button class="text-primary hover:underline" @click.stop="triggerFolderPicker">
-                  folder
-                </button>
-              </template>
-              <template v-else>
-                Drop a folder or images here, or browse
-                <button class="text-primary hover:underline" @click.stop="triggerFilePicker">
-                  files
-                </button>
-                /
-                <button class="text-primary hover:underline" @click.stop="triggerFolderPicker">
-                  folder
-                </button>
-              </template>
-            </div>
-            <div class="text-xs text-muted-foreground mt-1">
-              Adds to the training pool. Accepts .jpg, .png, .zip, or a folder of images.
-            </div>
-            <input
-              ref="fileInputRef"
-              type="file"
-              multiple
-              accept=".jpg,.jpeg,.png,.zip"
-              class="hidden"
-              @change="onFilePicked"
-            />
-            <input
-              ref="folderInputRef"
-              type="file"
-              multiple
-              class="hidden"
-              @change="onFilePicked"
-            />
-          </div>
+            <template #body>
+              <UploadCloud class="w-8 h-8 mx-auto text-muted-foreground" />
+              <div class="text-sm font-medium mt-2">
+                <template v-if="uploadedFiles.length">
+                  {{ uploadedFiles.length }} file{{ uploadedFiles.length === 1 ? '' : 's' }} added — drop more to extend
+                </template>
+                <template v-else>
+                  Drop a folder or images here, or click to browse
+                </template>
+              </div>
+              <div class="text-xs text-muted-foreground mt-1">
+                Adds to the training pool. Accepts .jpg, .png, .zip, or a folder of images.
+              </div>
+            </template>
+          </UploadDropZone>
 
           <!-- View / clear link row. Shown only when files exist. Clicking
                "View files" opens a modal so the form layout doesn't shift. -->
@@ -648,6 +618,8 @@ import { useRoute } from 'vue-router'
 import PageHeader from '@/components/PageHeader.vue'
 import InfoPopover from '@/components/InfoPopover.vue'
 import TrainingCharts from '@/components/TrainingCharts.vue'
+import UploadDropZone, { type UploadTab } from '@/components/UploadDropZone.vue'
+import { UploadCloud } from 'lucide-vue-next'
 import { api } from '@/api'
 import { tracksFromVersions, type BackendModelVersion } from '@/lib/model-tracks'
 
@@ -735,21 +707,32 @@ const expandedHistory = ref<Set<number>>(new Set())
 const uploadedFiles = ref<Array<{ name: string; size: number }>>([])
 const filesModalOpen = ref(false)
 
-const dropZoneClass = computed(() => {
-  if (dragOver.value) return 'border-primary bg-primary/5'
-  if (uploadedFiles.value.length) return 'border-green-500 bg-green-50'
-  return 'border-border'
-})
-
 function clearUploads() {
   uploadedFiles.value = []
   filesModalOpen.value = false
 }
-const fileInputRef = ref<HTMLInputElement | null>(null)
-const folderInputRef = ref<HTMLInputElement | null>(null)
+
+const trainingUploadTab = ref('files')
+const trainingUploadTabs: UploadTab[] = [
+  {
+    key: 'files',
+    label: 'Files',
+    mode: 'files',
+    accept: '.jpg,.jpeg,.png,.zip',
+  },
+  {
+    key: 'folder',
+    label: 'Folder',
+    mode: 'folder',
+  },
+]
+
+function onTrainingUploadSelect(files: File[]) {
+  for (const f of files) addFile(f)
+}
+
 const reviewDrawerOpen = ref(false)
 const drawerFilter = ref<string>('all')
-const dragOver = ref(false)
 
 const settings = reactive({
   train_split: 80,
@@ -786,11 +769,6 @@ const previewMode = computed<string | null>(() => {
 })
 
 onMounted(async () => {
-  // webkitdirectory enables folder selection in the second hidden input.
-  // Set it via DOM rather than in the template so Vue's prop-type checker
-  // doesn't complain about the non-standard attribute.
-  folderInputRef.value?.setAttribute('webkitdirectory', '')
-
   if (previewMode.value) {
     const data = await loadPreview(previewMode.value)
     if (data) {
@@ -1266,14 +1244,6 @@ const CLASS_GLYPHS: Record<string, string> = {
   background: '·',
 }
 
-function triggerFilePicker() {
-  fileInputRef.value?.click()
-}
-
-function triggerFolderPicker() {
-  folderInputRef.value?.click()
-}
-
 function addFile(f: File) {
   // Filter out non-image entries when a folder is dropped — folders often
   // contain stray .DS_Store, JSON, etc. Accept the extensions in the
@@ -1281,48 +1251,6 @@ function addFile(f: File) {
   const name = f.name.toLowerCase()
   if (!/\.(jpe?g|png|zip)$/.test(name)) return
   uploadedFiles.value.push({ name: f.name, size: f.size })
-}
-
-function onFilePicked(e: Event) {
-  const target = e.target as HTMLInputElement
-  if (!target.files) return
-  for (const f of Array.from(target.files)) addFile(f)
-  target.value = ''
-}
-
-// Recursively walk a FileSystemEntry tree dropped from the OS, collecting
-// every file. Browsers expose this via the non-standard `webkitGetAsEntry`,
-// supported in Chromium and Firefox.
-function traverseEntry(entry: any) {
-  if (entry.isFile) {
-    entry.file((f: File) => addFile(f))
-  } else if (entry.isDirectory) {
-    const reader = entry.createReader()
-    const readBatch = () => {
-      reader.readEntries((entries: any[]) => {
-        if (!entries.length) return
-        for (const sub of entries) traverseEntry(sub)
-        readBatch() // readEntries can return in batches; keep pulling
-      })
-    }
-    readBatch()
-  }
-}
-
-function onDrop(e: DragEvent) {
-  dragOver.value = false
-  const items = e.dataTransfer?.items
-  if (items && items.length && typeof items[0].webkitGetAsEntry === 'function') {
-    for (const item of Array.from(items)) {
-      const entry = item.webkitGetAsEntry?.()
-      if (entry) traverseEntry(entry)
-    }
-    return
-  }
-  // Fallback for browsers without webkitGetAsEntry: top-level files only.
-  if (e.dataTransfer?.files) {
-    for (const f of Array.from(e.dataTransfer.files)) addFile(f)
-  }
 }
 
 function removeUpload(idx: number) {
