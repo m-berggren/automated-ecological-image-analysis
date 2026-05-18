@@ -694,6 +694,8 @@ interface ReviewBundle {
     status: string
     detection_count: number
     config?: {
+      yolo?: { confidence?: number }
+      binary_classifier?: { confidence?: number }
       preprocessing?: {
         roi_bbox?: [number, number, number, number] | null
       }
@@ -725,14 +727,15 @@ const selectedId = ref<number | null>(null)
 const statusFilter = ref<StatusFilter>('pending')
 type ClassFilter = ClassName | 'background' | 'all'
 const classFilter = ref<ClassFilter>('all')
-// Per-branch confidence sliders. Defaults mirror the upload-time
-// thresholds from PollinatorsUpload.vue so the review view starts in
-// the same regime the run was created with — anything weaker than what
-// the pipeline accepted is hidden until the reviewer lowers the bar.
-// Detections with no score in a branch pass that branch's filter so
-// preprocessing-only crops aren't dropped by the YOLO slider, etc.
-const yoloMinConf = ref(0.6)
-const insectnetMinConf = ref(0.5)
+// Per-branch confidence sliders. Seeded from the run's own config in
+// loadFromApi so the review view starts in the same regime the run was
+// actually created with — whatever the reviewer set on the upload page
+// is what they see here, not a hard-coded default. The literals here
+// are just a placeholder before the run loads. Detections with no score
+// in a branch pass that branch's filter so preprocessing-only crops
+// aren't dropped by the YOLO slider, etc.
+const yoloMinConf = ref(0)
+const insectnetMinConf = ref(0)
 
 function passesSliders(d: Detection): boolean {
   const yoloOk = d.yolo_confidence == null || d.yolo_confidence >= yoloMinConf.value
@@ -788,6 +791,12 @@ async function loadFromApi() {
       return
     }
     run.value = await runRes.json()
+    // Seed the confidence sliders from the run's own config so the
+    // review view starts at the same thresholds the upload page picked.
+    // Falls back to 0 ("no filter") if the run was created without an
+    // explicit threshold for that branch.
+    yoloMinConf.value = run.value?.config?.yolo?.confidence ?? 0
+    insectnetMinConf.value = run.value?.config?.binary_classifier?.confidence ?? 0
     // Stream pages: paint the first batch immediately so the reviewer
     // can start clicking, then keep appending until the run is fully
     // loaded. detections.value is reactive; groupedDetections recomputes
