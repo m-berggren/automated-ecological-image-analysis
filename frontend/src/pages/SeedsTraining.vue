@@ -295,11 +295,11 @@
           </span>
 
           <button
-            :disabled="trainingMode === 'scratch' ? !selectedSeed : !selectedVersionId"
+            :disabled="(trainingMode === 'scratch' ? !selectedSeed : !selectedVersionId) || hasActiveJob"
             class="px-4 py-2 rounded-md text-sm font-medium bg-primary text-primary-foreground disabled:opacity-50"
             @click="startTraining"
           >
-            Start training
+            {{ hasActiveJob ? 'A job is already running' : 'Start training' }}
           </button>
         </div>
       </section>
@@ -456,6 +456,12 @@ const paginatedJobRows = computed(() =>
   jobRows.value.slice((currentPage.value - 1) * pageSize, currentPage.value * pageSize)
 )
 
+const hasActiveJob = computed(() =>
+  tracks.value.some(
+    (t) => t.active_job && (t.active_job.status === 'running' || t.active_job.status === 'pending')
+  )
+)
+
 const seedTypes = ref([
   { id: 'PEH', species: 'Pisum sativum', isCustom: false },
   { id: 'PHYCA', species: 'Phacelia tanacetifolia', isCustom: false },
@@ -534,7 +540,7 @@ const jobRows = computed(() => {
       currentEpoch: j.current_epoch ?? 0,
       totalEpochs: j.total_epochs ?? 90,
       progress,
-      elapsed: elapsedSec,
+      elapsed: (j.current_epoch > 0 || j.status === 'running') ? elapsedSec : null,
       duration: j.completed_at && j.started_at
         ? Math.round(
             (new Date(j.completed_at).getTime() - new Date(j.started_at).getTime()) / 1000
@@ -595,21 +601,31 @@ function startPolling(jobId: number) {
       if (!res.ok) return
       const job = await res.json()
 
-      // Find and update the job in tracks
+      console.log('Poll response:', job.id, job.status, job.current_epoch, job.total_epochs)
+
       for (const t of tracks.value) {
         if (t.active_job?.id === jobId) {
-          t.active_job.current_epoch = job.current_epoch ?? 0
-          t.active_job.total_epochs = job.total_epochs ?? 90
-          t.active_job.status = job.status
-          t.active_job.errorMessage = job.error_message ?? null
-          t.active_job.completed_at = job.completed_at ?? null
+          console.log('Found track, updating:', t.id, t.active_job.current_epoch, '→', job.current_epoch)
+          t.active_job = {
+            ...t.active_job,
+            current_epoch: job.current_epoch ?? 0,
+            total_epochs: job.total_epochs ?? 90,
+            status: job.status,
+            errorMessage: job.error_message ?? null,
+            completed_at: job.completed_at ?? null,
+          }
         }
       }
 
       if (job.status === 'completed' || job.status === 'failed') {
         clearInterval(pollHandle!)
         pollHandle = null
-        formMessage.value = ''
+        formMessage.value =
+          job.status === 'completed'
+            ? 'Training complete!'
+            : `Training failed: ${job.error_message}`
+        // Only reload after job finishes to get the new ModelVersion
+        await loadFromApi()
       }
     } catch {}
   }, 3000)
@@ -664,7 +680,9 @@ onMounted(async () => {
 })
 
 async function loadFromApi() {
-  // 1. Fetch all seed model versions
+  // Don't reload if we're actively polling
+  if (pollHandle) return
+
   const versionsRes = await api('/api/analysis/models/?module=seeds')
   if (!versionsRes.ok) {
     loadError.value = `Models: HTTP ${versionsRes.status}`
@@ -672,7 +690,6 @@ async function loadFromApi() {
   }
   const versions: any[] = await versionsRes.json()
 
-  // 2. Build track map from known seed types
   const speciesMap = new Map<string, any>()
   for (const seed of seedTypes.value) {
     speciesMap.set(seed.id.toLowerCase(), {
@@ -685,58 +702,60 @@ async function loadFromApi() {
     })
   }
 
-  // 3. Slot each version into its track
   for (const v of versions) {
     const species = (v.parameters?.species ?? v.version_name.split('-')[0]).toLowerCase()
     const track = speciesMap.get(species)
     if (track) {
-      track.versions.push({
-        ...v,
-        samples: v.sample_count ?? 0,
-      })
+      track.versions.push({ ...v, samples: v.sample_count ?? 0 })
     }
   }
 
   tracks.value = Array.from(speciesMap.values())
 
-  // 4. Fetch active/pending training jobs and attach to tracks
   const jobsRes = await api('/api/analysis/training/?module=seeds')
   if (jobsRes.ok) {
     const jobs: any[] = await jobsRes.json()
     const activeJobs = jobs.filter(
       (j) => j.status === 'running' || j.status === 'pending'
-  )
-  for (const job of activeJobs) {
-    const species = job.config?.species?.toLowerCase()
-    const track = tracks.value.find((t) => t.id.toLowerCase() === species)
-    if (track) {
-      track.active_job = {
-        id: job.id,
-        version_name: `${species}-job-${job.id}`,
-        started_at: job.started_at,
-        current_epoch: job.current_epoch,
-        total_epochs: job.total_epochs,
-        loss: job.metrics?.loss ?? 0,
+    )
+
+    for (const job of activeJobs) {
+      const species = job.config?.species?.toLowerCase()
+      const track = tracks.value.find((t) => t.id.toLowerCase() === species)
+      if (track) {
+        track.active_job = {
+          id: job.id,
+          version_name: `${species.toUpperCase()}-${String(job.id).padStart(2, '0')}`,
+          started_at: job.started_at,
+          current_epoch: job.current_epoch,
+          total_epochs: job.total_epochs,
+          status: job.status,
+          loss: job.metrics?.loss ?? 0,
+          errorMessage: job.error_message ?? null,
+          completed_at: job.completed_at ?? null,
+        }
+        startPolling(job.id)
       }
     }
-    startPolling(job.id)
-  }
-  // History
-  trainingHistory.value = jobs
-    .filter((j) => j.status === 'completed' || j.status === 'failed')
-    .map((j) => ({
-      id: j.id,
-      version_name: `${j.config?.species}-job-${j.id}`,
-      track_label: j.config?.species?.toUpperCase() ?? '?',
-      status: j.status,
-      epochs_total: j.total_epochs,
-      duration_seconds: j.completed_at && j.started_at
-        ? Math.round(
-            (new Date(j.completed_at).getTime() - new Date(j.started_at).getTime()) / 1000
-          )
-        : null,
-      error_message: j.error_message || null,
-    }))
+
+    trainingHistory.value = jobs
+      .filter((j) => j.status === 'completed' || j.status === 'failed')
+      .map((j) => ({
+        id: j.id,
+        version_name: `${(j.config?.species ?? '').toUpperCase()}-${String(j.id).padStart(2, '0')}`,
+        track_label: j.config?.species?.toUpperCase() ?? '?',
+        status: j.status,
+        epochs_total: j.total_epochs,
+        duration_seconds:
+          j.completed_at && j.started_at
+            ? Math.round(
+                (new Date(j.completed_at).getTime() -
+                  new Date(j.started_at).getTime()) /
+                  1000
+              )
+            : null,
+        error_message: j.error_message || null,
+      }))
   }
 }
 
@@ -801,7 +820,7 @@ async function startTraining() {
     if (track) {
       track.active_job = {
         id: job.id,
-        version_name: `${species}-job-${job.id}`,
+        version_name: `${species.toUpperCase()}-${String(job.id).padStart(2, '0')}`,
         started_at: job.started_at ?? new Date().toISOString(),
         current_epoch: 0,
         total_epochs: 90,

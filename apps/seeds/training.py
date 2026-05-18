@@ -65,6 +65,7 @@ def _make_progress_callback(job_id: int):
         # Cancellation check on every tick. Status is owned by the cancel
         # endpoint; we just read and raise. RunCancelled inherits
         # BaseException so it bypasses ML pipeline's `except Exception`.
+        print(f'Progress callback: job={job_id} epoch={processed}/{total}')
         current = (
             TrainingJob.objects.filter(pk=job_id)
             .values_list('status', flat=True)
@@ -177,17 +178,31 @@ def run_training_job(job: TrainingJob) -> None:
 
         train_duration = int(time.monotonic() - train_started)
 
+        existing_count = ModelVersion.objects.filter(
+            module=Module.SEEDS,
+            parameters__species=species,
+        ).count()
+
+        version_name = f'{species.upper()}-{existing_count + 1:02d}'
+
         # Persist new ModelVersion + finalise job
+        # By default, the most recent model version is automatically set as active
         with transaction.atomic():
+            ModelVersion.objects.filter(
+                module=Module.SEEDS,
+                parameters__species=species,
+                is_active=True,
+            ).update(is_active=False)
+
             new_mv = ModelVersion.objects.create(
                 module=Module.SEEDS,
                 kind='detector',
-                version_name=f'{species}-{training_mode}-{job.pk}',
+                version_name=version_name,
                 model_file_path=weights_path,
                 source_model_version=source_model,
                 training_duration_seconds=train_duration,
                 trained_at=timezone.now(),
-                is_active=False,
+                is_active=True,
                 parameters={
                     'species': species,
                     'mode': training_mode,
