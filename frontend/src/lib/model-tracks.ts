@@ -16,8 +16,13 @@ export interface BackendModelVersion {
   kind: string
   version_name: string
   is_active: boolean
+  description?: string
   metrics: Record<string, number>
   parameters: Record<string, unknown>
+  sample_count?: number
+  training_duration_seconds?: number
+  trained_at?: string | null
+  source_model_version?: number | null
   created_at: string
   artifacts?: ModelArtifact[]
 }
@@ -28,6 +33,8 @@ export interface TrackVersion {
   is_active: boolean
   metrics: Record<string, number>
   parameters: Record<string, unknown>
+  sample_count: number
+  training_duration_seconds: number
   trained_at: string
   artifacts: ModelArtifact[]
 }
@@ -81,7 +88,9 @@ export function tracksFromVersions(versions: BackendModelVersion[]): Track[] {
       is_active: v.is_active,
       metrics: v.metrics,
       parameters: v.parameters,
-      trained_at: v.created_at,
+      sample_count: v.sample_count ?? 0,
+      training_duration_seconds: v.training_duration_seconds ?? 0,
+      trained_at: v.trained_at ?? v.created_at,
       artifacts: v.artifacts ?? [],
     }))
     const active = trackVersions.find((v) => v.is_active)

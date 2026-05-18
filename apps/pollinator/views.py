@@ -24,6 +24,7 @@ from apps.analysis.models import (
     DetectionStatus,
     InferenceRun,
     JobStatus,
+    ModelVersion,
     TrainingJob,
 )
 from apps.analysis.serializers import (
@@ -37,6 +38,7 @@ from .serializers import (
     PollinatorTrainingCreateSerializer,
 )
 from .training import (
+    PER_TRACK_DEFAULTS,
     POLLINATOR_CLASSES,
     _collect_binary_pool,
     _collect_detector_pool,
@@ -596,6 +598,9 @@ class PollinatorTrainingPoolView(APIView):
           "track": "detector",
           "available": 42,        # unit: images for detector, detections for classifiers
           "consumed": 12,         # detections already used in past completed jobs
+          "new_since_active": 7,  # subset of `available` reviewed after the
+                                  # active model finished training. 0 if no
+                                  # active version exists (everything is "new").
           "by_class": {           # absent for binary (only insect/background)
             "bumblebee": 5, "fly": 18, "butterfly": 4, "other": 15
           }
@@ -611,28 +616,43 @@ class PollinatorTrainingPoolView(APIView):
             )
 
         consumed = len(_consumed_detection_ids(track))
+        active_trained_at = _active_trained_at(track)
 
         if track == 'detector':
             eligible = _collect_detector_pool(POLLINATOR_CLASSES)
             by_class = Counter(
                 (d.reviewer_label or d.predicted_class) for d in eligible
             )
+            new_image_ids = {
+                d.image_id
+                for d in eligible
+                if active_trained_at is None
+                or (d.reviewed_at and d.reviewed_at > active_trained_at)
+            }
             return Response(
                 {
                     'track': track,
                     'available': len({d.image_id for d in eligible}),
                     'consumed': consumed,
+                    'new_since_active': len(new_image_ids),
                     'by_class': dict(by_class),
                 }
             )
 
         if track == 'binary':
             accepted, rejected = _collect_binary_pool()
+            new_count = sum(
+                1
+                for d in (*accepted, *rejected)
+                if active_trained_at is None
+                or (d.reviewed_at and d.reviewed_at > active_trained_at)
+            )
             return Response(
                 {
                     'track': track,
                     'available': len(accepted) + len(rejected),
                     'consumed': consumed,
+                    'new_since_active': new_count,
                     'by_class': {
                         'insect': len(accepted),
                         'background': len(rejected),
@@ -643,11 +663,32 @@ class PollinatorTrainingPoolView(APIView):
         # group
         eligible = _collect_group_pool(POLLINATOR_CLASSES)
         by_class = Counter((d.reviewer_label or d.predicted_class) for d in eligible)
+        new_count = sum(
+            1
+            for d in eligible
+            if active_trained_at is None
+            or (d.reviewed_at and d.reviewed_at > active_trained_at)
+        )
         return Response(
             {
                 'track': track,
                 'available': len(eligible),
                 'consumed': consumed,
+                'new_since_active': new_count,
                 'by_class': dict(by_class),
             }
         )
+
+
+def _active_trained_at(track: str):
+    """trained_at of the currently active ModelVersion for this track's kind,
+    or None if no active version exists. Used by the pool endpoint to bucket
+    reviewed-since-active detections separately from the broader pool."""
+    kind = PER_TRACK_DEFAULTS[track]['kind']
+    return (
+        ModelVersion.objects.filter(
+            module=Module.POLLINATORS, kind=kind, is_active=True
+        )
+        .values_list('trained_at', flat=True)
+        .first()
+    )

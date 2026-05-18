@@ -58,8 +58,13 @@ class ModelVersionSerializer(serializers.ModelSerializer):
             'kind',
             'version_name',
             'is_active',
+            'description',
             'metrics',
             'parameters',
+            'sample_count',
+            'training_duration_seconds',
+            'trained_at',
+            'source_model_version',
             'created_at',
             'artifacts',
         )
@@ -273,8 +278,12 @@ class DetectionBulkReviewSerializer(serializers.Serializer):
 class TrainingJobListSerializer(serializers.ModelSerializer):
     """Read serializer for GET /api/analysis/training/?module=...
 
-    Lightweight — no activity_log. Includes config so the UI can map each
-    job back to its track (e.g. pollinator's detector/binary/group)."""
+    Lightweight (no activity_log). Includes config so the UI can map each
+    job back to its track (e.g. pollinator's detector/binary/group),
+    metrics so the history can show a result column without an extra
+    detail round-trip, and the initiator's username."""
+
+    initiated_by = serializers.SerializerMethodField()
 
     class Meta:
         model = TrainingJob
@@ -288,10 +297,18 @@ class TrainingJobListSerializer(serializers.ModelSerializer):
             'image_count',
             'current_epoch',
             'total_epochs',
+            'metrics',
+            'initiated_by',
             'started_at',
             'completed_at',
             'error_message',
         )
+
+    def get_initiated_by(self, obj: TrainingJob) -> str:
+        user = obj.initiated_by
+        if not user:
+            return ''
+        return user.get_username() or ''
 
 
 class TrainingJobDetailSerializer(serializers.ModelSerializer):

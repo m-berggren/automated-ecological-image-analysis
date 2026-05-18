@@ -12,6 +12,7 @@ from __future__ import annotations
 
 import logging
 import random
+import shutil
 import threading
 from collections import defaultdict
 from pathlib import Path
@@ -32,7 +33,7 @@ from apps.analysis.models import (
     ModelVersion,
     TrainingJob,
 )
-from apps.analysis.storage import resolve_model_path
+from apps.analysis.storage import link_or_copy, resolve_model_path
 from apps.datasets.models import Module
 
 logger = logging.getLogger(__name__)
@@ -179,19 +180,27 @@ def _make_progress_callback(job_id: int):
 
 def _export_crop(detection: Detection, dst_path: Path) -> bool:
     """Crop the detection bbox out of its source image, save as JPG.
-    Returns True on success; False if the source file or bbox is invalid."""
+    Returns True on success; False if the source file or bbox is invalid.
+
+    Bbox shape matches what the pipeline writes (see apps/analysis/crops.py
+    and ml-pipelines/pollinator/workflows/merge.py): {x1, y1, x2, y2, w, h}.
+    Missing or malformed keys fail fast rather than silently degrading to
+    a (0,0,w,h) top-left crop."""
     if not detection.image.file:
         return False
-    src = Path(detection.image.file.path)
     bbox = detection.bbox or {}
-    x = float(bbox.get('x', 0))
-    y = float(bbox.get('y', 0))
-    w = float(bbox.get('w', 0))
-    h = float(bbox.get('h', 0))
-    if w <= 0 or h <= 0:
+    try:
+        x1 = float(bbox['x1'])
+        y1 = float(bbox['y1'])
+        x2 = float(bbox['x2'])
+        y2 = float(bbox['y2'])
+    except (KeyError, TypeError, ValueError):
         return False
+    if x2 <= x1 or y2 <= y1:
+        return False
+    src = Path(detection.image.file.path)
     with Image.open(src) as img:
-        crop = img.crop((x, y, x + w, y + h)).convert('RGB')
+        crop = img.crop((x1, y1, x2, y2)).convert('RGB')
     dst_path.parent.mkdir(parents=True, exist_ok=True)
     crop.save(dst_path, 'JPEG')
     return True
@@ -274,20 +283,25 @@ def _build_detector_dataset(
             stem = f'img_{image_id}'
             dst_img = img_dir / f'{stem}.jpg'
             if not dst_img.exists():
-                dst_img.symlink_to(src)
+                link_or_copy(src, dst_img)
 
             lines = []
             for d in dets:
                 cls_idx = class_to_idx[_effective_class(d)]
                 bbox = d.bbox or {}
-                x = float(bbox.get('x', 0))
-                y = float(bbox.get('y', 0))
-                w = float(bbox.get('w', 0))
-                h = float(bbox.get('h', 0))
-                if w <= 0 or h <= 0:
+                try:
+                    x1 = float(bbox['x1'])
+                    y1 = float(bbox['y1'])
+                    x2 = float(bbox['x2'])
+                    y2 = float(bbox['y2'])
+                except (KeyError, TypeError, ValueError):
                     continue
-                cx = (x + w / 2) / width
-                cy = (y + h / 2) / height
+                if x2 <= x1 or y2 <= y1:
+                    continue
+                w = x2 - x1
+                h = y2 - y1
+                cx = (x1 + w / 2) / width
+                cy = (y1 + h / 2) / height
                 lines.append(
                     f'{cls_idx} {cx:.6f} {cy:.6f} {w / width:.6f} {h / height:.6f}'
                 )
@@ -591,6 +605,11 @@ def run_training_job(job: TrainingJob) -> None:
     """Synchronous core. Status flow: pending → running → completed / failed."""
     import time
 
+    # Declared up front so the finally block can clean it up even if the
+    # job fails before dataset assembly. Trained weights live in weights_dir
+    # (sibling of dataset_dir), so this cleanup never touches them.
+    dataset_dir: Optional[Path] = None
+
     try:
         job.status = JobStatus.RUNNING
         job.save(update_fields=['status'])
@@ -731,6 +750,18 @@ def run_training_job(job: TrainingJob) -> None:
         job.completed_at = timezone.now()
         job.save(update_fields=['status', 'error_message', 'completed_at'])
         raise
+    finally:
+        if dataset_dir is not None:
+            shutil.rmtree(dataset_dir, ignore_errors=True)
+            # If the job failed before any weights were written, the sibling
+            # weights/ dir and its parent training/<job_pk>/ are now empty
+            # and just clutter MEDIA_ROOT. rmdir only succeeds when empty,
+            # so a successful job (weights present) leaves them intact.
+            for d in (dataset_dir.parent / 'weights', dataset_dir.parent):
+                try:
+                    d.rmdir()
+                except OSError:
+                    pass
 
 
 def _run_in_thread(job_id: int) -> None:

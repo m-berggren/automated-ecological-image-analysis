@@ -146,11 +146,10 @@
               <UploadCloud class="w-8 h-8 mx-auto text-muted-foreground" />
               <div class="text-sm font-medium mt-2">
                 <template v-if="uploadedFiles.length">
-                  {{ uploadedFiles.length }} file{{ uploadedFiles.length === 1 ? '' : 's' }} added — drop more to extend
+                  {{ uploadedFiles.length }} file{{ uploadedFiles.length === 1 ? '' : 's' }} added —
+                  drop more to extend
                 </template>
-                <template v-else>
-                  Drop a folder or images here, or click to browse
-                </template>
+                <template v-else> Drop a folder or images here, or click to browse </template>
               </div>
               <div class="text-xs text-muted-foreground mt-1">
                 Adds to the training pool. Accepts .jpg, .png, .zip, or a folder of images.
@@ -621,6 +620,7 @@ import TrainingCharts from '@/components/TrainingCharts.vue'
 import UploadDropZone, { type UploadTab } from '@/components/UploadDropZone.vue'
 import { UploadCloud } from 'lucide-vue-next'
 import { api } from '@/api'
+import { confirm } from '@/lib/confirm'
 import { tracksFromVersions, type BackendModelVersion } from '@/lib/model-tracks'
 
 interface ChartData {
@@ -653,10 +653,20 @@ interface ActiveJob {
   val_accuracy: number
 }
 
+interface PoolSample {
+  id: string
+  class: string
+}
+
 interface DataPool {
   total_samples: number
   new_since_active: number
   by_class: Record<string, number>
+  // Optional per-sample listing. When the pool endpoint returns it, the
+  // review drawer uses these IDs verbatim for thumbnails and exclusions.
+  // When absent, the drawer falls back to class-count placeholders so the
+  // layout still renders.
+  samples?: PoolSample[]
 }
 
 interface Track {
@@ -735,10 +745,10 @@ const reviewDrawerOpen = ref(false)
 const drawerFilter = ref<string>('all')
 
 const settings = reactive({
-  train_split: 80,
-  val_split: 10,
+  train_split: 70,
+  val_split: 20,
   test_split: 10,
-  epochs: 5,
+  epochs: 10,
   stratified: true,
 })
 
@@ -834,9 +844,6 @@ async function loadFromApi() {
       return
     }
     const versions: BackendModelVersion[] = await res.json()
-    // Per-track data_pool counts come from a future /training/pool/ endpoint.
-    // Stubbed to zero for now; sample/duration/charts come from completed
-    // TrainingJob metadata once wired.
     tracks.value = tracksFromVersions(versions).map((t) => ({
       id: t.id,
       label: t.label,
@@ -846,8 +853,7 @@ async function loadFromApi() {
       active_version_id: t.active_version_id,
       versions: t.versions.map((v) => ({
         ...v,
-        samples: 0,
-        training_duration_seconds: 0,
+        samples: v.sample_count,
         charts: null,
       })),
       data_pool: { total_samples: 0, new_since_active: 0, by_class: {} },
@@ -857,14 +863,45 @@ async function loadFromApi() {
       selectedTrackId.value = tracks.value[0].id
     }
 
-    // Load training jobs in parallel — populates active_job per track
-    // (resuming polling for in-flight jobs) and the history list below.
-    await loadTrainingJobs(versions)
+    await Promise.all([loadTrainingJobs(versions), loadPools()])
   } catch (e) {
     loadError.value = e instanceof Error ? e.message : String(e)
   } finally {
     loading.value = false
   }
+}
+
+interface BackendPoolResponse {
+  track: string
+  available: number
+  consumed: number
+  new_since_active: number
+  by_class: Record<string, number>
+}
+
+// Pool endpoint is module-scoped and per-track. Failures per-track are
+// non-fatal: the track keeps its zeroed pool and the rest of the page works.
+async function loadPools() {
+  const apiTracks: Array<'detector' | 'binary' | 'group'> = ['detector', 'binary', 'group']
+  await Promise.all(
+    apiTracks.map(async (apiTrack) => {
+      try {
+        const res = await api(`/api/pollinator/training/pool/?track=${apiTrack}`)
+        if (!res.ok) return
+        const pool: BackendPoolResponse = await res.json()
+        const uiTrackId = API_TO_UI_TRACK[apiTrack]
+        const track = tracks.value.find((t) => t.id === uiTrackId)
+        if (!track) return
+        track.data_pool = {
+          total_samples: pool.available,
+          new_since_active: pool.new_since_active,
+          by_class: pool.by_class || {},
+        }
+      } catch {
+        // ignore — track keeps its zeroed pool
+      }
+    }),
+  )
 }
 
 // API ↔ UI track id mapping (backend uses short forms, UI uses ModelKind).
@@ -884,9 +921,20 @@ interface BackendTrainingJobListEntry {
   image_count: number
   current_epoch: number
   total_epochs: number
+  metrics: Record<string, unknown>
+  initiated_by: string
   started_at: string
   completed_at: string | null
   error_message?: string
+}
+
+// Per-track key probe order for extracting a single headline metric out of
+// the free-form TrainingJob.metrics JSON. Detector returns nested
+// {val:{...}, test:{...}}; classifier returns are flatter (acc / macro_f1).
+const METRIC_KEYS_BY_API_TRACK: Record<string, string[]> = {
+  detector: ['val.recall', 'val.mAP50', 'test.recall', 'test.mAP50', 'recall', 'mAP50'],
+  binary: ['accuracy', 'val_acc', 'acc', 'macro_f1'],
+  group: ['accuracy', 'val_acc', 'acc', 'macro_f1'],
 }
 
 async function loadTrainingJobs(versions: BackendModelVersion[]) {
@@ -912,6 +960,8 @@ async function loadTrainingJobs(versions: BackendModelVersion[]) {
             (new Date(job.completed_at).getTime() - new Date(job.started_at).getTime()) / 1000,
           )
         : null
+    const metricKeys = METRIC_KEYS_BY_API_TRACK[apiTrack] ?? []
+    const metric = metricKeys.length ? pickMetric(job.metrics || {}, metricKeys) : 0
     return {
       id: job.id,
       track_id: trackId,
@@ -925,8 +975,8 @@ async function loadTrainingJobs(versions: BackendModelVersion[]) {
       duration_seconds: duration,
       status: job.status as HistoryEntry['status'],
       main_metric_label: tracks.value.find((t) => t.id === trackId)?.metric_label ?? '',
-      main_metric_value: null,
-      initiated_by: '',
+      main_metric_value: metric || null,
+      initiated_by: job.initiated_by || '',
     }
   })
 
@@ -1208,11 +1258,35 @@ async function refreshModels() {
   }
 }
 
-function cancelJob(track: Track) {
-  // Client-side dismissal only. Backend has no cancel endpoint yet; the
-  // job keeps running and produces a ModelVersion on completion.
-  track.active_job = null
-  stopPolling(track.id)
+async function cancelJob(track: Track) {
+  const job = track.active_job
+  if (!job) return
+  const label = job.version_name || `${track.label} training`
+  const ok = await confirm({
+    title: 'Cancel running job',
+    message:
+      `Cancel "${label}"? ` +
+      `The training worker will stop at the next epoch boundary and no new ` +
+      `model version will be created.`,
+    confirmLabel: 'Cancel job',
+    cancelLabel: 'Keep training',
+    variant: 'danger',
+  })
+  if (!ok) return
+  try {
+    const res = await api(`/api/analysis/training/${job.id}/cancel/`, {
+      method: 'POST',
+    })
+    if (!res.ok) {
+      formMessage.value = (await res.text()) || `HTTP ${res.status}`
+      return
+    }
+    track.active_job = null
+    stopPolling(track.id)
+    formMessage.value = `Cancellation sent for ${track.label}.`
+  } catch (e) {
+    formMessage.value = e instanceof Error ? e.message : String(e)
+  }
 }
 
 onUnmounted(() => {
@@ -1269,14 +1343,8 @@ function openReviewDrawer() {
   reviewDrawerOpen.value = true
 }
 
-// Per-run exclusion set. Click a sample card in the drawer to exclude it
-// from this training job; default is everything included. Backed by a
-// reactive Set so toggles re-render the grid.
-//
-// TODO(backend): wire this into the POST payload as `detection_ids` (or
-// `image_ids` for the detector track) once /api/pollinator/training/pool/
-// exposes real per-sample IDs. Today the drawer renders placeholder
-// thumbnails with synthetic IDs, so the toggle is visual only.
+// Per-run exclusion set, keyed by the sample IDs the drawer rendered. The
+// `startTraining` payload forwards this as `excluded_sample_ids`.
 const excludedSampleIds = reactive(new Set<string>())
 
 function toggleSampleInclusion(id: string) {
@@ -1308,28 +1376,42 @@ const drawerClasses = computed(() => {
   ]
 })
 
-const drawerThumbnails = computed(() => {
+interface DrawerThumbnail {
+  id: string
+  label: string
+  glyph: string
+  color: string
+  bg: string
+}
+
+function thumbnailFor(id: string, cls: string): DrawerThumbnail {
+  const color = CLASS_COLORS[cls] ?? '#9aa3ab'
+  return {
+    id,
+    label: cls,
+    glyph: CLASS_GLYPHS[cls] ?? '?',
+    color,
+    bg: color + '14',
+  }
+}
+
+const drawerThumbnails = computed<DrawerThumbnail[]>(() => {
   if (!selectedTrack.value) return []
-  const balance = selectedTrack.value.data_pool.by_class
+  const pool = selectedTrack.value.data_pool
   const filter = drawerFilter.value
-  const result: Array<{
-    id: string
-    label: string
-    glyph: string
-    color: string
-    bg: string
-  }> = []
-  for (const [cls, count] of Object.entries(balance)) {
+  if (pool.samples) {
+    return pool.samples
+      .filter((s) => filter === 'all' || s.class === filter)
+      .map((s) => thumbnailFor(s.id, s.class))
+  }
+  // No per-sample listing yet: synthesise placeholder cards from class
+  // counts so the drawer layout still renders.
+  const result: DrawerThumbnail[] = []
+  for (const [cls, count] of Object.entries(pool.by_class)) {
     if (filter !== 'all' && filter !== cls) continue
     const visible = Math.min(count, 30)
     for (let i = 0; i < visible; i++) {
-      result.push({
-        id: `${cls}-${i}`,
-        label: cls,
-        glyph: CLASS_GLYPHS[cls] ?? '?',
-        color: CLASS_COLORS[cls] ?? '#9aa3ab',
-        bg: (CLASS_COLORS[cls] ?? '#9aa3ab') + '14',
-      })
+      result.push(thumbnailFor(`${cls}-${i}`, cls))
     }
   }
   return result
@@ -1382,6 +1464,9 @@ async function startTraining() {
           stratified: settings.stratified,
           ...(trackHasClassFilter.value ? { class_filter: Array.from(classFilter) } : {}),
           ...(trackHasImgSize.value ? { img_size: imgSize.value } : {}),
+          ...(t.data_pool.samples && excludedSampleIds.size > 0
+            ? { excluded_sample_ids: Array.from(excludedSampleIds) }
+            : {}),
         },
       }),
     })
