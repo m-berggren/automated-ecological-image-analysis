@@ -415,6 +415,9 @@
                   class="text-[10px] xl:text-[11px] font-semibold uppercase tracking-wider text-muted-foreground mb-0.5"
                 >
                   Label
+                  <span v-if="bulkMode" class="ml-1 normal-case tracking-normal text-muted-foreground/80">
+                    · applies to {{ bulkIds.size }} selected
+                  </span>
                 </div>
                 <!-- Radios (not checkboxes) so the browser enforces single-
                    select at the DOM level. With checkboxes a click race
@@ -435,8 +438,8 @@
                     <input
                       type="radio"
                       name="label-class"
-                      :checked="cls === effectiveLabel(selected)"
-                      @change="confirmAs(cls)"
+                      :checked="panelLabel(selected) === cls"
+                      @change="pendingLabel = cls"
                       class="w-3.5 h-3.5 xl:w-4 xl:h-4"
                     />
                   </label>
@@ -458,16 +461,18 @@
                     <input
                       type="radio"
                       name="label-class"
-                      :checked="selected.reviewer_status === 'rejected'"
-                      @change="reject()"
+                      :checked="panelLabel(selected) === 'background'"
+                      @change="pendingLabel = 'background'"
                       class="w-3.5 h-3.5 xl:w-4 xl:h-4"
                     />
                   </label>
                 </div>
               </div>
 
-              <!-- Predictions (compact, two-line). -->
-              <div class="px-5 py-2">
+              <!-- Predictions (compact, two-line). Hidden in bulk mode —
+                   per-detection model output doesn't make sense when the
+                   user is acting on a mixed selection. -->
+              <div v-if="!bulkMode" class="px-5 py-2">
                 <div
                   class="text-[10px] xl:text-[11px] font-semibold uppercase tracking-wider text-muted-foreground mb-0.5"
                 >
@@ -550,22 +555,16 @@
             </span>
             <div class="flex gap-2 ml-auto">
               <button
-                class="px-3 py-1.5 rounded-md text-sm font-medium border border-border hover:bg-muted"
-                @click="reject()"
-              >
-                Reject
-              </button>
-              <button
                 class="px-3 py-1.5 rounded-md text-sm font-medium border border-amber-300 text-amber-700 hover:bg-amber-50"
-                @click="markUnsure()"
+                @click="commitUnsure"
               >
                 Unsure
               </button>
               <button
                 class="px-3 py-1.5 rounded-md text-sm font-medium bg-primary text-primary-foreground hover:bg-primary/90 disabled:opacity-50 disabled:cursor-not-allowed disabled:hover:bg-primary"
-                :disabled="!effectiveLabel(selected)"
-                :title="effectiveLabel(selected) ? '' : 'Pick a label or wait for models to agree'"
-                @click="confirmAs(effectiveLabel(selected))"
+                :disabled="!canConfirm"
+                :title="canConfirm ? '' : 'Pick a label or wait for models to agree'"
+                @click="commitPending"
               >
                 Confirm
               </button>
@@ -1018,12 +1017,97 @@ watch(
   { immediate: true },
 )
 
+// Mouse picks on the Label panel set this rather than firing a server PATCH
+// immediately. The Confirm button reads it. 'background' = the panel's
+// reject row. null = no pending change. Resets on selection change (or
+// when bulkIds shifts) so a staged-but-uncommitted pick can't leak into
+// the next target.
+type PendingLabel = ClassName | 'background' | null
+const pendingLabel = ref<PendingLabel>(null)
+
+// True when the bulk drag-selected more than one detection — the Label
+// panel then targets the whole bulk instead of just the primary `selected`.
+const bulkMode = computed(() => bulkIds.value.size > 1)
+
 watch(selectedId, async (id) => {
+  pendingLabel.value = null
   if (id == null) return
   await nextTick()
   const el = document.querySelector(`[data-detection-id="${id}"]`)
   el?.scrollIntoView({ block: 'nearest', behavior: 'smooth' })
 })
+
+// Clearing the bulk set or shrinking it back to a single row should also
+// drop any pending pick that was staged for the bulk.
+watch(bulkMode, (isBulk, wasBulk) => {
+  if (isBulk !== wasBulk) pendingLabel.value = null
+})
+
+// What the Label panel should show as ticked. In bulk mode there's no
+// "single source of truth" across the selected detections, so nothing is
+// pre-ticked — the user has to actively pick one. Otherwise pending pick
+// wins; falling back to the row's settled state.
+function panelLabel(d: Detection): PendingLabel {
+  if (bulkMode.value) return pendingLabel.value
+  if (pendingLabel.value !== null) return pendingLabel.value
+  if (d.reviewer_status === 'rejected') return 'background'
+  return effectiveLabel(d)
+}
+
+// Confirm enabled when there's something to send.
+//   Bulk: a staged pick (we apply it to every selected detection).
+//   Single: a pending pick that differs from the row's state, or an
+//           unreviewed row that already has an effective label.
+const canConfirm = computed(() => {
+  if (bulkMode.value) return pendingLabel.value !== null
+  const d = selected.value
+  if (!d) return false
+  if (pendingLabel.value !== null) {
+    if (pendingLabel.value === 'background') return d.reviewer_status !== 'rejected'
+    return d.reviewer_label !== pendingLabel.value || d.reviewer_status === 'unreviewed'
+  }
+  return d.reviewer_status === 'unreviewed' && effectiveLabel(d) != null
+})
+
+function commitPending() {
+  if (bulkMode.value) {
+    if (pendingLabel.value === 'background') {
+      applyToBulk('rejected', null)
+    } else if (pendingLabel.value !== null) {
+      applyToBulk('corrected', pendingLabel.value)
+    }
+    pendingLabel.value = null
+    return
+  }
+  const d = selected.value
+  if (!d) return
+  // Auto-advance after the commit so the just-reviewed detection drops
+  // out of selection. Without this the selectedId stays on the row, and
+  // siblingOverlays' "always render the selected bbox" exception keeps the
+  // red box on the source image until the reviewer navigates away.
+  // Matches the keyboard flow (1-4 / x already pass advanceAfter=true).
+  if (pendingLabel.value === 'background') {
+    reject(true)
+  } else if (pendingLabel.value !== null) {
+    confirmAs(pendingLabel.value, true)
+  } else {
+    const eff = effectiveLabel(d)
+    if (eff) confirmAs(eff, true)
+  }
+  pendingLabel.value = null
+}
+
+// Footer Unsure also has to branch — single uses markUnsure() with
+// auto-advance (same rationale as Confirm), bulk goes through applyToBulk
+// so every selected detection lands on 'unsure' in one request.
+function commitUnsure() {
+  if (bulkMode.value) {
+    applyToBulk('unsure', null)
+    pendingLabel.value = null
+    return
+  }
+  markUnsure(true)
+}
 
 // Preloaded natural dimensions of the currently-selected source image.
 // Needed so the SVG viewBox can match the bbox coords, which are in raw
@@ -1614,7 +1698,16 @@ async function submitBulk(ids: number[], status: ReviewerStatus, label: ClassNam
 
 async function applyToBulk(status: ReviewerStatus, label: ClassName | null) {
   const ids = [...bulkIds.value]
+  // If the bulk includes the primary selection, advance selectedId off
+  // it before the commit. siblingOverlays keeps the selected row's bbox
+  // visible even after it's reviewed (intentional, for browsing the
+  // Reviewed pile), which would otherwise leave a stale red box on the
+  // source image after a bulk action. Captured BEFORE clearBulk so we
+  // can still read the membership.
+  const sel = selected.value
+  const advanceTo = sel && bulkIds.value.has(sel.id) ? nextVisibleId(sel.id) : null
   clearBulk()
+  if (advanceTo != null) selectedId.value = advanceTo
   await submitBulk(ids, status, label)
 }
 
@@ -1680,7 +1773,11 @@ async function bulkConfirm() {
     buckets.get(lbl)!.push(d.id)
   }
   bulkConfirmSkipped.value = skipped
+  // Same advance logic as applyToBulk — see comment there.
+  const sel = selected.value
+  const advanceTo = sel && bulkIds.value.has(sel.id) ? nextVisibleId(sel.id) : null
   clearBulk()
+  if (advanceTo != null) selectedId.value = advanceTo
   for (const [label, ids] of buckets) {
     await submitBulk(ids, 'corrected', label)
   }
