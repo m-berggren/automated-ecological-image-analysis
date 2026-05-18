@@ -38,6 +38,7 @@ from apps.analysis.models import (
 from apps.analysis.storage import resolve_model_path
 
 from .models import PollinatorDetection
+from .training import canonical_class
 
 logger = logging.getLogger(__name__)
 
@@ -147,9 +148,7 @@ def run_inference_pipeline(run: InferenceRun) -> None:
         # Group threshold defaults to 0 -> keep every group call (current
         # behaviour). When the upload sets it, sub-threshold group calls are
         # stripped to insectnet_class='' inside the pipeline.
-        group_thr = float(
-            (config.get('group_classifier') or {}).get('confidence', 0.0)
-        )
+        group_thr = float((config.get('group_classifier') or {}).get('confidence', 0.0))
         # Frontend start_at_image is 1-based; library skip_first_n is 0-based.
         skip_first = max(0, int(config.get('start_at_image', 1)) - 1)
 
@@ -209,8 +208,12 @@ def run_inference_pipeline(run: InferenceRun) -> None:
             if image is None:
                 continue
             bbox = d.get('bbox') or {}
-            yolo_class = d.get('yolo_class') or ''
-            insectnet_class = d.get('insectnet_class') or ''
+            # Normalize raw model labels to canonical pollinator classes.
+            # The InsectNet model emits 'butterfly_moth' but the rest of
+            # the system (and the DB) speak canonical names. canonical_class
+            # is the single gate that keeps the storage layer clean.
+            yolo_class = canonical_class(d.get('yolo_class'))
+            insectnet_class = canonical_class(d.get('insectnet_class'))
             primary_class = yolo_class or insectnet_class
             primary_conf = (
                 d.get('yolo_confidence')
@@ -289,8 +292,7 @@ def run_inference_pipeline(run: InferenceRun) -> None:
         )
         if current_status == JobStatus.CANCELLED:
             logger.info(
-                f'Run {run.pk} cancelled after inference; '
-                f'detections + crops preserved'
+                f'Run {run.pk} cancelled after inference; detections + crops preserved'
             )
             return
 

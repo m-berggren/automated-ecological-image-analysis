@@ -54,7 +54,9 @@ const POLLINATOR_TRACK_DEFS: TrackDef[] = [
     id: 'detector',
     label: 'YOLO',
     description: 'Pollinator detector',
-    metric_label: 'mAP50',
+    // Recall is the headline metric: missing an insect costs more than the
+    // occasional false positive (which the binary classifier can drop).
+    metric_label: 'recall',
   },
   {
     id: 'binary_classifier',

@@ -395,6 +395,14 @@ class Detection(models.Model):
             'step to drop duplicates (same insect detected twice).'
         ),
     )
+    export_exclusion_user_set = models.BooleanField(
+        default=False,
+        help_text=(
+            'True once a reviewer has explicitly toggled excluded_from_export '
+            'from the Export page. Engulfment auto-exclude skips these rows '
+            'so a manual include/exclude decision is sticky across re-runs.'
+        ),
+    )
 
     class Meta:
         indexes = [

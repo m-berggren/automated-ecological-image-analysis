@@ -104,7 +104,24 @@
                     {{ formatRelative(v.trained_at) }}
                   </td>
                   <td class="px-3 py-3 text-right text-muted-foreground">
-                    {{ expandedIds.has(v.id) ? '▾' : '▸' }}
+                    <div class="flex items-center justify-end gap-3" @click.stop>
+                      <button
+                        v-if="canDeleteModels"
+                        :disabled="deletingId === v.id"
+                        :title="
+                          v.is_active
+                            ? 'Cannot delete the active version. Pick another default first.'
+                            : `Delete ${v.version_name}`
+                        "
+                        class="text-muted-foreground hover:text-red-600 disabled:opacity-40 disabled:cursor-not-allowed"
+                        @click="confirmDelete(v)"
+                      >
+                        <Trash2 class="w-4 h-4" />
+                      </button>
+                      <span @click="toggleExpanded(v.id)" class="cursor-pointer">
+                        {{ expandedIds.has(v.id) ? '▾' : '▸' }}
+                      </span>
+                    </div>
                   </td>
                 </tr>
                 <tr v-if="expandedIds.has(v.id)" class="border-t border-border bg-muted/10">
@@ -118,8 +135,8 @@
                           Parameters
                         </div>
                         <dl class="text-xs grid grid-cols-[auto_1fr] gap-x-4 gap-y-1">
-                          <template v-for="(value, key) in v.parameters" :key="String(key)">
-                            <dt class="text-muted-foreground">{{ String(key) }}</dt>
+                          <template v-for="[key, value] in visibleParams(v.parameters)" :key="key">
+                            <dt class="text-muted-foreground">{{ key }}</dt>
                             <dd class="font-mono">{{ formatParam(value) }}</dd>
                           </template>
                         </dl>
@@ -211,14 +228,20 @@
       class="fixed inset-0 z-50 flex items-center justify-center bg-black/40 p-4"
       @click.self="uploadOpen = false"
     >
-      <div class="bg-card border border-border rounded-xl shadow-xl w-full max-w-md">
-        <header class="px-5 py-3 border-b border-border flex items-center justify-between">
+      <!-- max-h-[90vh] + flex column keeps the footer (Cancel/Upload) glued
+           to the bottom no matter how big the body grows. The body scrolls
+           internally instead of pushing the buttons off-screen on smaller
+           laptops. -->
+      <div
+        class="bg-card border border-border rounded-xl shadow-xl w-full max-w-md max-h-[90vh] flex flex-col"
+      >
+        <header class="px-5 py-2 border-b border-border flex items-center justify-between shrink-0">
           <h3 class="font-semibold">Upload existing model</h3>
           <button class="text-muted-foreground hover:text-foreground" @click="uploadOpen = false">
             ✕
           </button>
         </header>
-        <div class="p-5 space-y-3 text-sm">
+        <div class="px-5 py-3 space-y-2 text-sm overflow-y-auto">
           <label class="block">
             <span class="text-xs font-medium text-muted-foreground">Kind</span>
             <select
@@ -255,88 +278,50 @@
             />
           </label>
           <div>
-            <span class="text-xs font-medium text-muted-foreground">Source</span>
-            <div class="mt-1 inline-flex rounded border border-border overflow-hidden text-xs">
-              <button
-                type="button"
-                class="px-3 py-1.5"
-                :class="
-                  uploadMode === 'file'
-                    ? 'bg-primary text-primary-foreground'
-                    : 'bg-background hover:bg-muted'
-                "
-                @click="uploadMode = 'file'"
-              >
-                Single weights file
-              </button>
-              <button
-                type="button"
-                class="px-3 py-1.5"
-                :class="
-                  uploadMode === 'folder'
-                    ? 'bg-primary text-primary-foreground'
-                    : 'bg-background hover:bg-muted'
-                "
-                @click="uploadMode = 'folder'"
-              >
-                Training run folder
-              </button>
-            </div>
-          </div>
-          <label v-if="uploadMode === 'file'" class="block">
             <span class="text-xs font-medium text-muted-foreground">
-              Weights file
+              Source
               <span class="text-red-600">*</span>
             </span>
-            <input
-              type="file"
-              accept=".pt,.pth,.bin"
-              class="mt-1 w-full text-xs"
-              @change="pickUploadFile"
+            <UploadDropZone
+              class="mt-1"
+              compact
+              v-model:active-tab="uploadMode"
+              :tabs="modelUploadTabs"
+              :has-files="uploadHasFiles"
+              @select="onModelUploadSelect"
             />
-            <span class="text-[11px] text-muted-foreground">
-              .pt / .pth — metadata (img_size, arch, epoch) is auto-extracted if present.
-            </span>
-          </label>
-          <div v-else class="block">
-            <span class="text-xs font-medium text-muted-foreground">
-              Ultralytics run folder
-              <span class="text-red-600">*</span>
-            </span>
-            <input
-              type="file"
-              webkitdirectory
-              directory
-              multiple
-              class="mt-1 w-full text-xs"
-              @change="pickUploadFolder"
-            />
-            <span class="text-[11px] text-muted-foreground">
-              Pick the run folder; the server takes weights/best.pt (fallback last.pt) and ingests
-              recognised siblings (curves, confusion matrix, results.csv, sample tiles, args.yaml).
-            </span>
+            <p
+              v-if="uploadMode === 'file' && uploadFile"
+              class="mt-2 text-[11px] text-muted-foreground font-mono"
+            >
+              {{ uploadFile.name }} · {{ formatFileSize(uploadFile.size) }}
+            </p>
+            <!-- Folder preview. Plain text rows rather than nested boxes:
+                 enough info to know we picked the right folder, without
+                 the visual noise that dominated the dialog. Artifact list
+                 caps at ~5 rows with internal scroll for big folders. -->
             <div
-              v-if="uploadFolderFiles.length"
-              class="mt-2 rounded border border-border bg-muted/30 p-2 text-[11px] space-y-1"
+              v-if="uploadMode === 'folder' && uploadFolderFiles.length"
+              class="mt-2 text-[11px] space-y-1"
             >
               <div>
-                <span class="font-medium">Weights:</span>
-                <span v-if="folderPreview.weightsLabel" class="ml-1 font-mono">
+                <span class="text-muted-foreground">Weights: </span>
+                <span v-if="folderPreview.weightsLabel" class="font-mono">
                   {{ folderPreview.weightsLabel }}
                 </span>
-                <span v-else class="ml-1 text-red-600">
+                <span v-else class="text-red-600">
                   not found (need weights/best.pt or weights/last.pt)
                 </span>
               </div>
-              <div>
-                <span class="font-medium">
+              <div v-if="folderPreview.recognised.length">
+                <span class="text-muted-foreground">
                   Artifacts ({{ folderPreview.recognised.length }}):
                 </span>
-                <span v-if="folderPreview.recognised.length" class="ml-1 font-mono">
-                  {{ folderPreview.recognised.join(', ') }}
-                </span>
-                <span v-else class="ml-1 text-muted-foreground">none recognised</span>
+                <div class="mt-0.5 max-h-32 overflow-y-auto font-mono leading-snug pl-2">
+                  <div v-for="name in folderPreview.recognised" :key="name">{{ name }}</div>
+                </div>
               </div>
+              <div v-else class="text-muted-foreground">Artifacts: none recognised.</div>
               <div v-if="folderPreview.skipped > 0" class="text-muted-foreground">
                 {{ folderPreview.skipped }} other file(s) will be ignored.
               </div>
@@ -344,7 +329,9 @@
           </div>
           <p v-if="uploadError" class="text-xs text-red-600">{{ uploadError }}</p>
         </div>
-        <footer class="px-5 py-3 border-t border-border flex items-center justify-end gap-2">
+        <footer
+          class="px-5 py-3 border-t border-border flex items-center justify-end gap-2 shrink-0"
+        >
           <button
             class="px-3 py-1.5 rounded-md text-sm font-medium text-muted-foreground hover:bg-muted"
             :disabled="uploadSubmitting"
@@ -370,7 +357,10 @@
 import { computed, onMounted, ref } from 'vue'
 import { useRoute } from 'vue-router'
 import PageHeader from '@/components/PageHeader.vue'
+import UploadDropZone, { type UploadTab } from '@/components/UploadDropZone.vue'
+import { Trash2 } from 'lucide-vue-next'
 import { api } from '@/api'
+import { confirm, alert } from '@/lib/confirm'
 import { useAuthStore } from '@/stores/auth'
 import {
   tracksFromVersions,
@@ -443,10 +433,33 @@ function groupedArtifacts(v: Version) {
   }))
 }
 
-// Toggle that gates the "Upload model" button. Currently checks staff
-// status from the auth store; flip to `true` to make the button visible
-// to everyone (e.g. for local testing without staff users).
-const canUploadModels = computed(() => auth.user?.is_staff === true)
+// Gates the "Upload model" button. Set REQUIRE_STAFF_FOR_UPLOAD=true to
+// restore the staff-only check; left open while we work out the right
+// permissioning for model uploads.
+const REQUIRE_STAFF_FOR_UPLOAD = false
+const canUploadModels = computed(() =>
+  REQUIRE_STAFF_FOR_UPLOAD ? auth.user?.is_staff === true : !!auth.user,
+)
+const canDeleteModels = canUploadModels
+
+const deletingId = ref<number | null>(null)
+
+// Parameters surfaced from the trainer that don't add value to the
+// per-version detail view: yolo_model/yolo_data are always the same
+// reference paths, and `epoch` is the legacy in-checkpoint name we now
+// expose as `yolo_epochs`.
+const HIDDEN_PARAM_KEYS = new Set(['yolo_model', 'yolo_data'])
+
+function visibleParams(params: Record<string, unknown>): Array<[string, unknown]> {
+  const hasYoloEpochs = 'yolo_epochs' in params
+  return Object.entries(params).filter(([key]) => {
+    if (HIDDEN_PARAM_KEYS.has(key)) return false
+    // Drop the raw `epoch` field when yolo_epochs already covers it; keep
+    // it for non-YOLO models that don't surface yolo_epochs.
+    if (key === 'epoch' && hasYoloEpochs) return false
+    return true
+  })
+}
 
 // --- Upload modal state ---
 const uploadOpen = ref(false)
@@ -461,6 +474,42 @@ const uploadError = ref('')
 // (or last.pt) and ingests recognized siblings as ModelArtifact rows.
 const uploadMode = ref<'file' | 'folder'>('file')
 const uploadFolderFiles = ref<File[]>([])
+
+const modelUploadTabs: UploadTab[] = [
+  {
+    key: 'file',
+    label: 'Single weights file',
+    mode: 'single-file',
+    accept: '.pt,.pth,.bin',
+    placeholder: 'Drop a .pt / .pth file or click to browse',
+    helper: '.pt / .pth — metadata (img_size, arch, epoch) is auto-extracted if present.',
+  },
+  {
+    key: 'folder',
+    label: 'Training run folder',
+    mode: 'folder',
+    placeholder: 'Drop an Ultralytics run folder or click to browse',
+    helper: 'Server takes weights/best.pt and ingests recognised additional files.',
+  },
+]
+
+const uploadHasFiles = computed(() =>
+  uploadMode.value === 'file' ? !!uploadFile.value : uploadFolderFiles.value.length > 0,
+)
+
+function formatFileSize(bytes: number): string {
+  if (bytes < 1024) return `${bytes} B`
+  if (bytes < 1024 * 1024) return `${(bytes / 1024).toFixed(0)} KB`
+  return `${(bytes / 1024 / 1024).toFixed(1)} MB`
+}
+
+function onModelUploadSelect(files: File[], tabKey: string) {
+  if (tabKey === 'file') {
+    uploadFile.value = files[0] ?? null
+  } else if (tabKey === 'folder') {
+    uploadFolderFiles.value = files
+  }
+}
 
 // Names the backend recognises and ingests into ModelArtifact. Used by the
 // preview list so the user sees what will land in the DB before they submit.
@@ -548,16 +597,6 @@ function openUpload() {
   uploadMode.value = 'file'
   uploadError.value = ''
   uploadOpen.value = true
-}
-
-function pickUploadFile(e: Event) {
-  const target = e.target as HTMLInputElement
-  uploadFile.value = target.files?.[0] ?? null
-}
-
-function pickUploadFolder(e: Event) {
-  const target = e.target as HTMLInputElement
-  uploadFolderFiles.value = target.files ? Array.from(target.files) : []
 }
 
 async function submitUpload() {
@@ -734,6 +773,37 @@ async function setDefault(track: Track, v: Version) {
       if (prev) prev.is_active = true
     }
     loadError.value = e instanceof Error ? e.message : String(e)
+  }
+}
+
+async function confirmDelete(v: Version) {
+  if (v.is_active) {
+    await alert({
+      title: 'Cannot delete active model',
+      message: `"${v.version_name}" is the active version. Pick another default first, then delete it.`,
+    })
+    return
+  }
+  if (deletingId.value !== null) return
+  const ok = await confirm({
+    title: 'Delete model',
+    message: `Delete model "${v.version_name}"?\nThis removes the weights file and all artifacts. This cannot be undone.`,
+    confirmLabel: 'Delete',
+    variant: 'danger',
+  })
+  if (!ok) return
+  deletingId.value = v.id
+  try {
+    const res = await api(`/api/analysis/models/${v.id}/`, { method: 'DELETE' })
+    if (!res.ok) {
+      const data = await res.json().catch(() => ({}))
+      throw new Error(data.error || data.detail || `HTTP ${res.status}`)
+    }
+    await loadFromApi()
+  } catch (e) {
+    loadError.value = e instanceof Error ? e.message : String(e)
+  } finally {
+    deletingId.value = null
   }
 }
 

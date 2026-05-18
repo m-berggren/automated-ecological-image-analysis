@@ -6,6 +6,8 @@ from .views import (
     InferenceRunCancelView,
     InferenceRunDetailView,
     InferenceRunListCreateView,
+    InferenceRunRecomputeExclusionsView,
+    ModelVersionDetailView,
     ModelVersionListCreateView,
     ModelVersionSetActiveView,
     TrainingJobCancelView,
@@ -20,6 +22,11 @@ urlpatterns = [
         name='model-version-list-create',
     ),
     path(
+        'models/<int:pk>/',
+        ModelVersionDetailView.as_view(),
+        name='model-version-detail',
+    ),
+    path(
         'models/<int:pk>/set-active/',
         ModelVersionSetActiveView.as_view(),
         name='model-version-set-active',
@@ -30,6 +37,11 @@ urlpatterns = [
         'runs/<int:pk>/cancel/',
         InferenceRunCancelView.as_view(),
         name='run-cancel',
+    ),
+    path(
+        'runs/<int:pk>/recompute-exclusions/',
+        InferenceRunRecomputeExclusionsView.as_view(),
+        name='run-recompute-exclusions',
     ),
     path('detections/bulk/', DetectionBulkView.as_view(), name='detection-bulk'),
     path(

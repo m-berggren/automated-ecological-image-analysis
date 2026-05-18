@@ -3,6 +3,8 @@ from django.urls import path
 from .views import (
     PollinatorDetectionDetailView,
     PollinatorDetectionListView,
+    PollinatorRunExportAnnotatedView,
+    PollinatorRunExportCropsView,
     PollinatorRunExportCSVView,
     PollinatorTrainingCreateView,
     PollinatorTrainingPoolView,
@@ -18,6 +20,16 @@ urlpatterns = [
         'runs/<int:run_id>/export.csv',
         PollinatorRunExportCSVView.as_view(),
         name='pollinator-run-export-csv',
+    ),
+    path(
+        'runs/<int:run_id>/export-crops.zip',
+        PollinatorRunExportCropsView.as_view(),
+        name='pollinator-run-export-crops',
+    ),
+    path(
+        'runs/<int:run_id>/export-annotated.zip',
+        PollinatorRunExportAnnotatedView.as_view(),
+        name='pollinator-run-export-annotated',
     ),
     path(
         'detections/<int:pk>/',

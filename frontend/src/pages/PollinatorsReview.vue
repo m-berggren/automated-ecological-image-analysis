@@ -29,83 +29,113 @@
       </button>
     </div>
     <div class="flex-1 flex flex-col-reverse lg:flex-row min-h-0">
-      <!-- Left: filters + grouped grid -->
+      <!-- Left: filters + grouped grid. Width controlled by --left-width
+           at lg+ so the divider drag can update it via a single CSS var.
+           @container lets children query *this section's* width (not the
+           viewport) so the crops grid and filter row reflow as the
+           reviewer drags the divider. Mobile keeps the full-width stacked
+           layout. -->
       <section
-        class="w-full lg:w-[480px] shrink-0 border-t lg:border-t-0 lg:border-r border-border flex flex-col bg-surface max-h-[55vh] lg:max-h-none"
+        :style="{ '--left-width': leftWidth + 'px' }"
+        class="@container w-full lg:w-[var(--left-width)] shrink-0 border-t lg:border-t-0 lg:border-r border-border flex flex-col bg-surface max-h-[55vh] lg:max-h-none"
       >
         <div class="px-4 py-3 border-b border-border space-y-2">
-          <div class="flex items-center gap-2 text-xs">
-            <label class="text-muted-foreground">Show</label>
-            <select
-              v-model="statusFilter"
-              class="px-2 py-1 rounded border border-border bg-background"
-            >
-              <option value="todo">Todo</option>
-              <option value="unsure">Unsure</option>
-              <option value="rejected">Rejected</option>
-              <option value="all">All</option>
-            </select>
-            <label class="text-muted-foreground">Class</label>
-            <select
-              v-model="classFilter"
-              class="px-2 py-1 rounded border border-border bg-background"
-            >
-              <option value="all">All</option>
-              <option v-for="cls in CLASSES" :key="cls" :value="cls">
-                {{ classLabel(cls) }}
-              </option>
-            </select>
-            <button
-              class="ml-auto px-2 py-1 rounded border border-border hover:bg-muted disabled:opacity-50 disabled:hover:bg-transparent"
-              :disabled="exporting || !run"
-              @click="exportCsv"
-            >
-              {{ exporting ? 'Exporting…' : 'Export CSV' }}
-            </button>
+          <!-- Filter row: stacks vertically below 340px and runs side by
+               side from 340px upward. Side-by-side needs ~290px just for
+               the two label+select pairs plus the gap; below that the
+               Class group runs off the edge. Show goes on top when
+               stacked so the most-used control stays reachable first. -->
+          <div class="flex flex-col @[340px]:flex-row @[340px]:items-center gap-2 text-xs">
+            <div class="flex items-center gap-2">
+              <label class="text-muted-foreground">Show</label>
+              <select
+                v-model="statusFilter"
+                class="flex-1 px-2 py-1 rounded border border-border bg-background"
+              >
+                <option value="pending">Pending</option>
+                <option value="reviewed">Reviewed</option>
+                <option value="unsure">Unsure</option>
+                <option value="all">All</option>
+              </select>
+            </div>
+            <div class="flex items-center gap-2">
+              <label class="text-muted-foreground">Class</label>
+              <select
+                v-model="classFilter"
+                class="flex-1 px-2 py-1 rounded border border-border bg-background"
+              >
+                <option value="all">All</option>
+                <option v-for="cls in CLASSES" :key="cls" :value="cls">
+                  {{ classLabel(cls) }}
+                </option>
+                <option value="background">Background</option>
+              </select>
+            </div>
           </div>
-          <!-- Per-detector minimum confidence. Detections from the other branch
-             pass through unaffected (preprocessing-only crops have no YOLO
-             score and so on). Step 0.05 keeps the slider snappy. -->
+          <!-- Per-branch min-confidence sliders. Letting the reviewer tune
+             YOLO and the crop classifier independently mirrors how those
+             stages are configured at upload time. Detections with no
+             score in a branch (e.g. preprocessing-only crops lack a YOLO
+             score) pass that branch's filter unaffected, so the slider
+             only hides things its branch actually scored. -->
           <div class="grid grid-cols-[auto_1fr_auto] items-center gap-x-2 gap-y-1 text-xs">
             <label for="yolo-min" class="text-muted-foreground">YOLO ≥</label>
             <input
               id="yolo-min"
               type="range"
-              :min="inferenceYoloThreshold"
+              min="0"
               max="1"
               step="0.05"
               v-model.number="yoloMinConf"
               class="w-full accent-primary"
-              :title="`Inference threshold: ${inferenceYoloThreshold.toFixed(2)}`"
             />
             <span class="font-mono w-10 text-right">{{ yoloMinConf.toFixed(2) }}</span>
             <label for="insectnet-min" class="text-muted-foreground">InsectNet ≥</label>
             <input
               id="insectnet-min"
               type="range"
-              :min="inferenceInsectnetThreshold"
+              min="0"
               max="1"
               step="0.05"
               v-model.number="insectnetMinConf"
               class="w-full accent-primary"
-              :title="`Inference threshold: ${inferenceInsectnetThreshold.toFixed(2)}`"
             />
             <span class="font-mono w-10 text-right">{{ insectnetMinConf.toFixed(2) }}</span>
           </div>
-          <div v-if="belowThresholdIds.length" class="flex items-center justify-end text-xs">
+          <!-- Search + below-threshold toggle. Same row when the section
+               is wide enough; stacks when not (search on top, button
+               underneath). Search runs after 3 characters so single-key
+               typing doesn't trigger noisy re-filters. -->
+          <div class="flex flex-col gap-2 text-xs @[340px]:flex-row @[340px]:items-center">
+            <input
+              type="text"
+              v-model.trim="searchQuery"
+              placeholder="Search image (3+ chars)"
+              class="flex-1 min-w-0 px-2 py-1 rounded border border-border bg-background"
+            />
             <button
-              class="px-2 py-1 rounded border border-red-300 text-red-700 hover:bg-red-50 disabled:opacity-50"
-              :disabled="rejectingBelow"
-              @click="rejectBelowThreshold"
+              v-if="!viewBelowOnly && belowThresholdIds.length"
+              class="shrink-0 px-2 py-1 rounded border border-border text-foreground hover:bg-muted"
+              @click="viewBelowOnly = true"
             >
-              {{
-                rejectingBelow ? 'Rejecting…' : `Reject ${belowThresholdIds.length} below threshold`
-              }}
+              View {{ belowThresholdIds.length }} below threshold
+            </button>
+            <button
+              v-else-if="viewBelowOnly"
+              class="shrink-0 px-2 py-1 rounded border border-primary text-primary hover:bg-primary/10"
+              @click="viewBelowOnly = false"
+            >
+              ← Back to normal view
             </button>
           </div>
           <div class="text-xs text-muted-foreground flex items-center justify-between gap-3">
             <span class="flex-1 min-w-0 truncate">
-              {{ filteredDetections.length }} of {{ detections.length }} detections
+              {{ filteredDetections.length }} of {{ detections.length }} detections<span
+                v-if="loadProgress.total && loadProgress.loaded < loadProgress.total"
+                class="italic"
+              >
+                · loading {{ loadProgress.loaded }}/{{ loadProgress.total }}…</span
+              >
             </span>
             <button
               class="text-primary hover:underline"
@@ -183,13 +213,19 @@
               {{ group.label }}
               <span class="font-normal">({{ group.detections.length }})</span>
             </header>
-            <div class="grid grid-cols-5 gap-1 p-2">
+            <!-- Column count scales with the section's own width via
+                 container queries. Crops stay roughly square at every
+                 breakpoint so the grid feels consistent as the divider
+                 moves. -->
+            <div
+              class="grid grid-cols-3 @[260px]:grid-cols-4 @[340px]:grid-cols-5 @[440px]:grid-cols-6 @[560px]:grid-cols-7 gap-1 p-2"
+            >
               <div
                 v-for="d in group.detections"
                 :key="d.id"
                 class="rounded-md overflow-hidden border-2 transition-all"
                 :class="[
-                  selectedId === d.id
+                  isHighlighted(d.id)
                     ? 'border-primary ring-2 ring-primary'
                     : 'border-transparent hover:border-border',
                   reviewedFade(d) ? 'opacity-50' : '',
@@ -245,18 +281,32 @@
         </div>
       </section>
 
-      <!-- Right: preview pane (mirrors left's structural feel: thin top bar, scroll body, action bar at bottom) -->
-      <section class="flex-1 flex flex-col min-w-0">
+      <!-- Drag-resizable divider, lg+ only. 1px visible line in a 4px hit
+           area so the cursor doesn't have to be pixel-perfect. -->
+      <div
+        class="hidden lg:flex w-1 shrink-0 cursor-col-resize group items-stretch"
+        role="separator"
+        aria-orientation="vertical"
+        @mousedown="onResizerMouseDown"
+      >
+        <div class="w-px h-full bg-border group-hover:bg-primary mx-auto" />
+      </div>
+
+      <!-- Right: preview pane (mirrors left's structural feel: thin top
+           bar, scroll body, action bar at bottom). @container so the
+           Label/Predictions row can adapt to *this pane's* width as the
+           divider moves. -->
+      <section class="@container flex-1 flex flex-col min-w-0">
         <div v-if="!selected" class="m-auto text-sm text-muted-foreground">
           Select a detection on the left to review it.
         </div>
         <template v-else>
-          <!-- Top bar (height matches left filter bar) -->
-          <header
-            class="px-5 py-3 border-b border-border bg-surface text-sm flex items-center gap-3"
-          >
-            <span class="font-medium">Detection #{{ selected.id }}</span>
-            <span class="text-muted-foreground font-mono text-xs truncate">
+          <!-- Top bar. Filename is the primary identifier here — the
+               internal Detection #id was a debug crutch that ate
+               horizontal space without telling the reviewer anything they
+               needed. -->
+          <header class="px-5 py-1.5 border-b border-border bg-surface flex items-center gap-3">
+            <span class="font-medium font-mono text-sm truncate">
               {{ selected.source_image_filename }}
             </span>
             <span
@@ -273,17 +323,10 @@
                16:9 box that forced the right pane to scroll. -->
             <div
               class="flex-1 min-h-0 relative overflow-hidden"
-              :class="selected.source_image_url && sourceImage.w ? 'cursor-zoom-in' : ''"
               :style="{ backgroundColor: classBgFor(primaryClass(selected)) }"
-              role="button"
-              tabindex="0"
-              @click="openZoom"
-              @keydown.enter.prevent="openZoom"
+              :class="selected.source_image_url && sourceImage.w ? 'cursor-crosshair' : ''"
+              @mousedown="onPreviewMouseDown"
             >
-              <div
-                class="absolute top-0 left-0 right-0 h-1.5 z-10"
-                :style="{ backgroundColor: classColor(primaryClass(selected)) }"
-              />
               <svg
                 v-if="selected.source_image_url && sourceImage.w"
                 :viewBox="`0 0 ${sourceImage.w} ${sourceImage.h}`"
@@ -295,40 +338,147 @@
                   :width="sourceImage.w"
                   :height="sourceImage.h"
                 />
+                <!-- Red = single-selected (no bulk) OR in the current
+                   drag-selected bulk. Gray = unreviewed sibling, available
+                   to click or drag over. Bulk takes priority over single
+                   selection so a stale auto-selected tile doesn't keep
+                   its red bbox after a drag-select picks elsewhere. -->
                 <rect
-                  v-if="bboxOutline"
-                  :x="bboxOutline.x"
-                  :y="bboxOutline.y"
-                  :width="bboxOutline.width"
-                  :height="bboxOutline.height"
-                  fill="#ef4444"
-                  fill-opacity="0.18"
-                  stroke="#ef4444"
+                  v-for="ov in siblingOverlays"
+                  :key="ov.id"
+                  :x="ov.outline.x"
+                  :y="ov.outline.y"
+                  :width="ov.outline.width"
+                  :height="ov.outline.height"
+                  :fill="isHighlighted(ov.id) ? '#ef4444' : 'transparent'"
+                  :fill-opacity="isHighlighted(ov.id) ? 0.18 : 0"
+                  :stroke="isHighlighted(ov.id) ? '#ef4444' : '#52525b'"
                   :stroke-width="bboxStrokeWidth"
+                  class="cursor-pointer"
+                  @mousedown.stop
+                  @click="onSiblingBboxClick(ov, $event)"
                 />
+                <!-- Drag-select rectangle. pointer-events-none so it can't
+                   intercept mousemove from the window listener. -->
+                <rect
+                  v-if="dragRect"
+                  :x="dragRect.x1"
+                  :y="dragRect.y1"
+                  :width="dragRect.x2 - dragRect.x1"
+                  :height="dragRect.y2 - dragRect.y1"
+                  fill="#3b82f6"
+                  fill-opacity="0.15"
+                  stroke="#3b82f6"
+                  :stroke-width="bboxStrokeWidth"
+                  stroke-dasharray="8 4"
+                  class="pointer-events-none"
+                />
+                <ROIOverlay :bbox="roiBbox" :image-w="sourceImage.w" :image-h="sourceImage.h" />
               </svg>
               <span
                 v-else
                 class="absolute inset-0 flex items-center justify-center text-7xl font-bold opacity-30"
                 >{{ classGlyph(primaryClass(selected)) }}</span
               >
+              <!-- Explicit zoom button. The whole tile is still click-to-
+                 zoom but the bbox overlays now eat most of the surface, so
+                 an unambiguous button avoids the "I tried to zoom but
+                 selected a sibling instead" miss. -->
+              <button
+                v-if="selected.source_image_url && sourceImage.w"
+                @mousedown.stop
+                @click.stop="openZoom"
+                title="Zoom in"
+                class="absolute bottom-3 right-3 z-10 p-2 rounded-md bg-black/55 text-white hover:bg-black/75 cursor-pointer"
+              >
+                <ZoomIn class="w-4 h-4" />
+              </button>
             </div>
 
-            <!-- Predictions + Label: stacked below xl, side-by-side at xl+ (Label left, Predictions right) -->
-            <div class="grid grid-cols-1 xl:grid-cols-2 border-b border-border">
-              <!-- Predictions (compact, two-line). Order swap at xl+ via order-2. -->
-              <div class="px-5 py-4 border-b border-border xl:border-b-0 xl:order-2">
+            <!-- Label + Predictions row. Column count tracks the pane's
+                 own width via container queries:
+                   < 500px  stack vertically (1 col)
+                   500-700  side by side (2 cols, fills the row)
+                   700-1000 2 panels + 1 empty col on the right
+                   1000+    2 panels + 2 empty cols on the right
+                 Empty cols come from grid auto-flow (no explicit divs).
+                 Label is first in DOM so the stacked view shows it on
+                 top — text-size and padding still scale with the
+                 viewport via xl: since legibility is about pixel size
+                 on the user's screen, not container width. -->
+            <div
+              class="grid grid-cols-1 @[500px]:grid-cols-2 @[700px]:grid-cols-3 @[1000px]:grid-cols-4 border-b border-border"
+            >
+              <!-- Label first (one row per class with radio at end). -->
+              <div class="px-5 py-2 border-b border-border @[500px]:border-b-0 @[500px]:border-r">
                 <div
-                  class="text-[11px] font-semibold uppercase tracking-wider text-muted-foreground mb-2"
+                  class="text-[10px] xl:text-[11px] font-semibold uppercase tracking-wider text-muted-foreground mb-0.5"
+                >
+                  Label
+                </div>
+                <!-- Radios (not checkboxes) so the browser enforces single-
+                   select at the DOM level. With checkboxes a click race
+                   between Vue's :checked re-binding and the DOM's own state
+                   could leave two ticks visible. The name attribute groups
+                   them so picking one auto-unsets the others. -->
+                <div>
+                  <label
+                    v-for="cls in CLASSES"
+                    :key="cls"
+                    class="flex items-center gap-2 py-0 xl:py-0.5 px-2 -mx-2 rounded cursor-pointer"
+                  >
+                    <span
+                      class="w-2 h-2 rounded-full shrink-0"
+                      :style="{ backgroundColor: classColor(cls) }"
+                    />
+                    <span class="flex-1 text-xs xl:text-sm">{{ classLabel(cls) }}</span>
+                    <input
+                      type="radio"
+                      name="label-class"
+                      :checked="cls === effectiveLabel(selected)"
+                      @change="confirmAs(cls)"
+                      class="w-3.5 h-3.5 xl:w-4 xl:h-4"
+                    />
+                  </label>
+                  <!-- 5th option: rejecting means "this is background" — the
+                     binary classifier trains rejected detections as the
+                     'background' class. Treating it as a label keeps the
+                     Label panel as a single source of truth for what the
+                     reviewer decided. -->
+                  <label
+                    class="flex items-center gap-2 py-0 xl:py-0.5 px-2 -mx-2 rounded cursor-pointer"
+                  >
+                    <span class="w-2 h-2 rounded-full shrink-0 bg-muted-foreground/40" />
+                    <span class="flex-1 text-xs xl:text-sm">
+                      Background
+                      <span class="text-[10px] xl:text-[11px] text-muted-foreground ml-1"
+                        >(reject)</span
+                      >
+                    </span>
+                    <input
+                      type="radio"
+                      name="label-class"
+                      :checked="selected.reviewer_status === 'rejected'"
+                      @change="reject()"
+                      class="w-3.5 h-3.5 xl:w-4 xl:h-4"
+                    />
+                  </label>
+                </div>
+              </div>
+
+              <!-- Predictions (compact, two-line). -->
+              <div class="px-5 py-2">
+                <div
+                  class="text-[10px] xl:text-[11px] font-semibold uppercase tracking-wider text-muted-foreground mb-0.5"
                 >
                   Predictions
                 </div>
-                <div class="space-y-1.5 text-sm">
+                <div class="space-y-0.5 text-xs xl:text-sm">
                   <div
                     class="flex items-center gap-2"
                     :class="selected.yolo_class == null ? 'opacity-60' : ''"
                   >
-                    <span class="text-muted-foreground w-20">YOLO</span>
+                    <span class="text-muted-foreground w-16 xl:w-20">YOLO</span>
                     <span
                       class="w-2 h-2 rounded-full shrink-0"
                       :style="{ backgroundColor: classColor(selected.yolo_class) }"
@@ -336,7 +486,7 @@
                     <span class="font-medium flex-1">{{
                       selected.yolo_class ? classLabel(selected.yolo_class) : '—'
                     }}</span>
-                    <span class="font-mono text-xs text-muted-foreground">
+                    <span class="font-mono text-muted-foreground">
                       {{
                         selected.yolo_confidence != null ? selected.yolo_confidence.toFixed(2) : '—'
                       }}
@@ -346,7 +496,7 @@
                     class="flex items-center gap-2"
                     :class="selected.insectnet_class == null ? 'opacity-60' : ''"
                   >
-                    <span class="text-muted-foreground w-20">InsectNet</span>
+                    <span class="text-muted-foreground w-16 xl:w-20">InsectNet</span>
                     <span
                       class="w-2 h-2 rounded-full shrink-0"
                       :style="{ backgroundColor: classColor(selected.insectnet_class) }"
@@ -354,7 +504,7 @@
                     <span class="font-medium flex-1">{{
                       selected.insectnet_class ? classLabel(selected.insectnet_class) : '—'
                     }}</span>
-                    <span class="font-mono text-xs text-muted-foreground">
+                    <span class="font-mono text-muted-foreground">
                       {{
                         selected.insectnet_confidence != null
                           ? selected.insectnet_confidence.toFixed(2)
@@ -362,91 +512,52 @@
                       }}
                     </span>
                   </div>
-                  <div v-if="hasDisagreement(selected)" class="text-xs text-amber-700 pt-1">
+                  <div v-if="hasDisagreement(selected)" class="text-amber-700">
                     ⚠ Models disagree
                   </div>
-                  <div v-else-if="isLowConfidence(selected)" class="text-xs text-amber-700 pt-1">
+                  <div v-else-if="isLowConfidence(selected)" class="text-amber-700">
                     ⚠ Low confidence
                   </div>
-                </div>
-              </div>
-
-              <!-- Label (one row per class with checkbox at end). Visually first at xl+ via order-1. -->
-              <div class="px-5 py-4 xl:order-1 xl:border-r border-border">
-                <div
-                  class="text-[11px] font-semibold uppercase tracking-wider text-muted-foreground mb-2"
-                >
-                  Label
-                </div>
-                <div>
-                  <label
-                    v-for="cls in CLASSES"
-                    :key="cls"
-                    class="flex items-center gap-3 py-2 px-2 -mx-2 rounded cursor-pointer"
-                  >
-                    <span
-                      class="w-2 h-2 rounded-full shrink-0"
-                      :style="{ backgroundColor: classColor(cls) }"
-                    />
-                    <span class="flex-1 text-sm">{{ classLabel(cls) }}</span>
-                    <input
-                      type="checkbox"
-                      :checked="cls === effectiveLabel(selected)"
-                      @change="correctTo(cls)"
-                      class="w-4 h-4"
-                    />
-                  </label>
-                  <!-- 5th option: rejecting means "this is background" — the
-                     binary classifier trains rejected detections as the
-                     'background' class. Treating it as a label keeps the
-                     Label panel as a single source of truth for what the
-                     reviewer decided. -->
-                  <label class="flex items-center gap-3 py-2 px-2 -mx-2 rounded cursor-pointer">
-                    <span class="w-2 h-2 rounded-full shrink-0 bg-muted-foreground/40" />
-                    <span class="flex-1 text-sm">
-                      Background
-                      <span class="text-[10px] text-muted-foreground ml-1">(reject)</span>
-                    </span>
-                    <input
-                      type="checkbox"
-                      :checked="selected.reviewer_status === 'rejected'"
-                      @change="reject()"
-                      class="w-4 h-4"
-                    />
-                  </label>
                 </div>
               </div>
             </div>
           </div>
 
+          <!-- "All reviewed" CTA. Sits above the footer so the action bar
+             buttons are still visible for further edits, while making the
+             next-step path obvious. -->
+          <div
+            v-if="allReviewed && run"
+            class="border-t border-border bg-green-50 px-5 py-3 flex items-center gap-3 text-sm"
+          >
+            <span class="text-green-800 flex-1">
+              ✓ All detections reviewed. Ready for export.
+            </span>
+            <RouterLink
+              :to="`/pollinators/runs/${run.id}/export`"
+              class="px-3 py-1.5 rounded-md bg-green-600 text-white hover:bg-green-700 font-medium"
+            >
+              Continue to Export →
+            </RouterLink>
+          </div>
           <!-- Bottom action bar -->
           <footer
             class="border-t border-border bg-surface px-5 py-3 flex items-center justify-between"
           >
             <span class="text-[11px] text-muted-foreground font-mono hidden md:block">
-              1-4 confirm · x reject · u unsure · z undo · ⏎ suggested · ←→↑↓ navigate · ⇧ + arrows
-              / click: range select · esc: clear
+              1-4 confirm · x reject · u unsure · ⏎ suggested · ←→↑↓ navigate · ⇧ + arrows / click:
+              range select · esc: clear
             </span>
             <div class="flex gap-2 ml-auto">
               <button
-                class="px-3 py-1.5 rounded-md text-sm font-medium border border-border hover:bg-muted disabled:opacity-50 disabled:cursor-not-allowed"
-                :disabled="!lastAction || undoing"
-                :title="
-                  lastAction ? `Undo last action on detection #${lastAction.id}` : 'Nothing to undo'
-                "
-                @click="undoLast"
-              >
-                {{ undoing ? 'Undoing…' : 'Undo' }}
-              </button>
-              <button
                 class="px-3 py-1.5 rounded-md text-sm font-medium border border-border hover:bg-muted"
-                @click="reject"
+                @click="reject()"
               >
                 Reject
               </button>
               <button
                 class="px-3 py-1.5 rounded-md text-sm font-medium border border-amber-300 text-amber-700 hover:bg-amber-50"
-                @click="markUnsure"
+                @click="markUnsure()"
               >
                 Unsure
               </button>
@@ -491,15 +602,25 @@
         <g :transform="`translate(${zoom.tx} ${zoom.ty}) scale(${zoom.scale})`">
           <image :href="selected.source_image_url" :width="sourceImage.w" :height="sourceImage.h" />
           <rect
-            v-if="bboxOutline"
-            :x="bboxOutline.x"
-            :y="bboxOutline.y"
-            :width="bboxOutline.width"
-            :height="bboxOutline.height"
+            v-for="ov in siblingOverlays"
+            :key="ov.id"
+            :x="ov.outline.x"
+            :y="ov.outline.y"
+            :width="ov.outline.width"
+            :height="ov.outline.height"
             fill="none"
-            stroke="#ef4444"
+            :stroke="isHighlighted(ov.id) ? '#ef4444' : '#a1a1aa'"
             :stroke-width="bboxStrokeWidth"
             vector-effect="non-scaling-stroke"
+            class="cursor-pointer"
+            @click="onSiblingBboxClick(ov, $event)"
+            @mousedown="isHighlighted(ov.id) || $event.stopPropagation()"
+          />
+          <ROIOverlay
+            :bbox="roiBbox"
+            :image-w="sourceImage.w"
+            :image-h="sourceImage.h"
+            non-scaling-stroke
           />
         </g>
       </svg>
@@ -518,18 +639,23 @@
 
 <script setup lang="ts">
 import { computed, nextTick, onMounted, onUnmounted, ref, watch } from 'vue'
-import { useRoute } from 'vue-router'
+import { RouterLink, useRoute } from 'vue-router'
+import { ZoomIn } from 'lucide-vue-next'
 import PageHeader from '@/components/PageHeader.vue'
 import PollinatorsStepper from '@/components/PollinatorsStepper.vue'
+import ROIOverlay from '@/components/ROIOverlay.vue'
 import { api } from '@/api'
 
 type ClassName = 'fly' | 'bumblebee' | 'butterfly' | 'other'
 type ReviewerStatus = 'unreviewed' | 'confirmed' | 'corrected' | 'rejected' | 'unsure'
-// Frontend workflow labels (not the backend reviewer_status). 'todo' is
-// the active queue (unreviewed). 'unsure' / 'rejected' are explicit sub-
-// queues you typically revisit later. 'all' shows everything, with
-// confirmed/corrected ones in their class groups.
-type StatusFilter = 'todo' | 'unsure' | 'rejected' | 'all'
+// Frontend workflow labels (not the backend reviewer_status).
+//   pending  — unreviewed; the active working queue.
+//   reviewed — anything the reviewer has settled (confirmed / corrected /
+//              rejected). Lets the reviewer see what's already handled.
+//   unsure   — explicitly parked for revisit; kept separate so it doesn't
+//              disappear into the reviewed pile.
+//   all      — everything.
+type StatusFilter = 'pending' | 'reviewed' | 'unsure' | 'all'
 type Source = 'yolo' | 'preprocessing' | 'both'
 
 const LOW_CONFIDENCE_THRESHOLD = 0.6
@@ -570,6 +696,9 @@ interface ReviewBundle {
     config?: {
       yolo?: { confidence?: number }
       binary_classifier?: { confidence?: number }
+      preprocessing?: {
+        roi_bbox?: [number, number, number, number] | null
+      }
     }
   }
   detections: Detection[]
@@ -595,27 +724,25 @@ const loadError = ref('')
 const run = ref<ReviewBundle['run'] | null>(null)
 const detections = ref<Detection[]>([])
 const selectedId = ref<number | null>(null)
-const statusFilter = ref<StatusFilter>('todo')
-type ClassFilter = ClassName | 'all'
+const statusFilter = ref<StatusFilter>('pending')
+type ClassFilter = ClassName | 'background' | 'all'
 const classFilter = ref<ClassFilter>('all')
-// Inference-time thresholds. Anything below these never made it into the
-// DB, so the sliders can't usefully go lower.
-const inferenceYoloThreshold = computed(() => run.value?.config?.yolo?.confidence ?? 0)
-const inferenceInsectnetThreshold = computed(
-  () => run.value?.config?.binary_classifier?.confidence ?? 0,
-)
+// Per-branch confidence sliders. Seeded from the run's own config in
+// loadFromApi so the review view starts in the same regime the run was
+// actually created with — whatever the reviewer set on the upload page
+// is what they see here, not a hard-coded default. The literals here
+// are just a placeholder before the run loads. Detections with no score
+// in a branch pass that branch's filter so preprocessing-only crops
+// aren't dropped by the YOLO slider, etc.
 const yoloMinConf = ref(0)
 const insectnetMinConf = ref(0)
-// Snap sliders to the inference thresholds when the run loads so "no
-// filter" matches the actual data floor instead of a misleading 0.
-watch(
-  [inferenceYoloThreshold, inferenceInsectnetThreshold],
-  ([y, i]) => {
-    yoloMinConf.value = y
-    insectnetMinConf.value = i
-  },
-  { immediate: true },
-)
+
+function passesSliders(d: Detection): boolean {
+  const yoloOk = d.yolo_confidence == null || d.yolo_confidence >= yoloMinConf.value
+  const insectnetOk =
+    d.insectnet_confidence == null || d.insectnet_confidence >= insectnetMinConf.value
+  return yoloOk && insectnetOk
+}
 const bulkIds = ref<Set<number>>(new Set())
 const bulkCorrectClass = ref<'' | ClassName>('')
 // Surfaces how many rows the most recent bulk-confirm skipped because they
@@ -631,28 +758,67 @@ interface FailedEntry {
 }
 const failedSaves = ref<Map<number, FailedEntry>>(new Map())
 const retrying = ref(false)
-const exporting = ref(false)
-const rejectingBelow = ref(false)
+// When true, the grid inverts the slider filter and shows ONLY the
+// unreviewed rows the sliders would otherwise hide, so the reviewer can
+// step through them one by one and confirm/reject individually instead
+// of bulk-rejecting blindly.
+const viewBelowOnly = ref(false)
+// Free-text substring filter on source image filename. Held in the
+// review page (not query-string) since reviewers tend to clear it as
+// they jump between tiles. Substring match (case-insensitive) so
+// typing "011" finds "WSCT0011.JPG". Min length keeps the filter from
+// firing on single-key noise; below the floor it does nothing.
+const searchQuery = ref('')
+const SEARCH_MIN_LEN = 3
 
 onMounted(loadFromApi)
+
+interface DetectionsPage {
+  count: number
+  next: string | null
+  results: Detection[]
+}
+
+const loadProgress = ref({ loaded: 0, total: 0 })
 
 async function loadFromApi() {
   const id = route.params.id as string
   try {
-    const [runRes, detRes] = await Promise.all([
-      api(`/api/analysis/runs/${id}/`),
-      api(`/api/pollinator/runs/${id}/detections/`),
-    ])
+    const runRes = await api(`/api/analysis/runs/${id}/`)
     if (!runRes.ok) {
       loadError.value = `Run: HTTP ${runRes.status}`
-      return
-    }
-    if (!detRes.ok) {
-      loadError.value = `Detections: HTTP ${detRes.status}`
+      loading.value = false
       return
     }
     run.value = await runRes.json()
-    detections.value = await detRes.json()
+    // Seed the confidence sliders from the run's own config so the
+    // review view starts at the same thresholds the upload page picked.
+    // Falls back to 0 ("no filter") if the run was created without an
+    // explicit threshold for that branch.
+    yoloMinConf.value = run.value?.config?.yolo?.confidence ?? 0
+    insectnetMinConf.value = run.value?.config?.binary_classifier?.confidence ?? 0
+    // Stream pages: paint the first batch immediately so the reviewer
+    // can start clicking, then keep appending until the run is fully
+    // loaded. detections.value is reactive; groupedDetections recomputes
+    // each time we extend it.
+    let next: string | null = `/api/pollinator/runs/${id}/detections/`
+    let firstPage = true
+    while (next) {
+      const url: string = next.startsWith('http') ? next.replace(/^https?:\/\/[^/]+/, '') : next
+      const res = await api(url)
+      if (!res.ok) {
+        loadError.value = `Detections: HTTP ${res.status}`
+        return
+      }
+      const page = (await res.json()) as DetectionsPage
+      detections.value = detections.value.concat(page.results)
+      loadProgress.value = { loaded: detections.value.length, total: page.count }
+      next = page.next
+      if (firstPage) {
+        loading.value = false
+        firstPage = false
+      }
+    }
   } catch (e) {
     loadError.value = e instanceof Error ? e.message : String(e)
   } finally {
@@ -664,37 +830,74 @@ const headerTitle = computed(() =>
   run.value ? `Review · ${run.value.name || `Run #${run.value.id}`}` : 'Review',
 )
 
+// Reviewer is done when no detection is still in the unreviewed pile.
+// Computed over the full detections list, not filteredDetections, so a
+// status/class filter doesn't make the banner falsely appear.
+const allReviewed = computed(
+  () =>
+    detections.value.length > 0 &&
+    detections.value.every((d) => d.reviewer_status !== 'unreviewed'),
+)
+
 const filteredDetections = computed(() => {
   let list = detections.value
-  if (statusFilter.value === 'todo') {
+  if (statusFilter.value === 'pending') {
     list = list.filter((d) => d.reviewer_status === 'unreviewed')
-  } else if (statusFilter.value === 'unsure') {
-    list = list.filter((d) => d.reviewer_status === 'unsure')
-  } else if (statusFilter.value === 'rejected') {
-    list = list.filter((d) => d.reviewer_status === 'rejected')
-  }
-  // Class filter: a broad match so spotting duplicates works regardless of
-  // who labelled it — accept if any signal (yolo, insectnet, reviewer,
-  // primary) says this class.
-  if (classFilter.value !== 'all') {
-    const cls = classFilter.value
+  } else if (statusFilter.value === 'reviewed') {
     list = list.filter(
       (d) =>
+        d.reviewer_status === 'confirmed' ||
+        d.reviewer_status === 'corrected' ||
+        d.reviewer_status === 'rejected',
+    )
+  } else if (statusFilter.value === 'unsure') {
+    list = list.filter((d) => d.reviewer_status === 'unsure')
+  }
+  // Image-name search. Only kicks in past the min length so a single key
+  // doesn't whip the grid through every partial match. Case-insensitive
+  // substring so "011" matches "WSCT0011.JPG" anywhere in the filename.
+  if (searchQuery.value.length >= SEARCH_MIN_LEN) {
+    const q = searchQuery.value.toLowerCase()
+    list = list.filter((d) => d.source_image_filename.toLowerCase().includes(q))
+  }
+  // Class filter.
+  //   Background    → only rejected rows (rejected = background label).
+  //   Fly/Bee/etc.  → reviewer's call wins. Confirmed/corrected match strictly
+  //                   on reviewer_label. Rejected rows are excluded entirely
+  //                   even if the original model thought they were that
+  //                   class — the reviewer overruled that prediction.
+  //                   Unreviewed/unsure still match any signal so the
+  //                   reviewer can hunt by detector output when nothing has
+  //                   been settled yet.
+  if (classFilter.value !== 'all') {
+    const cls = classFilter.value
+    list = list.filter((d) => {
+      if (cls === 'background') return d.reviewer_status === 'rejected'
+      if (d.reviewer_status === 'rejected') return false
+      if (d.reviewer_status === 'confirmed' || d.reviewer_status === 'corrected') {
+        return (d.reviewer_label ?? d.predicted_class) === cls
+      }
+      return (
         d.yolo_class === cls ||
         d.insectnet_class === cls ||
         d.reviewer_label === cls ||
-        d.predicted_class === cls,
-    )
+        d.predicted_class === cls
+      )
+    })
   }
-  if (yoloMinConf.value > 0) {
-    list = list.filter((d) => d.yolo_confidence == null || d.yolo_confidence >= yoloMinConf.value)
+  // Slider filter, or its inverse for the "View below threshold" mode:
+  // unreviewed-only rows that the sliders are currently hiding.
+  if (viewBelowOnly.value) {
+    list = list.filter((d) => d.reviewer_status === 'unreviewed' && !passesSliders(d))
+  } else {
+    list = list.filter(passesSliders)
   }
-  if (insectnetMinConf.value > 0) {
-    list = list.filter(
-      (d) => d.insectnet_confidence == null || d.insectnet_confidence >= insectnetMinConf.value,
-    )
-  }
-  return [...list].sort((a, b) => maxConfidence(a) - maxConfidence(b))
+  // Stable sort by id. The previous double-sort (confidence at this layer,
+  // then by source-image filename inside each group) caused tiles to
+  // visibly swap places whenever streamed pages arrived or a review action
+  // shifted the underlying ordering. Insertion order from the backend is
+  // deterministic and never moves once loaded.
+  return [...list].sort((a, b) => a.id - b.id)
 })
 
 const groupedDetections = computed(() => {
@@ -716,7 +919,10 @@ const groupedDetections = computed(() => {
   // unclassified split: everything that matched is a candidate for *this*
   // class. Background still gets pulled aside so duplicate-spotting in
   // Class=Fly doesn't count rejected things.
-  const collapseToClass = classFilter.value !== 'all' ? classFilter.value : null
+  // Class=Background is handled via the existing rejected → background
+  // bucket above, so we don't need a collapse rule for it.
+  const collapseToClass: ClassName | null =
+    classFilter.value !== 'all' && classFilter.value !== 'background' ? classFilter.value : null
   for (const d of filteredDetections.value) {
     if (d.reviewer_status === 'rejected') {
       background.push(d)
@@ -745,26 +951,8 @@ const groupedDetections = computed(() => {
     if (!classGroups.has(cls)) classGroups.set(cls, [])
     classGroups.get(cls)!.push(d)
   }
-  // Cluster same-image detections within each group so multi-insect photos
-  // sit next to each other in the grid.
-  // Stable cluster order: alphabetical by source image filename, then by
-  // ascending confidence within an image. Earlier we ordered clusters by
-  // "first appearance in the pre-sort list", which made removing the
-  // lowest-confidence detection in an image silently slide the whole
-  // cluster past its neighbours — looked like two crops swapped places.
-  const clusterByImage = (list: Detection[]) => {
-    list.sort((a, b) => {
-      const af = a.source_image_filename
-      const bf = b.source_image_filename
-      if (af !== bf) return af.localeCompare(bf)
-      return maxConfidence(a) - maxConfidence(b)
-    })
-  }
-  clusterByImage(review)
-  clusterByImage(unclassified)
-  clusterByImage(background)
-  for (const list of classGroups.values()) clusterByImage(list)
-
+  // No per-group re-sort. filteredDetections is already sorted by id, and
+  // the bucketing above preserves that order within each bucket.
   const out: {
     label: string
     kind: 'needs_review' | 'unclassified' | 'class' | 'background'
@@ -814,12 +1002,16 @@ const imageParityById = computed(() => {
 
 const selected = computed(() => detections.value.find((d) => d.id === selectedId.value) ?? null)
 
+// Only pick an initial selection when nothing is selected. We deliberately
+// do not snap to list[0] when the current selection falls out of the
+// filtered view (e.g. slider moved, bulk action, status change) — the
+// reviewer keeps seeing the tile they were on instead of teleporting to a
+// random low-id detection. The grid just won't show a highlight; clicking
+// another tile takes over from there.
 watch(
   filteredDetections,
   (list) => {
-    if (selectedId.value && !list.find((d) => d.id === selectedId.value)) {
-      selectedId.value = list[0]?.id ?? null
-    } else if (!selectedId.value && list.length) {
+    if (!selectedId.value && list.length) {
       selectedId.value = list[0].id
     }
   },
@@ -863,18 +1055,25 @@ watch(
 )
 
 // SVG strokes scale with the viewBox, so size the bbox outline relative to
-// the source image rather than the screen. ~0.15% of the longest side
-// renders as a hairline on a high-res photo without covering small insects.
+// the source image rather than the screen. ~0.3% of the longest side reads
+// clearly when the preview is shrunk down to fit the pane, while still
+// staying out of the way of small insects. Zoom uses non-scaling-stroke
+// (template-side) so it stays a hairline regardless of this value.
 const bboxStrokeWidth = computed(() => {
   const longest = Math.max(sourceImage.value.w, sourceImage.value.h)
-  return Math.max(1, longest * 0.0015)
+  return Math.max(2, longest * 0.003)
 })
 
 // The model's bbox sits tight against the insect, so drawing the outline
 // right on it covers the edges. Expand the rectangle outward by ~8% of
 // the longer bbox side so the line frames the insect with a small gap.
-const bboxOutline = computed(() => {
-  const b = selected.value?.bbox
+function outlineFor(d: Detection | null): {
+  x: number
+  y: number
+  width: number
+  height: number
+} | null {
+  const b = d?.bbox
   if (!b) return null
   const margin = Math.max(b.w, b.h) * 0.08
   return {
@@ -883,6 +1082,65 @@ const bboxOutline = computed(() => {
     width: b.w + 2 * margin,
     height: b.h + 2 * margin,
   }
+}
+
+// Every detection that shares the selected detection's source image,
+// painted on the preview as bbox overlays. The selected one renders red;
+// siblings render dark-gray and are clickable to switch selection. Selected
+// goes last so it stacks on top of any overlapping siblings. Useful for
+// spotting clusters (multiple insects in the same photo) without having
+// to flip through tiles.
+interface SiblingOverlay {
+  id: number
+  outline: { x: number; y: number; width: number; height: number }
+  isSelected: boolean
+}
+// Click on a sibling bbox in the preview SVG → switch selection. Stops
+// propagation so it doesn't trigger drag-select on the outer container.
+function onSiblingBboxClick(ov: SiblingOverlay, e: MouseEvent) {
+  e.stopPropagation()
+  selectedId.value = ov.id
+}
+
+// Single source of truth for "this detection looks selected". When a drag
+// bulk is active it takes priority: only bulk members read as selected,
+// so a stale single-selection (the auto-selected preview tile) doesn't
+// keep its red bbox / green grid ring after the reviewer drags a new
+// region that doesn't include it. When no bulk is active, fall back to
+// the normal single-selection (selectedId).
+function isHighlighted(id: number): boolean {
+  if (bulkIds.value.size > 0) return bulkIds.value.has(id)
+  return selectedId.value === id
+}
+
+const siblingOverlays = computed<SiblingOverlay[]>(() => {
+  const sel = selected.value
+  if (!sel) return []
+  const filename = sel.source_image_filename
+  const peers = filename
+    ? detections.value.filter((d) => d.source_image_filename === filename)
+    : [sel]
+  const out: SiblingOverlay[] = []
+  for (const d of peers) {
+    // Overlays are a working aid — they highlight detections the reviewer
+    // still needs to act on. Once a detection has been confirmed,
+    // corrected, rejected, or marked unsure, drop its bbox so the image
+    // doesn't stay cluttered with boxes that have already been handled.
+    // Exception: the currently selected detection always gets its
+    // overlay, even when reviewed, so a reviewer browsing the Reviewed
+    // pile can still see where on the image the selected crop sits.
+    if (d.id !== sel.id && d.reviewer_status !== 'unreviewed') continue
+    const outline = outlineFor(d)
+    if (!outline) continue
+    out.push({ id: d.id, outline, isSelected: d.id === sel.id })
+  }
+  out.sort((a, b) => (a.isSelected ? 1 : 0) - (b.isSelected ? 1 : 0))
+  return out
+})
+
+const roiBbox = computed<[number, number, number, number] | null>(() => {
+  const r = run.value?.config?.preprocessing?.roi_bbox
+  return r && r.length === 4 ? r : null
 })
 
 // Fullscreen zoom modal. State lives in viewBox units; the SVG <g> is
@@ -961,6 +1219,145 @@ function onPanMove(e: MouseEvent) {
 
 function onPanEnd() {
   panning.value = false
+}
+
+// Width of the left (crops) section in pixels at lg+. Persisted so each
+// reviewer's choice survives reloads. The bounds keep the layout sane —
+// below the min the filter row stops fitting in one line, above the max
+// the preview pane gets squashed.
+const LEFT_WIDTH_KEY = 'review:left-width'
+const LEFT_WIDTH_DEFAULT = 300
+const LEFT_WIDTH_MIN = 220
+const LEFT_WIDTH_MAX = 700
+const leftWidth = ref<number>(
+  (() => {
+    if (typeof localStorage === 'undefined') return LEFT_WIDTH_DEFAULT
+    const stored = Number(localStorage.getItem(LEFT_WIDTH_KEY))
+    if (!Number.isFinite(stored) || stored < LEFT_WIDTH_MIN || stored > LEFT_WIDTH_MAX) {
+      return LEFT_WIDTH_DEFAULT
+    }
+    return stored
+  })(),
+)
+watch(leftWidth, (w) => {
+  try {
+    localStorage.setItem(LEFT_WIDTH_KEY, String(w))
+  } catch {
+    // localStorage may be unavailable (private mode); ignore.
+  }
+})
+
+let resizeStartX = 0
+let resizeStartWidth = 0
+
+function onResizerMouseDown(e: MouseEvent) {
+  if (e.button !== 0) return
+  e.preventDefault()
+  resizeStartX = e.clientX
+  resizeStartWidth = leftWidth.value
+  window.addEventListener('mousemove', onResizerMove)
+  window.addEventListener('mouseup', onResizerUp)
+  // Lock cursor and kill text-selection while dragging so the mouse looks
+  // right wherever it travels and a sloppy drag doesn't highlight prose.
+  document.body.style.cursor = 'col-resize'
+  document.body.style.userSelect = 'none'
+}
+
+function onResizerMove(e: MouseEvent) {
+  const delta = e.clientX - resizeStartX
+  const next = resizeStartWidth + delta
+  leftWidth.value = Math.max(LEFT_WIDTH_MIN, Math.min(LEFT_WIDTH_MAX, next))
+}
+
+function onResizerUp() {
+  window.removeEventListener('mousemove', onResizerMove)
+  window.removeEventListener('mouseup', onResizerUp)
+  document.body.style.cursor = ''
+  document.body.style.userSelect = ''
+}
+
+// Drag-to-select on the static preview image: drag a rectangle to add all
+// unreviewed sibling detections whose bboxes intersect it to bulkIds. The
+// existing bulk action bar then takes over for the actual review action.
+// Coordinates live in source-image pixels (same space as detection bboxes)
+// so the intersection test is a straight number comparison.
+const dragRect = ref<{ x1: number; y1: number; x2: number; y2: number } | null>(null)
+let dragStartImg: { x: number; y: number } | null = null
+let dragContainerRect: DOMRect | null = null
+
+function clientToImageXY(e: MouseEvent, contRect: DOMRect) {
+  const sx = sourceImage.value.w
+  const sy = sourceImage.value.h
+  if (!sx || !sy) return { x: 0, y: 0 }
+  const fit = Math.min(contRect.width / sx, contRect.height / sy)
+  const offX = (contRect.width - sx * fit) / 2
+  const offY = (contRect.height - sy * fit) / 2
+  return {
+    x: Math.max(0, Math.min(sx, (e.clientX - contRect.left - offX) / fit)),
+    y: Math.max(0, Math.min(sy, (e.clientY - contRect.top - offY) / fit)),
+  }
+}
+
+// Detections in the current source image that the drag rect intersects.
+// Filename guard avoids accidentally selecting same-bbox detections from
+// other photos (we're looking at one image at a time on the preview).
+function dragHits(r: { x1: number; y1: number; x2: number; y2: number }): number[] {
+  const filename = selected.value?.source_image_filename
+  if (!filename) return []
+  const out: number[] = []
+  for (const d of detections.value) {
+    if (d.source_image_filename !== filename) continue
+    if (d.reviewer_status !== 'unreviewed') continue
+    const b = d.bbox
+    if (!b) continue
+    if (b.x1 < r.x2 && b.x2 > r.x1 && b.y1 < r.y2 && b.y2 > r.y1) out.push(d.id)
+  }
+  return out
+}
+
+function onPreviewMouseDown(e: MouseEvent) {
+  if (e.button !== 0) return
+  if (!selected.value || !sourceImage.value.w) return
+  const cont = e.currentTarget as HTMLElement
+  dragContainerRect = cont.getBoundingClientRect()
+  dragStartImg = clientToImageXY(e, dragContainerRect)
+  dragRect.value = {
+    x1: dragStartImg.x,
+    y1: dragStartImg.y,
+    x2: dragStartImg.x,
+    y2: dragStartImg.y,
+  }
+  // A new drag = a fresh selection. Clearing here is what gives the
+  // "previous selection gone, new batch starts" feel the reviewer expects.
+  bulkIds.value = new Set()
+  bulkConfirmSkipped.value = 0
+  window.addEventListener('mousemove', onPreviewDragMove)
+  window.addEventListener('mouseup', onPreviewDragEnd)
+}
+
+function onPreviewDragMove(e: MouseEvent) {
+  if (!dragStartImg || !dragContainerRect) return
+  const p = clientToImageXY(e, dragContainerRect)
+  const r = {
+    x1: Math.min(dragStartImg.x, p.x),
+    y1: Math.min(dragStartImg.y, p.y),
+    x2: Math.max(dragStartImg.x, p.x),
+    y2: Math.max(dragStartImg.y, p.y),
+  }
+  dragRect.value = r
+  // Live update so bboxes turn red the instant the rect covers them, and
+  // turn back gray if the user pulls the rect off them. The set is rebuilt
+  // each frame so backtracking shrinks the selection.
+  bulkIds.value = new Set(dragHits(r))
+}
+
+function onPreviewDragEnd() {
+  window.removeEventListener('mousemove', onPreviewDragMove)
+  window.removeEventListener('mouseup', onPreviewDragEnd)
+  dragStartImg = null
+  dragContainerRect = null
+  dragRect.value = null
+  // bulkIds is already correct from the last mousemove. Nothing to do.
 }
 
 function classColor(cls: string | null): string {
@@ -1111,19 +1508,7 @@ function clearFailedSave(id: number) {
   failedSaves.value = new Map(failedSaves.value)
 }
 
-// Single-step undo. Records the state of the most recently reviewed
-// detection so it can be restored before any subsequent action overwrites
-// the slot. Cleared on successful undo (no undo-an-undo) and on bulk
-// actions (which would need their own snapshot).
-interface UndoEntry {
-  id: number
-  prevStatus: ReviewerStatus
-  prevLabel: ClassName | null
-}
-const lastAction = ref<UndoEntry | null>(null)
-const undoing = ref(false)
-
-async function applyAction(status: ReviewerStatus, label: ClassName | null) {
+async function applyAction(status: ReviewerStatus, label: ClassName | null, advanceAfter = false) {
   if (!selected.value) return
   const d = selected.value
   // If a previous save for this detection already failed, keep its original
@@ -1131,17 +1516,18 @@ async function applyAction(status: ReviewerStatus, label: ClassName | null) {
   const existing = failedSaves.value.get(d.id)
   const prevStatus = existing ? existing.prevStatus : d.reviewer_status
   const prevLabel = existing ? existing.prevLabel : d.reviewer_label
-  // Capture the next tile in the *current* view BEFORE mutating. After the
-  // mutation, d may move out of the view (e.g. labelling under Show:Todo
-  // makes it no longer todo). If we waited, advanceToNext would see d gone
-  // from flatVisible and the filteredDetections watcher would reset
-  // selection to list[0] — the "random jump" the reviewer experiences.
-  const nextId = nextVisibleId(d.id)
-  if (nextId != null) selectedId.value = nextId
+  // Auto-advance is for keyboard review (1/2/3/4/x/u to fly through tiles).
+  // Mouse clicks on the Label panel or footer buttons stay on the current
+  // tile — the reviewer is clearly focused on this tile, and jumping
+  // makes it look like the action saved to a different one. Captured BEFORE
+  // mutating so the next-tile lookup runs against the current view.
+  if (advanceAfter) {
+    const nextId = nextVisibleId(d.id)
+    if (nextId != null) selectedId.value = nextId
+  }
 
   d.reviewer_status = status
   d.reviewer_label = label
-  lastAction.value = { id: d.id, prevStatus, prevLabel }
 
   const ok = await patchDetection(d.id, status, label)
   if (!ok) {
@@ -1152,42 +1538,8 @@ async function applyAction(status: ReviewerStatus, label: ClassName | null) {
   }
 }
 
-async function undoLast() {
-  if (!lastAction.value || undoing.value) return
-  const entry = lastAction.value
-  const d = detections.value.find((x) => x.id === entry.id)
-  if (!d) {
-    lastAction.value = null
-    return
-  }
-  undoing.value = true
-  // Optimistic local restore. Jump back to the reverted detection so the
-  // reviewer sees the result of the undo, not the tile they had advanced to.
-  const newStatus = entry.prevStatus
-  const newLabel = entry.prevLabel
-  d.reviewer_status = newStatus
-  d.reviewer_label = newLabel
-  selectedId.value = entry.id
-
-  const ok = await patchDetection(entry.id, newStatus, newLabel)
-  undoing.value = false
-  if (!ok) {
-    // Mirror applyAction's failure handling so the retry banner can pick
-    // this up like any other failed save.
-    failedSaves.value.set(entry.id, {
-      status: newStatus,
-      label: newLabel,
-      prevStatus: newStatus,
-      prevLabel: newLabel,
-    })
-    failedSaves.value = new Map(failedSaves.value)
-  } else {
-    clearFailedSave(entry.id)
-  }
-  lastAction.value = null
-}
-
 function toggleBulk(id: number) {
+  bulkConfirmSkipped.value = 0
   const next = new Set(bulkIds.value)
   if (next.has(id)) next.delete(id)
   else next.add(id)
@@ -1197,86 +1549,31 @@ function toggleBulk(id: number) {
 function clearBulk() {
   bulkIds.value = new Set()
   bulkCorrectClass.value = ''
+  bulkConfirmSkipped.value = 0
 }
 
 function selectAllVisible() {
+  bulkConfirmSkipped.value = 0
   bulkIds.value = new Set(filteredDetections.value.map((d) => d.id))
 }
 
 // Unreviewed detections that the confidence sliders are currently hiding.
 // Restricted to 'unreviewed' so we never silently overwrite a reviewer's
-// confirmed/corrected/unsure call when the slider moves.
-const belowThresholdIds = computed<number[]>(() => {
-  if (yoloMinConf.value === 0 && insectnetMinConf.value === 0) return []
-  return detections.value
-    .filter((d) => {
-      if (d.reviewer_status !== 'unreviewed') return false
-      const yoloFails = d.yolo_confidence != null && d.yolo_confidence < yoloMinConf.value
-      const insectFails =
-        d.insectnet_confidence != null && d.insectnet_confidence < insectnetMinConf.value
-      return yoloFails || insectFails
-    })
-    .map((d) => d.id)
+// confirmed/corrected/unsure call when the slider moves. Shares the
+// passesSliders predicate with filteredDetections so the two views can't
+// drift.
+const belowThresholdIds = computed<number[]>(() =>
+  detections.value
+    .filter((d) => d.reviewer_status === 'unreviewed' && !passesSliders(d))
+    .map((d) => d.id),
+)
+
+// When the reviewer is in view-below mode and processes the last entry,
+// the special view is empty and meaningless — drop back to the normal
+// filter so they're not staring at a blank grid.
+watch([belowThresholdIds, viewBelowOnly], ([ids, on]) => {
+  if (on && ids.length === 0) viewBelowOnly.value = false
 })
-
-async function rejectBelowThreshold() {
-  if (rejectingBelow.value) return
-  const ids = belowThresholdIds.value
-  if (!ids.length) return
-  // Bulk action; single-step undo doesn't model multi-row reverts.
-  lastAction.value = null
-  rejectingBelow.value = true
-  const snapshot = new Map<number, ReviewerStatus>()
-  for (const d of detections.value) {
-    if (belowThresholdIds.value.includes(d.id)) {
-      snapshot.set(d.id, d.reviewer_status)
-      d.reviewer_status = 'rejected'
-      d.reviewer_label = null
-    }
-  }
-  try {
-    const ok = await postBulkReview(ids, 'rejected', null)
-    if (!ok) {
-      for (const id of ids) {
-        const prev = snapshot.get(id)!
-        failedSaves.value.set(id, {
-          status: 'rejected',
-          label: null,
-          prevStatus: prev,
-          prevLabel: null,
-        })
-      }
-      failedSaves.value = new Map(failedSaves.value)
-    }
-  } finally {
-    rejectingBelow.value = false
-  }
-}
-
-async function exportCsv() {
-  if (!run.value || exporting.value) return
-  exporting.value = true
-  try {
-    const res = await api(`/api/pollinator/runs/${run.value.id}/export.csv`)
-    if (!res.ok) {
-      loadError.value = `Export: HTTP ${res.status}`
-      return
-    }
-    const blob = await res.blob()
-    const url = URL.createObjectURL(blob)
-    const a = document.createElement('a')
-    a.href = url
-    a.download = `run-${run.value.id}-images.csv`
-    document.body.appendChild(a)
-    a.click()
-    a.remove()
-    URL.revokeObjectURL(url)
-  } catch (e) {
-    loadError.value = e instanceof Error ? e.message : String(e)
-  } finally {
-    exporting.value = false
-  }
-}
 
 async function submitBulk(ids: number[], status: ReviewerStatus, label: ClassName | null) {
   if (!ids.length) return
@@ -1316,9 +1613,6 @@ async function submitBulk(ids: number[], status: ReviewerStatus, label: ClassNam
 }
 
 async function applyToBulk(status: ReviewerStatus, label: ClassName | null) {
-  // Single-step undo only covers single-detection actions; clear it so a
-  // post-bulk Z doesn't surprise the reviewer by un-doing one random row.
-  lastAction.value = null
   const ids = [...bulkIds.value]
   clearBulk()
   await submitBulk(ids, status, label)
@@ -1373,7 +1667,6 @@ function dismissFailedSaves() {
 // as 'corrected' so reviewer_label is always populated. Rows with no derivable
 // class are skipped and surfaced to the reviewer.
 async function bulkConfirm() {
-  lastAction.value = null
   const buckets = new Map<ClassName, number[]>()
   let skipped = 0
   for (const d of detections.value) {
@@ -1405,21 +1698,18 @@ function onBulkCorrectChange() {
 // Confirmed only when both models agreed and the user picked that class.
 // When models disagree there's no single prediction to confirm, so any pick
 // is a correction (and the label is preserved server-side).
-function confirmAs(cls: ClassName | null) {
+function confirmAs(cls: ClassName | null, advanceAfter = false) {
   if (!selected.value || cls == null) return
   const d = selected.value
   const consensus = d.yolo_class != null && d.yolo_class === d.insectnet_class ? d.yolo_class : null
-  if (consensus === cls) applyAction('confirmed', null)
-  else applyAction('corrected', cls)
+  if (consensus === cls) applyAction('confirmed', null, advanceAfter)
+  else applyAction('corrected', cls, advanceAfter)
 }
-function correctTo(cls: ClassName) {
-  applyAction('corrected', cls)
+function reject(advanceAfter = false) {
+  applyAction('rejected', null, advanceAfter)
 }
-function reject() {
-  applyAction('rejected', null)
-}
-function markUnsure() {
-  applyAction('unsure', null)
+function markUnsure(advanceAfter = false) {
+  applyAction('unsure', null, advanceAfter)
 }
 
 function nextVisibleId(currentId: number): number | null {
@@ -1433,8 +1723,18 @@ function nextVisibleId(currentId: number): number | null {
   return null
 }
 
-// Grid is 5 columns. Down/Up jump a row, Left/Right step one tile.
-const GRID_COLS = 5
+// Crops grid column count follows the container-query thresholds in the
+// template, so Down/Up keyboard nav matches the actual visual rows. Below
+// the lg breakpoint (stacked mobile layout) the section is full-width;
+// default to 5 there.
+const GRID_COLS = computed(() => {
+  const w = leftWidth.value
+  if (w >= 560) return 7
+  if (w >= 440) return 6
+  if (w >= 340) return 5
+  if (w >= 260) return 4
+  return 3
+})
 
 // Anchor for range selection. Set by every plain click and by every
 // non-extending keyboard navigation. Shift+arrow / shift+click define the
@@ -1508,8 +1808,11 @@ function onKeydown(e: KeyboardEvent) {
   // instead of just the focused tile. Lets the reviewer do "select 30
   // crops, press x" without reaching for the bulk action bar.
   const bulkMode = bulkIds.value.size > 0
+  // Keyboard actions auto-advance to the next tile so the reviewer can
+  // fly through a queue without touching the mouse. Mouse-driven actions
+  // (Label panel clicks, footer buttons) stay put — see applyAction.
   const classKeyAction = (cls: ClassName) =>
-    bulkMode ? applyToBulk('corrected', cls) : confirmAs(cls)
+    bulkMode ? applyToBulk('corrected', cls) : confirmAs(cls, true)
   switch (e.key) {
     case '1':
       classKeyAction('fly')
@@ -1530,35 +1833,27 @@ function onKeydown(e: KeyboardEvent) {
     case 'x':
     case 'X':
       if (bulkMode) applyToBulk('rejected', null)
-      else reject()
+      else reject(true)
       e.preventDefault()
       break
     case 'u':
     case 'U':
       if (bulkMode) applyToBulk('unsure', null)
-      else markUnsure()
+      else markUnsure(true)
       e.preventDefault()
       break
-    case 'z':
-    case 'Z':
-      // Cmd+Z / Ctrl+Z also accepted so the muscle memory works.
-      if (lastAction.value) {
-        void undoLast()
-        e.preventDefault()
-      }
-      break
     case 'Enter':
-      confirmAs(suggestedClass(selected.value))
+      confirmAs(suggestedClass(selected.value), true)
       e.preventDefault()
       break
     case 'ArrowDown':
     case 'j':
-      navigate(GRID_COLS, e.shiftKey)
+      navigate(GRID_COLS.value, e.shiftKey)
       e.preventDefault()
       break
     case 'ArrowUp':
     case 'k':
-      navigate(-GRID_COLS, e.shiftKey)
+      navigate(-GRID_COLS.value, e.shiftKey)
       e.preventDefault()
       break
     case 'ArrowRight':
@@ -1575,5 +1870,14 @@ function onKeydown(e: KeyboardEvent) {
 }
 
 onMounted(() => window.addEventListener('keydown', onKeydown))
-onUnmounted(() => window.removeEventListener('keydown', onKeydown))
+onUnmounted(() => {
+  window.removeEventListener('keydown', onKeydown)
+  // If the user navigates away mid-drag, the move/up listeners would leak.
+  window.removeEventListener('mousemove', onPreviewDragMove)
+  window.removeEventListener('mouseup', onPreviewDragEnd)
+  window.removeEventListener('mousemove', onResizerMove)
+  window.removeEventListener('mouseup', onResizerUp)
+  document.body.style.cursor = ''
+  document.body.style.userSelect = ''
+})
 </script>

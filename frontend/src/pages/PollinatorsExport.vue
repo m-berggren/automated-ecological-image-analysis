@@ -19,13 +19,50 @@
       <span class="text-muted-foreground">·</span>
       <span class="font-mono">{{ totalIncluded }}</span>
       <span class="text-muted-foreground">total ({{ totalExcluded }} excluded)</span>
-      <button
-        class="ml-auto px-3 py-1.5 rounded-md text-sm font-medium border border-border hover:bg-muted disabled:opacity-50"
-        :disabled="exporting || !run"
-        @click="downloadCsv"
+      <span
+        v-if="loadProgress.total && loadProgress.loaded < loadProgress.total"
+        class="text-muted-foreground italic"
       >
-        {{ exporting ? 'Exporting…' : 'Download CSV' }}
-      </button>
+        loading {{ loadProgress.loaded }}/{{ loadProgress.total }}…
+      </span>
+      <div class="ml-auto">
+        <div class="border border-border rounded-lg bg-background shadow-sm p-3 space-y-3">
+          <!-- Header -->
+          <div class="text-xs font-semibold text-muted-foreground uppercase tracking-wide">
+            Export as
+          </div>
+
+          <!-- Actions -->
+          <div class="flex gap-2">
+            <!-- CSV -->
+            <button
+              class="px-3 py-1.5 rounded-md text-sm font-medium border border-border hover:bg-muted disabled:opacity-50"
+              :disabled="downloading !== null || !run"
+              @click="showCsvModal = true"
+            >
+              {{ downloading === 'csv' ? 'Downloading…' : 'CSV' }}
+            </button>
+
+            <!-- Crops ZIP -->
+            <button
+              class="px-3 py-1.5 rounded-md text-sm font-medium border border-border hover:bg-muted disabled:opacity-50"
+              :disabled="downloading !== null || !run"
+              @click="downloadExport('crops')"
+            >
+              {{ downloading === 'crops' ? 'Downloading…' : 'Crops (zip)' }}
+            </button>
+
+            <!-- Annotated ZIP -->
+            <button
+              class="px-3 py-1.5 rounded-md text-sm font-medium border border-border hover:bg-muted disabled:opacity-50"
+              :disabled="downloading !== null || !run"
+              @click="downloadExport('annotated')"
+            >
+              {{ downloading === 'annotated' ? 'Downloading…' : 'Annotated images (zip)' }}
+            </button>
+          </div>
+        </div>
+      </div>
     </header>
 
     <div v-if="!imageCards.length" class="flex-1 p-12 text-center text-sm text-muted-foreground">
@@ -49,10 +86,13 @@
           </span>
         </header>
         <div class="grid grid-cols-1 xl:grid-cols-[2fr_1fr] gap-4 p-4">
-          <!-- Source image with all bboxes overlaid -->
+          <!-- Source image with all bboxes overlaid. Click anywhere outside
+               a bbox to open the fullscreen zoom modal. -->
           <div
             class="relative bg-background rounded-md overflow-hidden"
+            :class="card.naturalW && card.sourceUrl ? 'cursor-zoom-in' : ''"
             :style="{ aspectRatio: card.aspectRatio || 'auto' }"
+            @click="openZoom(card)"
           >
             <svg
               v-if="card.naturalW && card.sourceUrl"
@@ -68,13 +108,17 @@
                 :y="d.bbox.y1"
                 :width="d.bbox.w"
                 :height="d.bbox.h"
-                :fill="d.excluded_from_export ? '#ef4444' : 'transparent'"
-                :fill-opacity="d.excluded_from_export ? 0.35 : 0"
-                :stroke="d.excluded_from_export ? '#ef4444' : strokeFor(d)"
-                :stroke-width="Math.max(2, Math.max(card.naturalW, card.naturalH) * 0.002)"
+                fill="none"
+                stroke="#ef4444"
+                :stroke-width="
+                  Math.max(2, Math.max(card.naturalW, card.naturalH) * 0.002) *
+                  (d.excluded_from_export ? 0.5 : 1)
+                "
+                :stroke-opacity="d.excluded_from_export ? 0.4 : 1"
                 class="cursor-pointer"
-                @click="toggleExclude(d)"
+                @click.stop="toggleExclude(d)"
               />
+              <ROIOverlay :bbox="roiBbox" :image-w="card.naturalW" :image-h="card.naturalH" />
             </svg>
             <div
               v-else
@@ -88,9 +132,11 @@
             <button
               v-for="d in card.detections"
               :key="d.id"
-              class="relative aspect-square rounded-md overflow-hidden border-2 transition-colors focus:outline-none"
+              class="relative aspect-square rounded-md overflow-hidden transition-colors focus:outline-none"
               :class="
-                d.excluded_from_export ? 'border-red-500' : 'border-transparent hover:border-border'
+                d.excluded_from_export
+                  ? 'border-2 border-red-500'
+                  : 'border-2 border-transparent hover:border-border'
               "
               :title="`${classLabel(effective(d))} · ${(d.confidence ?? 0).toFixed(2)}`"
               @click="toggleExclude(d)"
@@ -104,19 +150,76 @@
               />
               <div
                 v-if="d.excluded_from_export"
-                class="absolute inset-0 bg-red-500/40 flex items-center justify-center text-white text-2xl font-bold"
-              >
-                ✗
-              </div>
-              <div
-                class="absolute bottom-0 left-0 right-0 h-1.5"
-                :style="{ backgroundColor: strokeFor(d) }"
-              />
+                class="absolute inset-0 bg-red-500/15 flex items-center justify-center text-white text-2xl font-bold"
+              ></div>
             </button>
           </div>
         </div>
       </section>
     </div>
+    <CsvExportDialog v-model="showCsvModal" @confirm="onCsvConfirm" />
+
+    <!-- Fullscreen read-only zoom for a card's source image. Wheel-zooms
+         around the cursor; click-and-drag pans. ESC or backdrop closes. -->
+    <dialog
+      ref="zoomDialog"
+      class="m-0 p-0 w-screen h-screen max-w-none max-h-none bg-black/95 backdrop:bg-black/95"
+      @close="onZoomClose"
+      @click.self="closeZoom"
+    >
+      <div
+        v-if="zoomedCard && zoomedCard.sourceUrl && zoomedCard.naturalW"
+        class="w-screen h-screen relative select-none overflow-hidden"
+        @wheel.prevent="onZoomWheel"
+        @mousedown="onPanStart"
+        @mousemove="onPanMove"
+        @mouseup="onPanEnd"
+        @mouseleave="onPanEnd"
+        :style="{ cursor: panning ? 'grabbing' : 'grab' }"
+      >
+        <svg
+          :viewBox="`0 0 ${zoomedCard.naturalW} ${zoomedCard.naturalH}`"
+          preserveAspectRatio="xMidYMid meet"
+          class="w-full h-full"
+        >
+          <g :transform="`translate(${zoom.tx} ${zoom.ty}) scale(${zoom.scale})`">
+            <image
+              :href="zoomedCard.sourceUrl"
+              :width="zoomedCard.naturalW"
+              :height="zoomedCard.naturalH"
+            />
+            <rect
+              v-for="d in zoomedCard.detections"
+              :key="d.id"
+              :x="d.bbox.x1"
+              :y="d.bbox.y1"
+              :width="d.bbox.w"
+              :height="d.bbox.h"
+              fill="none"
+              stroke="#ef4444"
+              :stroke-width="d.excluded_from_export ? 1 : 2"
+              :stroke-opacity="d.excluded_from_export ? 0.4 : 1"
+              vector-effect="non-scaling-stroke"
+            />
+            <ROIOverlay
+              :bbox="roiBbox"
+              :image-w="zoomedCard.naturalW"
+              :image-h="zoomedCard.naturalH"
+              non-scaling-stroke
+            />
+          </g>
+        </svg>
+        <button
+          class="absolute top-4 right-4 px-3 py-1.5 rounded-md bg-white/10 text-white text-sm hover:bg-white/20"
+          @click.stop="closeZoom"
+        >
+          Close (Esc)
+        </button>
+        <div class="absolute bottom-4 left-1/2 -translate-x-1/2 text-white/60 text-xs font-mono">
+          scroll to zoom · drag to pan · {{ Math.round(zoom.scale * 100) }}%
+        </div>
+      </div>
+    </dialog>
   </div>
 </template>
 
@@ -125,6 +228,8 @@ import { computed, onMounted, ref } from 'vue'
 import { RouterLink, useRoute } from 'vue-router'
 import PageHeader from '@/components/PageHeader.vue'
 import PollinatorsStepper from '@/components/PollinatorsStepper.vue'
+import ROIOverlay from '@/components/ROIOverlay.vue'
+import CsvExportDialog, { type CsvExportMode } from '@/components/CsvExportDialog.vue'
 import { api } from '@/api'
 
 type ClassName = 'fly' | 'bumblebee' | 'butterfly' | 'other'
@@ -157,6 +262,11 @@ interface RunRow {
   id: number
   name: string
   status: string
+  config?: {
+    preprocessing?: {
+      roi_bbox?: [number, number, number, number] | null
+    }
+  }
 }
 
 const CLASSES: ClassName[] = ['fly', 'bumblebee', 'butterfly', 'other']
@@ -167,6 +277,12 @@ const CLASS_COLORS: Record<ClassName, string> = {
   other: '#9aa3ab',
 }
 
+const showCsvModal = ref(false)
+
+function onCsvConfirm(mode: CsvExportMode) {
+  downloadExport('csv', mode)
+}
+
 const route = useRoute()
 const runId = route.params.id as string
 const loading = ref(true)
@@ -174,7 +290,9 @@ const loadError = ref('')
 const run = ref<RunRow | null>(null)
 const detections = ref<Detection[]>([])
 const naturalSize = ref<Record<string, { w: number; h: number }>>({})
-const exporting = ref(false)
+type DownloadKind = 'csv' | 'crops' | 'annotated'
+const downloading = ref<DownloadKind | null>(null)
+const loadProgress = ref({ loaded: 0, total: 0 })
 
 const headerTitle = computed(() =>
   run.value ? `Export · ${run.value.name || `Run #${run.value.id}`}` : 'Export',
@@ -189,9 +307,10 @@ function effective(d: Detection): ClassName | null {
   return d.reviewer_label ?? d.predicted_class ?? d.yolo_class ?? d.insectnet_class ?? null
 }
 
-function strokeFor(d: Detection): string {
-  return CLASS_COLORS[effective(d) ?? 'other']
-}
+const roiBbox = computed<[number, number, number, number] | null>(() => {
+  const r = run.value?.config?.preprocessing?.roi_bbox
+  return r && r.length === 4 ? r : null
+})
 
 // Only accepted detections matter for export. Rejected/unsure/unreviewed
 // don't count in the CSV anyway, so don't clutter the Export view with
@@ -262,43 +381,71 @@ const totalExcluded = computed(
   () => acceptedDetections.value.filter((d) => d.excluded_from_export).length,
 )
 
-onMounted(async () => {
-  try {
-    const [runRes, detRes] = await Promise.all([
-      api(`/api/analysis/runs/${runId}/`),
-      api(`/api/pollinator/runs/${runId}/detections/`),
-    ])
-    if (!runRes.ok) {
-      loadError.value = `Run: HTTP ${runRes.status}`
+interface PageResponse {
+  count: number
+  next: string | null
+  results: Detection[]
+}
+
+function preloadDims(d: Detection, seen: Set<string>) {
+  if (!d.source_image_url || seen.has(d.source_image_filename)) return
+  seen.add(d.source_image_filename)
+  const fname = d.source_image_filename
+  const url = d.source_image_url
+  const img = new Image()
+  img.onload = () => {
+    naturalSize.value = {
+      ...naturalSize.value,
+      [fname]: { w: img.naturalWidth, h: img.naturalHeight },
+    }
+  }
+  img.src = url
+}
+
+async function fetchAllPages() {
+  // First page resolves loading=false so the user gets immediate feedback.
+  // Subsequent pages stream in via reactive push to detections.value, and
+  // image cards re-render incrementally.
+  const seen = new Set<string>()
+  let next: string | null = `/api/pollinator/runs/${runId}/detections/`
+  let firstPage = true
+  while (next) {
+    // Strip absolute prefix when DRF returns the full URL — api() expects
+    // a relative path.
+    const url: string = next.startsWith('http') ? next.replace(/^https?:\/\/[^/]+/, '') : next
+    const res = await api(url)
+    if (!res.ok) {
+      loadError.value = `Detections: HTTP ${res.status}`
       return
     }
-    if (!detRes.ok) {
-      loadError.value = `Detections: HTTP ${detRes.status}`
+    const page = (await res.json()) as PageResponse
+    for (const d of page.results) preloadDims(d, seen)
+    detections.value = detections.value.concat(page.results)
+    loadProgress.value = { loaded: detections.value.length, total: page.count }
+    next = page.next
+    if (firstPage) {
+      loading.value = false
+      firstPage = false
+    }
+  }
+}
+
+onMounted(async () => {
+  try {
+    const runRes = await api(`/api/analysis/runs/${runId}/`)
+    if (!runRes.ok) {
+      loadError.value = `Run: HTTP ${runRes.status}`
+      loading.value = false
       return
     }
     run.value = await runRes.json()
-    detections.value = await detRes.json()
-    // Pre-load source-image dimensions per image so the SVG viewBox can be
-    // set correctly without waiting for in-template <image> onload (SVG
-    // <image> doesn't have a reliable onload across browsers).
-    const seen = new Set<string>()
-    for (const d of detections.value) {
-      if (seen.has(d.source_image_filename) || !d.source_image_url) continue
-      seen.add(d.source_image_filename)
-      const fname = d.source_image_filename
-      const url = d.source_image_url
-      const img = new Image()
-      img.onload = () => {
-        naturalSize.value = {
-          ...naturalSize.value,
-          [fname]: { w: img.naturalWidth, h: img.naturalHeight },
-        }
-      }
-      img.src = url
-    }
+    // Apply engulfment auto-exclude on every Export visit. The backend
+    // skips rows the reviewer has already toggled here, so this only
+    // catches newly-accepted duplicates from Review.
+    await api(`/api/analysis/runs/${runId}/recompute-exclusions/`, { method: 'POST' })
+    await fetchAllPages()
   } catch (e) {
     loadError.value = e instanceof Error ? e.message : String(e)
-  } finally {
     loading.value = false
   }
 })
@@ -317,20 +464,30 @@ async function toggleExclude(d: Detection) {
   }
 }
 
-async function downloadCsv() {
-  if (!run.value || exporting.value) return
-  exporting.value = true
+async function downloadExport(kind: DownloadKind, mode?: 'per_image' | 'per_detection') {
+  if (!run.value || downloading.value !== null) return
+  downloading.value = kind
   try {
-    const res = await api(`/api/pollinator/runs/${run.value.id}/export.csv`)
+    const path = {
+      csv: `/api/pollinator/runs/${run.value.id}/export.csv?mode=${mode ?? 'per_detection'}`,
+      crops: `/api/pollinator/runs/${run.value.id}/export-crops.zip`,
+      annotated: `/api/pollinator/runs/${run.value.id}/export-annotated.zip`,
+    }[kind]
+    const res = await api(path)
     if (!res.ok) {
-      loadError.value = `Export: HTTP ${res.status}`
+      loadError.value = `Export (${kind}): HTTP ${res.status}`
       return
     }
     const blob = await res.blob()
+    const filename = {
+      csv: `run-${run.value.id}-images.csv`,
+      crops: `run-${run.value.id}-crops.zip`,
+      annotated: `run-${run.value.id}-annotated.zip`,
+    }[kind]
     const url = URL.createObjectURL(blob)
     const a = document.createElement('a')
     a.href = url
-    a.download = `run-${run.value.id}-images.csv`
+    a.download = filename
     document.body.appendChild(a)
     a.click()
     a.remove()
@@ -338,7 +495,85 @@ async function downloadCsv() {
   } catch (e) {
     loadError.value = e instanceof Error ? e.message : String(e)
   } finally {
-    exporting.value = false
+    downloading.value = null
   }
+}
+
+// Fullscreen zoom modal. Mirrors the pattern used in PollinatorsReview:
+// state lives in viewBox units; the SVG <g> is translated then scaled, so
+// the wheel-around-cursor math converts client coords into viewBox coords
+// before applying. Read-only — exclusion is toggled on the small card.
+const zoomDialog = ref<HTMLDialogElement | null>(null)
+const zoomedCard = ref<ImageCard | null>(null)
+const zoom = ref({ scale: 1, tx: 0, ty: 0 })
+const panning = ref(false)
+const panStart = ref({ x: 0, y: 0, tx: 0, ty: 0 })
+
+function openZoom(card: ImageCard) {
+  if (!card.sourceUrl || !card.naturalW) return
+  zoomedCard.value = card
+  zoom.value = { scale: 1, tx: 0, ty: 0 }
+  zoomDialog.value?.showModal()
+}
+
+function closeZoom() {
+  zoomDialog.value?.close()
+}
+
+function onZoomClose() {
+  panning.value = false
+  zoomedCard.value = null
+}
+
+function onZoomWheel(e: WheelEvent) {
+  if (!zoomedCard.value) return
+  const target = e.currentTarget as HTMLElement
+  const rect = target.getBoundingClientRect()
+  const sx = zoomedCard.value.naturalW
+  const sy = zoomedCard.value.naturalH
+  const fit = Math.min(rect.width / sx, rect.height / sy)
+  const offX = (rect.width - sx * fit) / 2
+  const offY = (rect.height - sy * fit) / 2
+  const vx = (e.clientX - rect.left - offX) / fit
+  const vy = (e.clientY - rect.top - offY) / fit
+
+  const factor = e.deltaY < 0 ? 1.2 : 1 / 1.2
+  const next = Math.max(1, Math.min(20, zoom.value.scale * factor))
+  if (next === zoom.value.scale) return
+  const k = next / zoom.value.scale
+  zoom.value = {
+    scale: next,
+    tx: vx - k * (vx - zoom.value.tx),
+    ty: vy - k * (vy - zoom.value.ty),
+  }
+}
+
+function onPanStart(e: MouseEvent) {
+  if (e.button !== 0) return
+  panning.value = true
+  panStart.value = {
+    x: e.clientX,
+    y: e.clientY,
+    tx: zoom.value.tx,
+    ty: zoom.value.ty,
+  }
+}
+
+function onPanMove(e: MouseEvent) {
+  if (!panning.value || !zoomedCard.value) return
+  const target = e.currentTarget as HTMLElement
+  const rect = target.getBoundingClientRect()
+  const sx = zoomedCard.value.naturalW
+  const sy = zoomedCard.value.naturalH
+  const fit = Math.min(rect.width / sx, rect.height / sy)
+  zoom.value = {
+    ...zoom.value,
+    tx: panStart.value.tx + (e.clientX - panStart.value.x) / fit,
+    ty: panStart.value.ty + (e.clientY - panStart.value.y) / fit,
+  }
+}
+
+function onPanEnd() {
+  panning.value = false
 }
 </script>

@@ -164,6 +164,7 @@ import { RouterLink, useRoute, useRouter } from 'vue-router'
 import PageHeader from '@/components/PageHeader.vue'
 import PollinatorsStepper from '@/components/PollinatorsStepper.vue'
 import { api } from '@/api'
+import { confirm } from '@/lib/confirm'
 
 type RunStatus = 'pending' | 'running' | 'completed' | 'failed' | 'cancelled'
 type PreviewMode = 'queued' | 'running' | 'completed' | 'failed'
@@ -465,13 +466,15 @@ async function onCancel() {
     run.value.error_message = 'Cancelled by user.'
     return
   }
-  if (
-    !window.confirm(
-      'Cancel this run? The worker stops at the next checkpoint and partial results are discarded.',
-    )
-  ) {
-    return
-  }
+  const ok = await confirm({
+    title: 'Cancel run',
+    message:
+      'Cancel this run?\nThe worker stops at the next checkpoint and partial results are discarded.',
+    confirmLabel: 'Cancel run',
+    cancelLabel: 'Keep running',
+    variant: 'danger',
+  })
+  if (!ok) return
   cancelling.value = true
   try {
     const res = await api(`/api/analysis/runs/${run.value.id}/cancel/`, {
