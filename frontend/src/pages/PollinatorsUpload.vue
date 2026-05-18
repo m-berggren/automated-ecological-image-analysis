@@ -2,7 +2,7 @@
   <PageHeader title="Upload" subtitle="Configure and upload a camera-trap folder" />
   <PollinatorsStepper current="upload" />
 
-  <div class="flex-1 min-h-0 overflow-y-auto p-8 space-y-6 max-w-3xl mx-auto w-full">
+  <div class="flex-1 min-h-0 overflow-y-auto px-8 py-4 space-y-3 max-w-3xl mx-auto w-full">
     <!-- Run details -->
     <section class="rounded-xl border border-border bg-surface p-5 space-y-3">
       <h2 class="text-sm font-semibold">Run details</h2>
@@ -123,10 +123,7 @@
           />
         </label>
       </div>
-      <div
-        v-if="startAtImageOutOfRange"
-        class="text-xs text-red-600"
-      >
+      <div v-if="startAtImageOutOfRange" class="text-xs text-red-600">
         “Start at image” is outside the uploaded range (max {{ localFiles.length }}).
       </div>
 
@@ -217,44 +214,13 @@
     </section>
 
     <!-- Drop zone -->
-    <section
-      class="rounded-xl border-2 border-dashed border-border bg-surface p-10 text-center transition-colors"
-      :class="{ 'border-primary bg-primary/5': dragOver, 'opacity-60': creatingUpload }"
-      @dragover.prevent="dragOver = true"
-      @dragleave.prevent="dragOver = false"
-      @drop.prevent="onDrop"
-    >
-      <UploadCloud class="w-10 h-10 mx-auto text-muted-foreground" />
-      <p class="mt-3 text-sm font-medium">
-        Drop a folder or images here, or
-        <label class="text-primary cursor-pointer hover:underline">
-          browse files
-          <input
-            type="file"
-            multiple
-            accept="image/*"
-            class="hidden"
-            @change="onPick($event, false)"
-          />
-        </label>
-        /
-        <label class="text-primary cursor-pointer hover:underline">
-          browse folder
-          <!-- webkitdirectory makes the OS dialog let you pick a folder
-               (instead of files). Without it the link is a no-op. -->
-          <input
-            ref="folderInput"
-            type="file"
-            multiple
-            webkitdirectory
-            directory
-            class="hidden"
-            @change="onPick($event, true)"
-          />
-        </label>
-      </p>
-      <p class="text-xs text-muted-foreground mt-1">JPG, PNG — up to ~12,000 images per run</p>
-    </section>
+    <UploadDropZone
+      v-model:active-tab="uploadActiveTab"
+      :tabs="uploadTabs"
+      :has-files="!!uploader && uploader.items.length > 0"
+      :disabled="creatingUpload"
+      @select="onUploadSelect"
+    />
 
     <!-- Upload progress + start. Always rendered so the Start button is
          visible even before any image has been picked; it's disabled with
@@ -288,10 +254,7 @@
         </div>
       </header>
 
-      <ul
-        v-if="recentFailures.length"
-        class="max-h-60 overflow-auto divide-y divide-border"
-      >
+      <ul v-if="recentFailures.length" class="max-h-60 overflow-auto divide-y divide-border">
         <li
           v-for="item in recentFailures"
           :key="item.id"
@@ -332,9 +295,10 @@ import { computed, onMounted, ref } from 'vue'
 import { useRouter } from 'vue-router'
 import PageHeader from '@/components/PageHeader.vue'
 import PollinatorsStepper from '@/components/PollinatorsStepper.vue'
+import UploadDropZone, { type UploadTab } from '@/components/UploadDropZone.vue'
 import { createUploader, type UploadItem } from '@/lib/uploader'
 import { api } from '@/api'
-import { UploadCloud, XCircle } from 'lucide-vue-next'
+import { XCircle } from 'lucide-vue-next'
 import ROIDrawer from '@/components/ROIDrawer.vue'
 
 interface ModelVersion {
@@ -356,8 +320,25 @@ const showRoiModal = ref(false)
 const previewUrl = ref<string | null>(null)
 
 const router = useRouter()
-const dragOver = ref(false)
 const creatingUpload = ref(false)
+const uploadActiveTab = ref('files')
+const uploadTabs: UploadTab[] = [
+  {
+    key: 'files',
+    label: 'Files',
+    mode: 'files',
+    accept: 'image/*',
+    placeholder: 'Drop images here or click to browse',
+    helper: 'JPG, PNG — up to ~12,000 images per run',
+  },
+  {
+    key: 'folder',
+    label: 'Folder',
+    mode: 'folder',
+    placeholder: 'Drop a folder here or click to browse',
+    helper: 'Subfolders are walked; non-image files are ignored.',
+  },
+]
 const starting = ref(false)
 const error = ref('')
 const showAdvanced = ref(false)
@@ -490,74 +471,19 @@ async function handleFiles(files: File[]) {
   localFiles.value = images
 }
 
-function onPick(e: Event, _isFolder: boolean) {
-  const target = e.target as HTMLInputElement
-  if (target.files) void handleFiles(Array.from(target.files))
-  target.value = ''
+function onUploadSelect(files: File[]) {
+  void handleFiles(files)
 }
-
-async function onDrop(e: DragEvent) {
-  dragOver.value = false
-  if (!e.dataTransfer) return
-
-  // dataTransfer.files alone can't recurse into dropped folders; use the
-  // items API + webkitGetAsEntry to walk directories. Fall back to files
-  // for any environment without items support.
-  if (e.dataTransfer.items && e.dataTransfer.items.length) {
-    const entries: FileSystemEntry[] = []
-    for (const item of Array.from(e.dataTransfer.items)) {
-      const entry = item.webkitGetAsEntry?.()
-      if (entry) entries.push(entry)
-    }
-    const files: File[] = []
-    await Promise.all(entries.map((entry) => collectFiles(entry, files)))
-    if (files.length) void handleFiles(files)
-    return
-  }
-  if (e.dataTransfer.files) void handleFiles(Array.from(e.dataTransfer.files))
-}
-
-// Recursively read every file under a dropped FileSystemEntry. Handles the
-// readEntries() batch limit (typically 100 per call) by re-reading until
-// the directory yields nothing.
-async function collectFiles(entry: FileSystemEntry, out: File[]): Promise<void> {
-  if (entry.isFile) {
-    const file = await new Promise<File>((resolve, reject) => {
-      ;(entry as FileSystemFileEntry).file(resolve, reject)
-    })
-    out.push(file)
-    return
-  }
-  if (entry.isDirectory) {
-    const reader = (entry as FileSystemDirectoryEntry).createReader()
-    const children: FileSystemEntry[] = []
-    let batch: FileSystemEntry[]
-    do {
-      batch = await new Promise<FileSystemEntry[]>((resolve, reject) => {
-        reader.readEntries(resolve, reject)
-      })
-      children.push(...batch)
-    } while (batch.length > 0)
-    await Promise.all(children.map((child) => collectFiles(child, out)))
-  }
-}
-
-const folderInput = ref<HTMLInputElement | null>(null)
-onMounted(() => {
-  if (folderInput.value) folderInput.value.setAttribute('webkitdirectory', '')
-})
 
 async function startDetection() {
-  if(config.value.preprocessing.use_roi) {
+  if (config.value.preprocessing.use_roi) {
     const roi = await openRoiModal()
 
-  if (!roi) {
-    error.value = 'ROI selection was cancelled.'
-    return
+    if (!roi) {
+      error.value = 'ROI selection was cancelled.'
+      return
+    }
   }
-  }
-
-
 
   error.value = ''
   if (!uploadId.value) {
@@ -628,7 +554,6 @@ function openRoiModal() {
     showRoiModal.value = true
 
     roiResolver.value = resolve
-
   })
 }
 
@@ -675,6 +600,4 @@ function fixROIFormat(cfg: PipelineConfig) {
     },
   }
 }
-
-
 </script>

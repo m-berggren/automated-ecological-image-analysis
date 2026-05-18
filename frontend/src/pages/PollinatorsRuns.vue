@@ -154,7 +154,7 @@
                   v-if="run.status === 'completed'"
                   class="text-xs px-2 py-1 rounded border border-border hover:bg-muted shrink-0 disabled:opacity-50"
                   :disabled="exportingRunId === run.id"
-                  @click="exportRunCsv(run.id)"
+                  @click="openCsvDialog(run.id)"
                 >
                   {{ exportingRunId === run.id ? 'Exporting…' : 'Export CSV' }}
                 </button>
@@ -181,6 +181,7 @@
         </section>
       </div>
     </div>
+    <CsvExportDialog v-model="csvDialogOpen" @confirm="onCsvConfirm" />
   </div>
 </template>
 
@@ -188,7 +189,9 @@
 import { computed, nextTick, onMounted, ref } from 'vue'
 import { RouterLink, useRoute } from 'vue-router'
 import PageHeader from '@/components/PageHeader.vue'
+import CsvExportDialog, { type CsvExportMode } from '@/components/CsvExportDialog.vue'
 import { api } from '@/api'
+import { confirm } from '@/lib/confirm'
 
 interface Upload {
   id: number
@@ -319,9 +322,13 @@ function isRunInFlight(run: Run): boolean {
 async function deleteRun(run: Run) {
   if (deletingRunId.value != null) return
   const label = run.name || `Run #${run.id}`
-  if (!window.confirm(
-    `Delete ${label}? This permanently removes the run, every detection in it, and the saved crops on disk. Source images stay.`,
-  )) return
+  const ok = await confirm({
+    title: 'Delete run',
+    message: `Delete ${label}?\nThis permanently removes the run, every detection in it, and the saved crops on disk. Source images stay.`,
+    confirmLabel: 'Delete',
+    variant: 'danger',
+  })
+  if (!ok) return
   deletingRunId.value = run.id
   try {
     const res = await api(`/api/analysis/runs/${run.id}/`, { method: 'DELETE' })
@@ -342,11 +349,26 @@ async function deleteRun(run: Run) {
   }
 }
 
-async function exportRunCsv(runId: number) {
+// CSV export goes through the shared CsvExportDialog so this page and
+// the dedicated Export page behave identically. csvDialogRunId tracks
+// which row's button was clicked; kept independent of csvDialogOpen so
+// the run id is still readable in onCsvConfirm after the dialog closes.
+const csvDialogOpen = ref(false)
+const csvDialogRunId = ref<number | null>(null)
+
+function openCsvDialog(runId: number) {
   if (exportingRunId.value != null) return
+  csvDialogRunId.value = runId
+  csvDialogOpen.value = true
+}
+
+async function onCsvConfirm(mode: CsvExportMode) {
+  const runId = csvDialogRunId.value
+  csvDialogRunId.value = null
+  if (runId == null || exportingRunId.value != null) return
   exportingRunId.value = runId
   try {
-    const res = await api(`/api/pollinator/runs/${runId}/export.csv`)
+    const res = await api(`/api/pollinator/runs/${runId}/export.csv?mode=${mode}`)
     if (!res.ok) {
       loadError.value = `Export: HTTP ${res.status}`
       return
@@ -355,7 +377,7 @@ async function exportRunCsv(runId: number) {
     const url = URL.createObjectURL(blob)
     const a = document.createElement('a')
     a.href = url
-    a.download = `run-${runId}-images.csv`
+    a.download = `run-${runId}-${mode === 'per_image' ? 'images' : 'detections'}.csv`
     document.body.appendChild(a)
     a.click()
     a.remove()
