@@ -14,11 +14,6 @@
               ? 'bg-primary text-primary-foreground'
               : 'text-muted-foreground hover:bg-muted'
           "
-          :class="
-            kindFilter === opt.value
-              ? 'bg-primary text-primary-foreground'
-              : 'text-muted-foreground hover:bg-muted'
-          "
           @click="kindFilter = opt.value"
         >
           {{ opt.label }}
@@ -46,10 +41,6 @@
         v-else-if="!filteredTracks.length"
         class="p-12 text-center text-sm text-muted-foreground"
       >
-      <div
-        v-else-if="!filteredTracks.length"
-        class="p-12 text-center text-sm text-muted-foreground"
-      >
         No models match this filter.
       </div>
 
@@ -59,9 +50,6 @@
           :key="track.id"
           class="rounded-xl border border-border bg-card overflow-hidden shadow-md"
         >
-          <header
-            class="px-5 py-4 bg-primary/[0.22] border-b border-border flex items-baseline gap-3"
-          >
           <header
             class="px-5 py-4 bg-primary/[0.22] border-b border-border flex items-baseline gap-3"
           >
@@ -137,14 +125,10 @@
                   </td>
                 </tr>
                 <tr v-if="expandedIds.has(v.id)" class="border-t border-border bg-muted/10">
-                <tr v-if="expandedIds.has(v.id)" class="border-t border-border bg-muted/10">
                   <td></td>
                   <td colspan="4" class="px-3 py-4">
                     <div class="grid grid-cols-2 gap-x-8 gap-y-3 max-w-3xl">
                       <div>
-                        <div
-                          class="text-[11px] font-semibold uppercase tracking-wider text-muted-foreground mb-1"
-                        >
                         <div
                           class="text-[11px] font-semibold uppercase tracking-wider text-muted-foreground mb-1"
                         >
@@ -161,13 +145,9 @@
                         <div
                           class="text-[11px] font-semibold uppercase tracking-wider text-muted-foreground mb-1"
                         >
-                        <div
-                          class="text-[11px] font-semibold uppercase tracking-wider text-muted-foreground mb-1"
-                        >
                           Metrics
                         </div>
                         <dl class="text-xs grid grid-cols-[auto_1fr] gap-x-4 gap-y-1">
-                          <template v-for="(value, key) in v.metrics" :key="String(key)">
                           <template v-for="(value, key) in v.metrics" :key="String(key)">
                             <dt class="text-muted-foreground">{{ String(key) }}</dt>
                             <dd class="font-mono">{{ formatMetric(value) }}</dd>
@@ -175,7 +155,6 @@
                         </dl>
                       </div>
                     </div>
-                    <div v-if="v.artifacts.length > 0" class="mt-4 pt-3 border-t border-border">
                     <div v-if="v.artifacts.length > 0" class="mt-4 pt-3 border-t border-border">
                       <button
                         class="flex items-center gap-1.5 text-[11px] font-semibold uppercase tracking-wider text-muted-foreground hover:text-foreground"
@@ -185,7 +164,6 @@
                         <span>Training artifacts ({{ v.artifacts.length }})</span>
                       </button>
                       <div v-if="expandedArtifactIds.has(v.id)" class="mt-3 space-y-4">
-                        <div v-for="group in groupedArtifacts(v)" :key="group.kind">
                         <div v-for="group in groupedArtifacts(v)" :key="group.kind">
                           <div class="text-xs font-medium text-foreground mb-1.5">
                             {{ group.label }}
@@ -259,7 +237,6 @@
       >
         <header class="px-5 py-2 border-b border-border flex items-center justify-between shrink-0">
           <h3 class="font-semibold">Upload existing model</h3>
-          <button class="text-muted-foreground hover:text-foreground" @click="uploadOpen = false">
           <button class="text-muted-foreground hover:text-foreground" @click="uploadOpen = false">
             ✕
           </button>
@@ -553,20 +530,6 @@ const KNOWN_ARTIFACT_NAMES = new Set([
   'labels_correlogram.jpg',
   'results.csv',
   'results.png',
-  'BoxF1_curve.png',
-  'BoxP_curve.png',
-  'BoxPR_curve.png',
-  'BoxR_curve.png',
-  'F1_curve.png',
-  'P_curve.png',
-  'PR_curve.png',
-  'R_curve.png',
-  'confusion_matrix.png',
-  'confusion_matrix_normalized.png',
-  'labels.jpg',
-  'labels_correlogram.jpg',
-  'results.csv',
-  'results.png',
   'args.yaml',
 ])
 const SAMPLE_PREFIXES = ['train_batch', 'val_batch']
@@ -612,7 +575,6 @@ const folderPreview = computed<FolderPreview>(() => {
   }
   return {
     weightsLabel: weights
-      ? (weights as File & { webkitRelativePath?: string }).webkitRelativePath || weights.name
       ? (weights as File & { webkitRelativePath?: string }).webkitRelativePath || weights.name
       : null,
     recognised: recognised.sort((a, b) => a.localeCompare(b)),
@@ -755,7 +717,6 @@ async function loadFromApi() {
 
 const filterOptions = computed(() => {
   const opts = [{ value: 'all', label: 'All', count: totalVersions.value }]
-  const opts = [{ value: 'all', label: 'All', count: totalVersions.value }]
   for (const t of tracks.value) {
     opts.push({ value: t.id, label: t.label, count: t.versions.length })
   }
@@ -768,10 +729,8 @@ const filteredTracks = computed(() => {
 })
 
 const totalVersions = computed(() => tracks.value.reduce((sum, t) => sum + t.versions.length, 0))
-const totalVersions = computed(() => tracks.value.reduce((sum, t) => sum + t.versions.length, 0))
 
 const activeCount = computed(() =>
-  tracks.value.reduce((sum, t) => sum + t.versions.filter((v) => v.is_active).length, 0),
   tracks.value.reduce((sum, t) => sum + t.versions.filter((v) => v.is_active).length, 0),
 )
 

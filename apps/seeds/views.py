@@ -6,10 +6,11 @@ from rest_framework.views import APIView
 from rest_framework.response import Response
 from rest_framework.permissions import IsAuthenticated
 
-from apps.analysis.models import TrainingJob, JobStatus
+from apps.analysis.models import TrainingJob, JobStatus, InferenceRun
 from apps.datasets.models import Module
 from apps.seeds.services import bootstrap_species_dataset
 from apps.seeds.training import spawn_training_job
+from apps.seeds.reference_seed_service import calculate_seed_status
 
 class SeedTrainingDataUploadView(APIView):
     """POST /api/seeds/training/upload-data/ to upload training images."""
@@ -108,3 +109,46 @@ class SeedTrainingJobCreateView(APIView):
             'training_mode': training_mode,
             'epochs': epochs,
         }, status=201)
+
+
+class SeedReferenceReviewView(APIView):
+    def get(self, request, run_id):
+        run = InferenceRun.objects.get(id=run_id)
+
+        image = run.images.first()
+
+        detections = run.detections.filter(image=image)
+
+        return Response({
+            "run": {
+                "id": run.id,
+                "name": run.name,
+            },
+            "image": {
+                "id": image.id,
+                "image_url": image.file.url,
+                "filename": image.filename,
+            },
+            "detections": [
+                {
+                    "id": d.id,
+                    "confidence": d.confidence,
+                    "bbox": d.bbox,
+                }
+                for d in detections
+            ]
+        })
+
+
+class SeedReferenceView(APIView):
+    def post(self, request, run_id):
+
+        reference_id = request.data["reference_detection_id"]
+        image_id = request.data["image_id"]
+
+        result = calculate_seed_status(
+            reference_detection_id=reference_id,
+            image_id=image_id
+        )
+
+        return Response(result)

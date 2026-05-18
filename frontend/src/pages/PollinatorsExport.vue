@@ -12,7 +12,6 @@
     >
       <span class="text-muted-foreground">Will export:</span>
       <span v-for="row in classCounts" :key="row.label" class="inline-flex items-center gap-1.5">
-      <span v-for="row in classCounts" :key="row.label" class="inline-flex items-center gap-1.5">
         <span class="w-2 h-2 rounded-full" :style="{ backgroundColor: row.color }" />
         <span class="font-mono">{{ row.count }}</span>
         <span class="text-muted-foreground">{{ row.label.toLowerCase() }}</span>
@@ -71,9 +70,6 @@
       <RouterLink :to="`/pollinators/runs/${runId}/review`" class="text-primary hover:underline"
         >Review</RouterLink
       >
-      <RouterLink :to="`/pollinators/runs/${runId}/review`" class="text-primary hover:underline"
-        >Review</RouterLink
-      >
       first.
     </div>
 
@@ -105,7 +101,6 @@
               class="absolute inset-0 w-full h-full"
             >
               <image :href="card.sourceUrl" :width="card.naturalW" :height="card.naturalH" />
-              <image :href="card.sourceUrl" :width="card.naturalW" :height="card.naturalH" />
               <rect
                 v-for="d in card.detections"
                 :key="d.id"
@@ -125,10 +120,6 @@
               />
               <ROIOverlay :bbox="roiBbox" :image-w="card.naturalW" :image-h="card.naturalH" />
             </svg>
-            <div
-              v-else
-              class="absolute inset-0 flex items-center justify-center text-xs text-muted-foreground"
-            >
             <div
               v-else
               class="absolute inset-0 flex items-center justify-center text-xs text-muted-foreground"
@@ -385,11 +376,7 @@ const classCounts = computed(() => {
 
 const totalIncluded = computed(
   () => acceptedDetections.value.filter((d) => !d.excluded_from_export).length,
-const totalIncluded = computed(
-  () => acceptedDetections.value.filter((d) => !d.excluded_from_export).length,
 )
-const totalExcluded = computed(
-  () => acceptedDetections.value.filter((d) => d.excluded_from_export).length,
 const totalExcluded = computed(
   () => acceptedDetections.value.filter((d) => d.excluded_from_export).length,
 )

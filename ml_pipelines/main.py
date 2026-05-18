@@ -1,7 +1,6 @@
 import json
 import os
 from collections import defaultdict
-import csv
 
 from seed_src.inference.inference import run_sahi
 from seed_src.training.train import train_species_model
@@ -267,11 +266,8 @@ for species in SPECIES_LIST:
 
 print('\n==== PER SPECIES RESULTS ====\n')
 
-csv_rows = []
-
 for species, r in results.items():
     mae = r['total_error'] / r['images'] if r['images'] > 0 else 0
-
     precision, recall, f1 = calculate_precision_recall_f1_score(
         r['tp'], r['fp'], r['fn']
     )
@@ -285,72 +281,14 @@ for species, r in results.items():
     print(f'  F1-score: {f1:.2f}')
     print('-' * 30)
 
-    # Save row for CSV
-    csv_rows.append({
-        'species': species,
-        'images': r['images'],
-        'mae': round(mae, 2),
-        'tp': r['tp'],
-        'fp': r['fp'],
-        'fn': r['fn'],
-        'precision': round(precision, 4),
-        'recall': round(recall, 4),
-        'f1_score': round(f1, 4),
-    })
-
-# overall results section
-
+# Overall results
 overall_tp = sum(r['tp'] for r in results.values())
 overall_fp = sum(r['fp'] for r in results.values())
 overall_fn = sum(r['fn'] for r in results.values())
 
-op, or_, of1 = calculate_precision_recall_f1_score(
-    overall_tp,
-    overall_fp,
-    overall_fn
-)
-
+op, or_, of1 = calculate_precision_recall_f1_score(overall_tp, overall_fp, overall_fn)
 print('\n==== Overall results ====\n')
 print(f'  TP: {overall_tp} | FP: {overall_fp} | FN: {overall_fn}')
 print(f'  Precision: {op:.2f}')
 print(f'  Recall: {or_:.2f}')
 print(f'  F1: {of1:.2f}')
-
-csv_rows.append({
-    'species': 'OVERALL',
-    'images': '-',
-    'mae': '-',
-    'tp': overall_tp,
-    'fp': overall_fp,
-    'fn': overall_fn,
-    'precision': round(op, 4),
-    'recall': round(or_, 4),
-    'f1_score': round(of1, 4),
-})
-
-
-# -------------------------
-# SAVE CSV
-# -------------------------
-
-csv_path = 'evaluation_results.csv'
-
-with open(csv_path, 'w', newline='') as csvfile:
-    fieldnames = [
-        'species',
-        'images',
-        'mae',
-        'tp',
-        'fp',
-        'fn',
-        'precision',
-        'recall',
-        'f1_score',
-    ]
-
-    writer = csv.DictWriter(csvfile, fieldnames=fieldnames)
-
-    writer.writeheader()
-    writer.writerows(csv_rows)
-
-print(f'\nResults saved to: {csv_path}')

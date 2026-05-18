@@ -146,11 +146,10 @@
               <UploadCloud class="w-8 h-8 mx-auto text-muted-foreground" />
               <div class="text-sm font-medium mt-2">
                 <template v-if="uploadedFiles.length">
-                  {{ uploadedFiles.length }} file{{ uploadedFiles.length === 1 ? '' : 's' }} added — drop more to extend
+                  {{ uploadedFiles.length }} file{{ uploadedFiles.length === 1 ? '' : 's' }} added —
+                  drop more to extend
                 </template>
-                <template v-else>
-                  Drop a folder or images here, or click to browse
-                </template>
+                <template v-else> Drop a folder or images here, or click to browse </template>
               </div>
               <div class="text-xs text-muted-foreground mt-1">
                 Adds to the training pool. Accepts .jpg, .png, .zip, or a folder of images.
