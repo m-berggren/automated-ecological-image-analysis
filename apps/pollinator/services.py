@@ -38,6 +38,7 @@ from apps.analysis.models import (
 from apps.analysis.storage import resolve_model_path
 
 from .models import PollinatorDetection
+from .training import canonical_class
 
 logger = logging.getLogger(__name__)
 
@@ -207,8 +208,12 @@ def run_inference_pipeline(run: InferenceRun) -> None:
             if image is None:
                 continue
             bbox = d.get('bbox') or {}
-            yolo_class = d.get('yolo_class') or ''
-            insectnet_class = d.get('insectnet_class') or ''
+            # Normalize raw model labels to canonical pollinator classes.
+            # The InsectNet model emits 'butterfly_moth' but the rest of
+            # the system (and the DB) speak canonical names. canonical_class
+            # is the single gate that keeps the storage layer clean.
+            yolo_class = canonical_class(d.get('yolo_class'))
+            insectnet_class = canonical_class(d.get('insectnet_class'))
             primary_class = yolo_class or insectnet_class
             primary_conf = (
                 d.get('yolo_confidence')
