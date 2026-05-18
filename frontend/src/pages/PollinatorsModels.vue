@@ -14,11 +14,6 @@
               ? 'bg-primary text-primary-foreground'
               : 'text-muted-foreground hover:bg-muted'
           "
-          :class="
-            kindFilter === opt.value
-              ? 'bg-primary text-primary-foreground'
-              : 'text-muted-foreground hover:bg-muted'
-          "
           @click="kindFilter = opt.value"
         >
           {{ opt.label }}
@@ -46,10 +41,6 @@
         v-else-if="!filteredTracks.length"
         class="p-12 text-center text-sm text-muted-foreground"
       >
-      <div
-        v-else-if="!filteredTracks.length"
-        class="p-12 text-center text-sm text-muted-foreground"
-      >
         No models match this filter.
       </div>
 
@@ -59,9 +50,6 @@
           :key="track.id"
           class="rounded-xl border border-border bg-card overflow-hidden shadow-md"
         >
-          <header
-            class="px-5 py-4 bg-primary/[0.22] border-b border-border flex items-baseline gap-3"
-          >
           <header
             class="px-5 py-4 bg-primary/[0.22] border-b border-border flex items-baseline gap-3"
           >
