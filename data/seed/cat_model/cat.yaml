@@ -1,7 +1,6 @@
-path: ../data/seed/cat_model
+path: data/seed/cat_model
 train: train_sliced
 val: val/images
 
 names:
   0: cat
-

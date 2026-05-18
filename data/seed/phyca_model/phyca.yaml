@@ -1,4 +1,4 @@
-path: ../data/seed/phyca_model
+path: data/seed/phyca_model
 train: train_sliced
 val: val/images
 

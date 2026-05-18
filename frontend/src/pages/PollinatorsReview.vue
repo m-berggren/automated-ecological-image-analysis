@@ -192,6 +192,51 @@
             Dismiss
           </button>
         </div>
+        <!-- Bulk action bar (only when 1+ selected) -->
+        <div
+          v-if="bulkIds.size > 0"
+          class="px-4 py-2 border-b border-border bg-primary/5 flex flex-wrap items-center gap-2 text-xs"
+        >
+          <span class="font-medium">{{ bulkIds.size }} selected</span>
+          <button
+            class="px-2 py-1 rounded bg-primary text-primary-foreground hover:bg-primary/90"
+            @click="bulkConfirm"
+          >
+            Confirm
+          </button>
+          <button class="px-2 py-1 rounded border border-border hover:bg-muted" @click="bulkReject">
+            Reject
+          </button>
+          <select
+            v-model="bulkCorrectClass"
+            class="px-2 py-1 rounded border border-border bg-background"
+            @change="onBulkCorrectChange"
+          >
+            <option value="">Correct to…</option>
+            <option v-for="cls in CLASSES" :key="cls" :value="cls">
+              {{ classLabel(cls) }}
+            </option>
+          </select>
+          <button class="ml-auto text-muted-foreground hover:text-foreground" @click="clearBulk">
+            Clear
+          </button>
+        </div>
+        <div
+          v-if="bulkConfirmSkipped > 0"
+          class="px-4 py-2 border-b border-border bg-amber-50 text-amber-800 flex items-center gap-2 text-xs"
+        >
+          <span>
+            Skipped {{ bulkConfirmSkipped }} row{{ bulkConfirmSkipped === 1 ? '' : 's' }}
+            with no predicted class. Correct them explicitly so they're included in group/detector
+            training.
+          </span>
+          <button
+            class="ml-auto text-amber-700 hover:text-amber-900"
+            @click="bulkConfirmSkipped = 0"
+          >
+            Dismiss
+          </button>
+        </div>
 
         <div class="flex-1 overflow-auto">
           <div v-for="group in groupedDetections" :key="group.label" class="border-b border-border">
@@ -316,6 +361,8 @@
             >
           </header>
 
+          <div class="flex-1 flex flex-col min-h-0">
+            <!-- Source image with bbox overlay. Click to open the zoom modal.
           <div class="flex-1 flex flex-col min-h-0">
             <!-- Source image with bbox overlay. Click to open the zoom modal.
                flex-1 + min-h-0 makes it fill whatever vertical space is left
@@ -601,6 +648,7 @@
       >
         <g :transform="`translate(${zoom.tx} ${zoom.ty}) scale(${zoom.scale})`">
           <image :href="selected.source_image_url" :width="sourceImage.w" :height="sourceImage.h" />
+          <image :href="selected.source_image_url" :width="sourceImage.w" :height="sourceImage.h" />
           <rect
             v-for="ov in siblingOverlays"
             :key="ov.id"
@@ -627,6 +675,9 @@
       <button
         class="absolute top-4 right-4 px-3 py-1.5 rounded-md bg-white/10 text-white text-sm hover:bg-white/20"
         @click.stop="closeZoom"
+      >
+        Close (Esc)
+      </button>
       >
         Close (Esc)
       </button>
@@ -979,6 +1030,7 @@ const groupedDetections = computed(() => {
 // Flattened in the same order the grid renders, so keyboard navigation
 // matches what the reviewer sees rather than the raw confidence sort.
 const flatVisible = computed(() => groupedDetections.value.flatMap((g) => g.detections))
+const flatVisible = computed(() => groupedDetections.value.flatMap((g) => g.detections))
 
 // Stripe by source image: same image → same tile background, image
 // changes → flip. Restarts per group so each group's first cluster is
@@ -991,6 +1043,7 @@ const imageParityById = computed(() => {
     let lastImage: string | null = null
     for (const d of group.detections) {
       if (lastImage !== null && d.source_image_filename !== lastImage) {
+        parity = parity === 0 ? 1 : 0
         parity = parity === 0 ? 1 : 0
       }
       lastImage = d.source_image_filename
@@ -1399,6 +1452,7 @@ function needsReview(d: Detection): boolean {
 function hasDisagreement(d: Detection): boolean {
   // Disagreement only meaningful when both branches contributed a class.
   return d.yolo_class != null && d.insectnet_class != null && d.yolo_class !== d.insectnet_class
+  return d.yolo_class != null && d.insectnet_class != null && d.yolo_class !== d.insectnet_class
 }
 function isLowConfidence(d: Detection): boolean {
   return maxConfidence(d) < LOW_CONFIDENCE_THRESHOLD
@@ -1412,6 +1466,16 @@ function reviewedFade(d: Detection): boolean {
 }
 function statusBadgeClass(s: ReviewerStatus): string {
   switch (s) {
+    case 'confirmed':
+      return 'bg-green-100 text-green-700'
+    case 'corrected':
+      return 'bg-blue-100 text-blue-700'
+    case 'rejected':
+      return 'bg-red-100 text-red-700'
+    case 'unsure':
+      return 'bg-amber-100 text-amber-700'
+    default:
+      return 'bg-muted text-muted-foreground'
     case 'confirmed':
       return 'bg-green-100 text-green-700'
     case 'corrected':
@@ -1576,8 +1640,10 @@ watch([belowThresholdIds, viewBelowOnly], ([ids, on]) => {
 })
 
 async function submitBulk(ids: number[], status: ReviewerStatus, label: ClassName | null) {
+async function submitBulk(ids: number[], status: ReviewerStatus, label: ClassName | null) {
   if (!ids.length) return
   const idSet = new Set(ids)
+  const snapshot = new Map<number, { status: ReviewerStatus; label: ClassName | null }>()
   const snapshot = new Map<number, { status: ReviewerStatus; label: ClassName | null }>()
   for (const d of detections.value) {
     if (idSet.has(d.id)) {
@@ -1795,6 +1861,10 @@ function onKeydown(e: KeyboardEvent) {
     e.target instanceof HTMLElement &&
     ['INPUT', 'SELECT', 'TEXTAREA'].includes(e.target.tagName)
   ) {
+  if (
+    e.target instanceof HTMLElement &&
+    ['INPUT', 'SELECT', 'TEXTAREA'].includes(e.target.tagName)
+  ) {
     return
   }
   // Escape clears any bulk selection without losing the currently-focused tile.
@@ -1814,6 +1884,22 @@ function onKeydown(e: KeyboardEvent) {
   const classKeyAction = (cls: ClassName) =>
     bulkMode ? applyToBulk('corrected', cls) : confirmAs(cls, true)
   switch (e.key) {
+    case '1':
+      classKeyAction('fly')
+      e.preventDefault()
+      break
+    case '2':
+      classKeyAction('bumblebee')
+      e.preventDefault()
+      break
+    case '3':
+      classKeyAction('butterfly')
+      e.preventDefault()
+      break
+    case '4':
+      classKeyAction('other')
+      e.preventDefault()
+      break
     case '1':
       classKeyAction('fly')
       e.preventDefault()
@@ -1861,7 +1947,15 @@ function onKeydown(e: KeyboardEvent) {
       navigate(1, e.shiftKey)
       e.preventDefault()
       break
+    case 'l':
+      navigate(1, e.shiftKey)
+      e.preventDefault()
+      break
     case 'ArrowLeft':
+    case 'h':
+      navigate(-1, e.shiftKey)
+      e.preventDefault()
+      break
     case 'h':
       navigate(-1, e.shiftKey)
       e.preventDefault()

@@ -40,7 +40,9 @@ onUnmounted(() => document.removeEventListener('mousedown', onDocClick))
 <style scoped>
 .info-pop-enter-active,
 .info-pop-leave-active {
-  transition: opacity 120ms ease, transform 120ms ease;
+  transition:
+    opacity 120ms ease,
+    transform 120ms ease;
 }
 .info-pop-enter-from,
 .info-pop-leave-to {
