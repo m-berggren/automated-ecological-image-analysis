@@ -1,7 +1,7 @@
 from pathlib import Path
 import random
 import os
-
+from PIL import Image
 from rest_framework.parsers import MultiPartParser
 from rest_framework.views import APIView
 from rest_framework.response import Response
@@ -116,40 +116,48 @@ class SeedReferenceReviewView(APIView):
     def get(self, request, run_id):
         run = InferenceRun.objects.get(id=run_id)
 
-        image = run.images.first()
+        images_qs = run.images.all()
 
-        if image is None:
-            return Response(
-                {"error": "No images attached to this inference run"},
-                status=404
-            )
+        response_images = []
+
+        for img in images_qs:
+            if img.width and img.height:
+                img_width, img_height = img.width, img.height
+            else:
+                with Image.open(img.file.path) as im:
+                    img_width, img_height = im.size
+
+            img_detections = run.detections.filter(image=img)
 
 
-        detections = run.detections.filter(image=image)
+            response_images.append({
+                "id": img.id,
+                "image_url": request.build_absolute_uri(img.file.url),
+                "filename": os.path.basename(img.file.name),
+                "width": img_width,
+                "height": img_height,
+
+                "detections": [
+                    {
+                        "id": d.id,
+                        "confidence": d.confidence,
+
+                        #Raw pixels
+                        "bbox": d.bbox,
+                        "polygon": d.polygon,
+
+                        "class": d.predicted_class,
+                    }
+                    for d in img_detections
+                ]
+            })
 
         return Response({
             "run": {
                 "id": run.id,
                 "name": run.name,
             },
-
-            "image": {
-                "id": image.id,
-                "image_url": request.build_absolute_uri(image.file.url),
-                "filename": os.path.basename(image.file.name),
-            },
-            "detections": [
-                {
-                    "id": d.id,
-                    "confidence": d.confidence,
-
-                    "bbox_x": d.bbox["x1"],
-                    "bbox_y": d.bbox["y1"],
-                    "bbox_width": d.bbox["x2"] - d.bbox["x1"],
-                    "bbox_height": d.bbox["y2"] - d.bbox["y1"],
-                }
-                for d in detections
-            ]
+            "images": response_images
         })
 
 

@@ -14,7 +14,7 @@
   </div>
 
   <!-- Main layout -->
-  <div v-else-if="currentImage" class="flex-1 flex flex-col min-h-0 bg-background">
+  <div v-else-if="images.length" class="flex-1 flex flex-col min-h-0 bg-background">
     <!-- Instructions -->
     <section class="border-b border-border bg-surface px-6 py-5">
       <div class="max-w-5xl">
@@ -27,7 +27,7 @@
 
         <div class="mt-4 flex flex-wrap items-center gap-3 text-sm">
           <div class="px-3 py-1 rounded-full bg-muted text-muted-foreground">
-            {{ detections.length }} detected seeds
+            {{ currentDetections.length }} detected seeds
           </div>
 
           <div v-if="selectedReference" class="px-3 py-1 rounded-full bg-green-100 text-green-700">
@@ -37,34 +37,63 @@
       </div>
     </section>
 
-    <!-- Image review area -->
+    <!-- IMAGE AREA -->
     <section class="flex-1 overflow-auto p-6">
       <div class="mx-auto max-w-7xl">
-        <div class="relative overflow-hidden rounded-2xl border border-border bg-black/5 shadow-sm">
-          <!-- Image -->
-          <img
-            :src="currentImage.image_url"
-            :alt="currentImage.filename"
-            class="w-full h-auto select-none"
-            draggable="false"
-          />
+        <!-- IMAGE WRAPPER -->
+        <div
+          class="relative w-full overflow-hidden rounded-2xl border border-border bg-black/5 shadow-sm"
+        >
+          <div class="flex items-center justify-between mb-3">
+            <button
+              class="px-3 py-1 border rounded"
+              :disabled="currentImageIndex === 0"
+              @click="currentImageIndex--"
+            >
+              Prev
+            </button>
 
-          <!-- Bounding boxes -->
-          <button
-            v-for="detection in detections"
-            :key="detection.id"
-            type="button"
-            class="absolute rounded-sm border-2 transition-all duration-150"
-            :class="
-              selectedReferenceId === detection.id
-                ? 'border-green-500 ring-4 ring-green-500/30 z-10'
-                : 'border-primary hover:border-green-400 hover:bg-green-500/10'
-            "
-            :style="boxStyle(detection)"
-            @click="selectReference(detection.id)"
-          >
-            <span class="sr-only"> Select seed {{ detection.id }} </span>
-          </button>
+            <div class="text-sm text-muted-foreground">
+              Image {{ currentImageIndex + 1 }} / {{ images.length }}
+            </div>
+
+            <button
+              class="px-3 py-1 border rounded"
+              :disabled="currentImageIndex === images.length - 1"
+              @click="currentImageIndex++"
+            >
+              Next
+            </button>
+          </div>
+          <div class="relative w-full">
+            <svg
+              ref="svgRef"
+              class="absolute inset-0 w-full h-full"
+              :viewBox="`0 0 ${currentImage.width} ${currentImage.height}`"
+              preserveAspectRatio="none"
+              style="pointer-events: none"
+            >
+              <polygon
+                v-for="detection in currentDetections"
+                :key="detection.id"
+                :points="polyPoints(detection)"
+                fill="transparent"
+                :stroke="selectedReferenceId === detection.id ? '#22c55e' : '#60a5fa'"
+                stroke-width="3"
+                style="pointer-events: all; cursor: pointer"
+                :class="selectedReferenceId === detection.id ? 'ring-highlight' : ''"
+                @click="selectReference(detection.id)"
+              />
+            </svg>
+
+            <img
+              ref="imageRef"
+              :src="currentImage.image_url"
+              :alt="currentImage.filename"
+              class="w-full h-auto block select-none"
+              draggable="false"
+            />
+          </div>
         </div>
       </div>
     </section>
@@ -108,9 +137,8 @@
 </template>
 
 <script setup lang="ts">
-import { computed, onMounted, ref } from 'vue'
+import { computed, onMounted, ref, nextTick, watch } from 'vue'
 import { useRoute, useRouter } from 'vue-router'
-
 import PageHeader from '@/components/PageHeader.vue'
 import SeedsStepper from '@/components/SeedsStepper.vue'
 
@@ -119,24 +147,28 @@ import { api } from '@/api'
 //Types
 interface Detection {
   id: number
-
   confidence: number
+  class: string
 
-  /*
-    Note to self: check that boundingboxes are normalized correctly in backend
-  */
-
-  bbox_x: number
-  bbox_y: number
-  bbox_width: number
-  bbox_height: number
+  bbox: {
+    x1: number
+    y1: number
+    x2: number
+    y2: number
+    w: number
+    h: number
+  }
 }
 
 interface ReviewImage {
   id: number
-
   filename: string
   image_url: string
+
+  width: number
+  height: number
+
+  detections: Detection[]
 }
 
 interface ReviewBundle {
@@ -146,7 +178,7 @@ interface ReviewBundle {
     status: string
   }
 
-  image: ReviewImage
+  images: ReviewImage[]
 
   detections: Detection[]
 }
@@ -161,11 +193,16 @@ const loadError = ref('')
 
 const run = ref<ReviewBundle['run'] | null>(null)
 
-const currentImage = ref<ReviewImage | null>(null)
+const images = ref<ReviewImage[]>([])
+const currentImageIndex = ref(0)
 
-const detections = ref<Detection[]>([])
+const currentImage = computed(() => images.value[currentImageIndex.value] ?? null)
+const currentDetections = computed(() => currentImage.value?.detections ?? [])
 
 const selectedReferenceId = ref<number | null>(null)
+
+const imageRef = ref<HTMLImageElement | null>(null)
+const imageSize = ref({ width: 0, height: 0 })
 
 //Computation
 const previewMode = computed(() => {
@@ -179,23 +216,30 @@ const headerTitle = computed(() =>
 )
 
 const selectedReference = computed(() =>
-  detections.value.find((detection) => detection.id === selectedReferenceId.value),
+  currentDetections.value.find((detection) => detection.id === selectedReferenceId.value),
 )
+
+// Converts flat coordinate points to SVG points string
+// This is to prevent needing scaling for matching correct position of boundingboxes in frontend page.
+function polyPoints(detection: Detection): string {
+  const poly = detection.polygon
+  if (!poly || poly.length < 8) {
+    // Fallback to bbox corners if polygon missing
+    const { x1, y1, x2, y2 } = detection.bbox
+    return `${x1},${y1} ${x2},${y1} ${x2},${y2} ${x1},${y2}`
+  }
+  // Pair up flat coords into "x,y" strings
+  const points: string[] = []
+  for (let i = 0; i < poly.length; i += 2) {
+    points.push(`${poly[i]},${poly[i + 1]}`)
+  }
+  return points.join(' ')
+}
 
 //Actual lifecycle of the page
 onMounted(async () => {
   if (previewMode.value) {
     const bundle = await loadPreview()
-
-    if (bundle) {
-      run.value = bundle.run
-      currentImage.value = bundle.image
-      detections.value = bundle.detections
-
-      loading.value = false
-
-      return
-    }
   }
 
   await loadFromApi()
@@ -228,8 +272,7 @@ async function loadFromApi() {
     const data: ReviewBundle = await response.json()
 
     run.value = data.run
-    currentImage.value = data.image
-    detections.value = data.detections
+    images.value = data.images
   } catch (error) {
     loadError.value = error instanceof Error ? error.message : String(error)
   } finally {
@@ -246,17 +289,44 @@ function clearReference() {
   selectedReferenceId.value = null
 }
 
-//Styling of the selected boundingbox
-function boxStyle(detection: Detection) {
-  return {
-    left: `${detection.bbox_x}%`,
-    top: `${detection.bbox_y}%`,
-    width: `${detection.bbox_width}%`,
-    height: `${detection.bbox_height}%`,
+async function updateImageSize() {
+  await nextTick()
+
+  const img = imageRef.value
+  if (!img) return
+
+  imageSize.value = {
+    width: img.clientWidth,
+    height: img.clientHeight,
   }
 }
 
-//Function to proceed to calculations with reference seed (Needs implementation in backend)
+watch(currentImageIndex, updateImageSize)
+watch(images, updateImageSize)
+
+//Styling of the selected boundingbox
+function boxStyle(detection: Detection) {
+  const img = imageRef.value
+  if (!img || !currentImage.value) return {}
+
+  const renderedWidth = img.clientWidth
+  const renderedHeight = img.clientHeight
+
+  const originalWidth = currentImage.value.width
+  const originalHeight = currentImage.value.height
+
+  const scaleX = renderedWidth / originalWidth
+  const scaleY = renderedHeight / originalHeight
+
+  return {
+    left: `${detection.bbox.x1 * scaleX}px`,
+    top: `${detection.bbox.y1 * scaleY}px`,
+    width: `${(detection.bbox.x2 - detection.bbox.x1) * scaleX}px`,
+    height: `${(detection.bbox.y2 - detection.bbox.y1) * scaleY}px`,
+  }
+}
+
+//Function to proceed to calculations with reference seed
 async function proceedToCalculation() {
   if (!selectedReferenceId.value) {
     return

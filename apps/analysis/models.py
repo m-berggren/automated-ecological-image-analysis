@@ -359,6 +359,8 @@ class Detection(models.Model):
             'the ML pipeline in ml-pipelines/pollinator/workflows.'
         ),
     )
+    polygon = models.JSONField()
+
     confidence = models.FloatField()
     predicted_class = models.CharField(max_length=50)
     area = models.FloatField(

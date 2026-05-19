@@ -1,6 +1,6 @@
 import json
 import os
-
+from PIL import Image
 import sys
 import django
 
@@ -205,6 +205,10 @@ for species in SPECIES_LIST:
 
     for img_name in os.listdir(species_img_dir):
         img_path = os.path.join(species_img_dir, img_name)
+
+        with Image.open(img_path) as im:
+            img_width, img_height = im.size
+
         gt_boxes = load_ground_truth(img_path)
 
         # Run inference using the specific species model
@@ -230,6 +234,8 @@ for species in SPECIES_LIST:
             image_asset = ImageAsset.objects.create(
                 module='seeds',
                 purpose='inference_output',
+                width=img_width,
+                height=img_height,
             )
 
             image_asset.file.save(
@@ -289,6 +295,7 @@ for species in SPECIES_LIST:
                 y1 = min(ys)
                 y2 = max(ys)
 
+                # In the detection save block, store flat polygon alongside bbox
                 Detection.objects.create(
                     inference_run=run,
                     image=image_asset,
@@ -301,8 +308,8 @@ for species in SPECIES_LIST:
                         "x2": x2,
                         "y2": y2,
                     },
+                    polygon=flat_poly[:8],
                 )
-
 
         tp, fp, fn = calculate_tp_fp_fn(preds, gt_boxes, iou_threshold=0.3)
 

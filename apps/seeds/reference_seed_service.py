@@ -10,20 +10,20 @@ def calculate_seed_status(reference_detection_id: int, image_id: int):
 
     reference = Detection.objects.get(id=reference_detection_id)
 
-    detections = Detection.objects.filter(image_id=image_id)
+    detections = list(Detection.objects.filter(image_id=image_id))
 
-    reference_poly = bbox_to_poly(reference.bbox)
+    reference_poly = reference.polygon
 
-    detected_polys = [
-        bbox_to_poly(d.bbox)
-        for d in detections
-    ]
+    detected_polys = [d.polygon for d in detections]
 
     result = count_active_and_aborted_seeds(
         reference_seed=reference_poly,
         detected_seeds=detected_polys,
         threshold=0.30,
     )
+
+    ref_area = poly_area(reference_poly)
+    active_threshold = ref_area * 0.30
 
     # save back into DB
     detections.update(
@@ -32,25 +32,9 @@ def calculate_seed_status(reference_detection_id: int, image_id: int):
 
     # assign labels based on result
     for d in detections:
-        poly = bbox_to_poly(d.bbox)
-        area = poly_area(poly)
-
-        if area <= result_threshold(reference_poly):
-            d.seed_status = "aborted"
-        else:
-            d.seed_status = "active"
-
+        area = poly_area(d.polygon)
+        d.seed_status = "active" if area >= active_threshold else "aborted"
         d.save()
 
     return result
 
-
-def bbox_to_poly(bbox):
-    x1, y1, x2, y2 = bbox["x1"], bbox["y1"], bbox["x2"], bbox["y2"]
-
-    return [
-        x1, y1,
-        x2, y1,
-        x2, y2,
-        x1, y2
-    ]
