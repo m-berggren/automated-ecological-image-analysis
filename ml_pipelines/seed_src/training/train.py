@@ -9,7 +9,7 @@ def train_species_model(
     species_name,
     data_yaml_path,
     *,
-    epochs=90,
+    epochs=1,
     pretrained_weights_path='yolo26n-obb.pt',
     finetune_from: str | None = None,
     run_name: str | None = None,

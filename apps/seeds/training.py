@@ -177,13 +177,7 @@ def run_training_job(job: TrainingJob) -> None:
         )
 
         train_duration = int(time.monotonic() - train_started)
-
-        existing_count = ModelVersion.objects.filter(
-            module=Module.SEEDS,
-            parameters__species=species,
-        ).count()
-
-        version_name = f'{species.upper()}-{existing_count + 1:02d}'
+        version_name = f'{species.upper()}-{job.pk:02d}'
 
         # Persist new ModelVersion + finalise job
         # By default, the most recent model version is automatically set as active

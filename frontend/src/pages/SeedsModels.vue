@@ -261,8 +261,39 @@ async function loadFromApi() {
       loadError.value = `HTTP ${res.status}`
       return
     }
-    tracks.value = []
+    const versions: any[] = await res.json()
+
+    const speciesMap = new Map<string, Track>()
+
+    for (const v of versions) {
+      const species = (v.parameters?.species ?? '').toLowerCase()
+      const id = species.toUpperCase()
+
+      if (!speciesMap.has(id)) {
+        speciesMap.set(id, {
+          id,
+          label: id,
+          species: v.parameters?.species ?? id,
+          versions: [],
+        })
+      }
+
+      speciesMap.get(id)!.versions.push({
+        id: v.id,
+        version_name: v.version_name,
+        is_active: v.is_active,
+        metrics: v.metrics ?? {},
+        samples: v.sample_count ?? 0,
+        trained_at: v.trained_at ?? v.created_at,
+        training_duration_seconds: v.training_duration_seconds ?? 0,
+        parameters: v.parameters ?? {},
+        charts: v.charts ?? null,
+      })
+    }
+
+    tracks.value = Array.from(speciesMap.values())
   } catch (e) {
+    console.error('loadFromApi error:', e)
     loadError.value = e instanceof Error ? e.message : String(e)
   } finally {
     loading.value = false

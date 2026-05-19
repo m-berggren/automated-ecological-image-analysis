@@ -19,22 +19,20 @@
 
         <!-- Training mode -->
         <div class="px-5 py-4 border-b border-border">
-          <div
-            class="text-[11px] font-semibold uppercase tracking-wider text-muted-foreground mb-3"
-          >
+          <div class="text-[11px] font-semibold uppercase tracking-wider text-muted-foreground mb-3">
             Training mode
           </div>
 
           <div class="grid grid-cols-2 gap-3">
             <button
-              @click="trainingMode = 'incremental'"
-              :class="[
-                'rounded-lg border p-4 text-left transition-colors',
-                trainingMode === 'incremental'
-                  ? 'border-primary bg-primary/5'
-                  : 'border-border hover:border-primary/40',
-              ]"
-            >
+                @click="trainingMode = 'incremental'"
+                :class="[
+                  'rounded-lg border p-4 text-left transition-colors',
+                  trainingMode === 'incremental'
+                    ? 'border-primary bg-primary/5'
+                    : 'border-border hover:border-primary/40',
+                ]"
+              >
               <div class="font-medium text-sm">Retrain model</div>
               <div class="text-xs text-muted-foreground mt-1">
                 Improve an existing trained model
@@ -479,6 +477,10 @@ const selectedVersionId = ref<number | null>(null)
 const totalUploadSize = computed(() =>
   uploadedFiles.value.reduce((sum, f) => sum + f.size, 0)
 )
+
+function formatMetric(v?: number) {
+  return v != null ? v.toFixed(2) : '—'
+}
 
 function clearFiles() {
   uploadedFiles.value = []
