@@ -28,7 +28,191 @@
         Dismiss
       </button>
     </div>
-    <div class="flex-1 flex flex-col-reverse lg:flex-row min-h-0">
+    <ReviewImageFirst
+      v-if="settings.reviewLayout === 'image-first'"
+      :detections="filteredDetections"
+      :selected-id="selectedId"
+      :bulk-ids="bulkIds"
+      @update:selected-id="selectedId = $event"
+      @drag-select="onImageFirstDragSelect"
+    >
+      <template #below>
+        <!-- Four side-by-side containers under the image. Fixed height so
+             the row never reflows when a crop with unusual aspect lands
+             in the preview. Left to right: crop preview, predictions,
+             thresholds, labels. -->
+        <div
+          class="grid grid-cols-1 md:grid-cols-[1fr_1fr_1fr_1.2fr] divide-y md:divide-y-0 md:divide-x divide-border h-48"
+        >
+          <!-- Focused crop preview. Hidden in bulk mode since there's no
+               single crop to preview; only shown for a lone selection. -->
+          <div class="p-2 min-h-0 flex items-center justify-center">
+            <img
+              v-if="!bulkMode && selected && selected.crop_url"
+              :src="selected.crop_url"
+              :alt="`Detection ${selected.id}`"
+              class="w-full h-full object-contain bg-background border border-border shadow-sm"
+            />
+            <span v-else class="text-xs text-muted-foreground">
+              {{ bulkMode ? `${bulkIds.size} crops selected` : 'No crop selected' }}
+            </span>
+          </div>
+
+          <!-- Model predictions for the focused crop. Mirrors the sidebar
+               row format so the same info is reachable without scrolling.
+               Empty-state message is centered to match the crop-preview
+               container's layout when nothing is selected or in bulk mode. -->
+          <div
+            class="px-4 py-2 min-h-0 overflow-auto"
+            :class="
+              !bulkMode && selected ? 'space-y-1' : 'flex items-center justify-center text-center'
+            "
+          >
+            <template v-if="!bulkMode && selected">
+              <div
+                class="text-[10px] xl:text-[11px] font-semibold uppercase tracking-wider text-muted-foreground"
+              >
+                Predictions
+              </div>
+              <div class="space-y-0.5 text-xs font-mono">
+                <div class="flex items-center gap-2">
+                  <span class="text-muted-foreground w-16 text-[10px]">YOLO</span>
+                  <span class="w-10 tabular-nums">
+                    {{
+                      selected.yolo_confidence != null ? selected.yolo_confidence.toFixed(2) : '—'
+                    }}
+                  </span>
+                  <span class="font-medium">{{
+                    selected.yolo_class
+                      ? classLabel(selected.yolo_class).slice(0, 1).toUpperCase() +
+                        classLabel(selected.yolo_class).slice(1)
+                      : '—'
+                  }}</span>
+                </div>
+                <div class="flex items-center gap-2">
+                  <span class="text-muted-foreground w-16 text-[10px]">InsectNet</span>
+                  <span class="w-10 tabular-nums">
+                    {{
+                      selected.insectnet_confidence != null
+                        ? selected.insectnet_confidence.toFixed(2)
+                        : '—'
+                    }}
+                  </span>
+                  <span class="font-medium">{{
+                    selected.insectnet_class ? classLabel(selected.insectnet_class) : '—'
+                  }}</span>
+                </div>
+              </div>
+            </template>
+            <span v-else class="text-xs text-muted-foreground">
+              {{ bulkMode ? `${bulkIds.size} crops selected` : 'No crop selected' }}
+            </span>
+          </div>
+
+          <!-- Thresholds -->
+          <div class="px-4 py-2 space-y-1 min-h-0 overflow-auto">
+            <div
+              class="text-[10px] xl:text-[11px] font-semibold uppercase tracking-wider text-muted-foreground"
+            >
+              Thresholds
+            </div>
+            <div class="grid grid-cols-[auto_1fr_auto] items-center gap-x-2 gap-y-1 text-xs">
+              <label for="img-yolo-min" class="text-muted-foreground">YOLO ≥</label>
+              <input
+                id="img-yolo-min"
+                type="range"
+                min="0"
+                max="1"
+                step="0.05"
+                v-model.number="yoloMinConf"
+                class="w-full accent-primary"
+              />
+              <span class="font-mono w-10 text-right">{{ yoloMinConf.toFixed(2) }}</span>
+              <label for="img-insectnet-min" class="text-muted-foreground">InsectNet ≥</label>
+              <input
+                id="img-insectnet-min"
+                type="range"
+                min="0"
+                max="1"
+                step="0.05"
+                v-model.number="insectnetMinConf"
+                class="w-full accent-primary"
+              />
+              <span class="font-mono w-10 text-right">{{ insectnetMinConf.toFixed(2) }}</span>
+            </div>
+          </div>
+
+          <!-- Labels (right) -->
+          <div class="px-4 py-2 flex flex-col gap-1 min-h-0 overflow-auto">
+            <div
+              class="text-[10px] xl:text-[11px] font-semibold uppercase tracking-wider text-muted-foreground"
+            >
+              Label
+              <span
+                v-if="bulkMode"
+                class="ml-1 normal-case tracking-normal text-muted-foreground/80"
+              >
+                · {{ bulkIds.size }} selected
+              </span>
+            </div>
+            <div class="flex flex-col">
+              <label
+                v-for="cls in CLASSES"
+                :key="cls"
+                class="flex items-center gap-2 py-0 px-2 -mx-2 rounded text-sm cursor-pointer hover:bg-muted/50"
+                :class="!selected && !bulkMode ? 'opacity-50 pointer-events-none' : ''"
+              >
+                <span
+                  class="w-2 h-2 rounded-full shrink-0"
+                  :style="{ backgroundColor: classColor(cls) }"
+                />
+                <span class="flex-1">{{ classLabel(cls) }}</span>
+                <input
+                  type="radio"
+                  name="label-class-img"
+                  :checked="panelLabelOf(selected) === cls"
+                  @change="pendingLabel = cls"
+                  class="w-4 h-4"
+                />
+              </label>
+              <label
+                class="flex items-center gap-2 py-0 px-2 -mx-2 rounded text-sm cursor-pointer hover:bg-muted/50"
+                :class="!selected && !bulkMode ? 'opacity-50 pointer-events-none' : ''"
+              >
+                <span class="w-2 h-2 rounded-full shrink-0 bg-muted-foreground/40" />
+                <span class="flex-1">
+                  Background
+                  <span class="text-[11px] text-muted-foreground ml-1">(reject)</span>
+                </span>
+                <input
+                  type="radio"
+                  name="label-class-img"
+                  :checked="panelLabelOf(selected) === 'background'"
+                  @change="pendingLabel = 'background'"
+                  class="w-4 h-4"
+                />
+              </label>
+            </div>
+            <div class="flex gap-2 pt-1">
+              <button
+                class="flex-1 px-2 py-1 rounded-md text-sm font-medium border border-amber-300 text-amber-700 hover:bg-amber-50"
+                @click="commitUnsure"
+              >
+                Unsure
+              </button>
+              <button
+                class="flex-1 px-2 py-1 rounded-md text-sm font-medium bg-primary text-primary-foreground hover:bg-primary/90 disabled:opacity-50 disabled:cursor-not-allowed"
+                :disabled="!canConfirm"
+                @click="commitPending"
+              >
+                Confirm
+              </button>
+            </div>
+          </div>
+        </div>
+      </template>
+    </ReviewImageFirst>
+    <div v-else class="flex-1 flex flex-col-reverse lg:flex-row min-h-0">
       <!-- Left: filters + grouped grid. Width controlled by --left-width
            at lg+ so the divider drag can update it via a single CSS var.
            @container lets children query *this section's* width (not the
@@ -415,7 +599,10 @@
                   class="text-[10px] xl:text-[11px] font-semibold uppercase tracking-wider text-muted-foreground mb-0.5"
                 >
                   Label
-                  <span v-if="bulkMode" class="ml-1 normal-case tracking-normal text-muted-foreground/80">
+                  <span
+                    v-if="bulkMode"
+                    class="ml-1 normal-case tracking-normal text-muted-foreground/80"
+                  >
                     · applies to {{ bulkIds.size }} selected
                   </span>
                 </div>
@@ -644,9 +831,13 @@ import PageHeader from '@/components/PageHeader.vue'
 import PollinatorsStepper from '@/components/PollinatorsStepper.vue'
 import ROIOverlay from '@/components/ROIOverlay.vue'
 import { api } from '@/api'
+import type { Detection, PollinatorClass, ReviewerStatus } from '@/types/pollinator'
+import { useRunDetections } from '@/composables/useRunDetections'
+import { usePollinatorSettingsStore } from '@/stores/pollinatorSettings'
+import ReviewImageFirst from '@/components/pollinator/ReviewImageFirst.vue'
 
-type ClassName = 'fly' | 'bumblebee' | 'butterfly' | 'other'
-type ReviewerStatus = 'unreviewed' | 'confirmed' | 'corrected' | 'rejected' | 'unsure'
+const settings = usePollinatorSettingsStore()
+
 // Frontend workflow labels (not the backend reviewer_status).
 //   pending  — unreviewed; the active working queue.
 //   reviewed — anything the reviewer has settled (confirmed / corrected /
@@ -655,62 +846,17 @@ type ReviewerStatus = 'unreviewed' | 'confirmed' | 'corrected' | 'rejected' | 'u
 //              disappear into the reviewed pile.
 //   all      — everything.
 type StatusFilter = 'pending' | 'reviewed' | 'unsure' | 'all'
-type Source = 'yolo' | 'preprocessing' | 'both'
 
 const LOW_CONFIDENCE_THRESHOLD = 0.6
 
-interface BBox {
-  x1: number
-  y1: number
-  x2: number
-  y2: number
-  w: number
-  h: number
-}
-
-interface Detection {
-  id: number
-  // YOLO-only detections have null insectnet_*, preprocessing-only have null
-  // yolo_*. Only source='both' detections populate both branches.
-  yolo_class: ClassName | null
-  yolo_confidence: number | null
-  insectnet_class: ClassName | null
-  insectnet_confidence: number | null
-  source: Source
-  reviewer_status: ReviewerStatus
-  reviewer_label: ClassName | null
-  predicted_class: ClassName | null
-  source_image_filename: string
-  bbox: BBox | null
-  source_image_url: string | null
-  crop_url: string | null
-}
-
-interface ReviewBundle {
-  run: {
-    id: number
-    name: string
-    status: string
-    detection_count: number
-    config?: {
-      yolo?: { confidence?: number }
-      binary_classifier?: { confidence?: number }
-      preprocessing?: {
-        roi_bbox?: [number, number, number, number] | null
-      }
-    }
-  }
-  detections: Detection[]
-}
-
-const CLASSES: ClassName[] = ['fly', 'bumblebee', 'butterfly', 'other']
-const CLASS_COLORS: Record<ClassName, string> = {
+const CLASSES: PollinatorClass[] = ['fly', 'bumblebee', 'butterfly', 'other']
+const CLASS_COLORS: Record<PollinatorClass, string> = {
   fly: '#6b9bd2',
   bumblebee: '#e6a946',
   butterfly: '#c87bba',
   other: '#9aa3ab',
 }
-const CLASS_GLYPHS: Record<ClassName, string> = {
+const CLASS_GLYPHS: Record<PollinatorClass, string> = {
   fly: '🪰',
   bumblebee: '🐝',
   butterfly: '🦋',
@@ -718,13 +864,12 @@ const CLASS_GLYPHS: Record<ClassName, string> = {
 }
 
 const route = useRoute()
-const loading = ref(true)
-const loadError = ref('')
-const run = ref<ReviewBundle['run'] | null>(null)
-const detections = ref<Detection[]>([])
+const { run, detections, loading, loadError, loadProgress, load } = useRunDetections(
+  route.params.id as string,
+)
 const selectedId = ref<number | null>(null)
 const statusFilter = ref<StatusFilter>('pending')
-type ClassFilter = ClassName | 'background' | 'all'
+type ClassFilter = PollinatorClass | 'background' | 'all'
 const classFilter = ref<ClassFilter>('all')
 // Per-branch confidence sliders. Seeded from the run's own config in
 // loadFromApi so the review view starts in the same regime the run was
@@ -743,7 +888,7 @@ function passesSliders(d: Detection): boolean {
   return yoloOk && insectnetOk
 }
 const bulkIds = ref<Set<number>>(new Set())
-const bulkCorrectClass = ref<'' | ClassName>('')
+const bulkCorrectClass = ref<'' | PollinatorClass>('')
 // Surfaces how many rows the most recent bulk-confirm skipped because they
 // had no derivable class. Reset when the reviewer next interacts with the
 // bulk bar (selection change or explicit clear).
@@ -751,9 +896,9 @@ const bulkConfirmSkipped = ref(0)
 
 interface FailedEntry {
   status: ReviewerStatus
-  label: ClassName | null
+  label: PollinatorClass | null
   prevStatus: ReviewerStatus
-  prevLabel: ClassName | null
+  prevLabel: PollinatorClass | null
 }
 const failedSaves = ref<Map<number, FailedEntry>>(new Map())
 const retrying = ref(false)
@@ -770,60 +915,22 @@ const viewBelowOnly = ref(false)
 const searchQuery = ref('')
 const SEARCH_MIN_LEN = 3
 
-onMounted(loadFromApi)
+onMounted(load)
 
-interface DetectionsPage {
-  count: number
-  next: string | null
-  results: Detection[]
-}
-
-const loadProgress = ref({ loaded: 0, total: 0 })
-
-async function loadFromApi() {
-  const id = route.params.id as string
-  try {
-    const runRes = await api(`/api/analysis/runs/${id}/`)
-    if (!runRes.ok) {
-      loadError.value = `Run: HTTP ${runRes.status}`
-      loading.value = false
-      return
-    }
-    run.value = await runRes.json()
-    // Seed the confidence sliders from the run's own config so the
-    // review view starts at the same thresholds the upload page picked.
-    // Falls back to 0 ("no filter") if the run was created without an
-    // explicit threshold for that branch.
-    yoloMinConf.value = run.value?.config?.yolo?.confidence ?? 0
-    insectnetMinConf.value = run.value?.config?.binary_classifier?.confidence ?? 0
-    // Stream pages: paint the first batch immediately so the reviewer
-    // can start clicking, then keep appending until the run is fully
-    // loaded. detections.value is reactive; groupedDetections recomputes
-    // each time we extend it.
-    let next: string | null = `/api/pollinator/runs/${id}/detections/`
-    let firstPage = true
-    while (next) {
-      const url: string = next.startsWith('http') ? next.replace(/^https?:\/\/[^/]+/, '') : next
-      const res = await api(url)
-      if (!res.ok) {
-        loadError.value = `Detections: HTTP ${res.status}`
-        return
-      }
-      const page = (await res.json()) as DetectionsPage
-      detections.value = detections.value.concat(page.results)
-      loadProgress.value = { loaded: detections.value.length, total: page.count }
-      next = page.next
-      if (firstPage) {
-        loading.value = false
-        firstPage = false
-      }
-    }
-  } catch (e) {
-    loadError.value = e instanceof Error ? e.message : String(e)
-  } finally {
-    loading.value = false
-  }
-}
+// Seed confidence sliders from the run's own config so the review starts
+// at the same thresholds the upload page picked. Falls back to 0 ("no
+// filter") when the run was created without an explicit threshold for
+// that branch. Watching run (rather than awaiting it in onMounted) keeps
+// the loading flow inside useRunDetections.
+watch(
+  run,
+  (r) => {
+    if (!r) return
+    yoloMinConf.value = r.config?.yolo?.confidence ?? 0
+    insectnetMinConf.value = r.config?.binary_classifier?.confidence ?? 0
+  },
+  { immediate: true },
+)
 
 const headerTitle = computed(() =>
   run.value ? `Review · ${run.value.name || `Run #${run.value.id}`}` : 'Review',
@@ -891,19 +998,36 @@ const filteredDetections = computed(() => {
   } else {
     list = list.filter(passesSliders)
   }
-  // Stable sort by id. The previous double-sort (confidence at this layer,
-  // then by source-image filename inside each group) caused tiles to
-  // visibly swap places whenever streamed pages arrived or a review action
-  // shifted the underlying ordering. Insertion order from the backend is
-  // deterministic and never moves once loaded.
-  return [...list].sort((a, b) => a.id - b.id)
+  // Sort by (source image filename, bbox.x1, bbox.y1, id). Within a single
+  // image this gives the natural left-to-right reading order, which
+  // matches the image-first arrow-key navigation users expect; between
+  // images it falls back to alphabetical filename so the rail and the
+  // detection sequence stay aligned. Detections with no bbox sink to the
+  // end of their image's group (by id), keeping the comparator total and
+  // deterministic.
+  return [...list].sort((a, b) => {
+    const fn = a.source_image_filename.localeCompare(b.source_image_filename)
+    if (fn !== 0) return fn
+    const ax = a.bbox?.x1
+    const bx = b.bbox?.x1
+    if (ax == null && bx == null) return a.id - b.id
+    if (ax == null) return 1
+    if (bx == null) return -1
+    if (ax !== bx) return ax - bx
+    // Larger y first when x ties: at the same horizontal slot, the
+    // lower-on-image crop comes earlier in the sequence.
+    const ay = a.bbox?.y1 ?? 0
+    const by = b.bbox?.y1 ?? 0
+    if (ay !== by) return by - ay
+    return a.id - b.id
+  })
 })
 
 const groupedDetections = computed(() => {
   const review: Detection[] = []
   const unclassified: Detection[] = []
   const background: Detection[] = []
-  const classGroups = new Map<ClassName, Detection[]>()
+  const classGroups = new Map<PollinatorClass, Detection[]>()
   // Placement priority:
   // 1. Rejected detections are labelled "background" — they go to the
   //    Background bucket regardless of detector state. Keeping them under
@@ -920,7 +1044,7 @@ const groupedDetections = computed(() => {
   // Class=Fly doesn't count rejected things.
   // Class=Background is handled via the existing rejected → background
   // bucket above, so we don't need a collapse rule for it.
-  const collapseToClass: ClassName | null =
+  const collapseToClass: PollinatorClass | null =
     classFilter.value !== 'all' && classFilter.value !== 'background' ? classFilter.value : null
   for (const d of filteredDetections.value) {
     if (d.reviewer_status === 'rejected') {
@@ -1022,12 +1146,29 @@ watch(
 // reject row. null = no pending change. Resets on selection change (or
 // when bulkIds shifts) so a staged-but-uncommitted pick can't leak into
 // the next target.
-type PendingLabel = ClassName | 'background' | null
+type PendingLabel = PollinatorClass | 'background' | null
 const pendingLabel = ref<PendingLabel>(null)
 
 // True when the bulk drag-selected more than one detection — the Label
 // panel then targets the whole bulk instead of just the primary `selected`.
 const bulkMode = computed(() => bulkIds.value.size > 1)
+
+// Drag-select handler for the image-first view. The child computes which
+// detection ids fell inside the dragged rectangle (center-in-rect) and
+// sends them up here so the parent's bulkIds stays the single source of
+// truth across both layouts.
+function onImageFirstDragSelect(ids: number[]) {
+  if (ids.length === 0) {
+    bulkIds.value = new Set()
+    return
+  }
+  bulkIds.value = new Set(ids)
+  // Promote the first hit to the active selection so the right pane is
+  // populated and the keyboard shortcuts have something to act on.
+  if (selectedId.value == null || !bulkIds.value.has(selectedId.value)) {
+    selectedId.value = ids[0]
+  }
+}
 
 watch(selectedId, async (id) => {
   pendingLabel.value = null
@@ -1052,6 +1193,13 @@ function panelLabel(d: Detection): PendingLabel {
   if (pendingLabel.value !== null) return pendingLabel.value
   if (d.reviewer_status === 'rejected') return 'background'
   return effectiveLabel(d)
+}
+
+// Null-tolerant variant for templates that render under (selected || bulk)
+// guards: when no row is selected but a bulk is active, the pending
+// pick is what the panel should mirror.
+function panelLabelOf(d: Detection | null): PendingLabel {
+  return d ? panelLabel(d) : pendingLabel.value
 }
 
 // Confirm enabled when there's something to send.
@@ -1446,7 +1594,7 @@ function onPreviewDragEnd() {
 
 function classColor(cls: string | null): string {
   if (!cls) return '#9aa3ab'
-  return CLASS_COLORS[cls as ClassName] ?? '#9aa3ab'
+  return CLASS_COLORS[cls as PollinatorClass] ?? '#9aa3ab'
 }
 function classBgFor(cls: string | null): string {
   const hex = classColor(cls)
@@ -1454,7 +1602,7 @@ function classBgFor(cls: string | null): string {
 }
 function classGlyph(cls: string | null): string {
   if (!cls) return '?'
-  return CLASS_GLYPHS[cls as ClassName] ?? '?'
+  return CLASS_GLYPHS[cls as PollinatorClass] ?? '?'
 }
 function classLabel(cls: string | null): string {
   if (!cls) return '—'
@@ -1462,7 +1610,7 @@ function classLabel(cls: string | null): string {
 }
 // Class shown on the grid card and used for grouping/coloring. Falls back
 // to whichever branch produced the detection when only one is populated.
-function primaryClass(d: Detection): ClassName | null {
+function primaryClass(d: Detection): PollinatorClass | null {
   return d.yolo_class ?? d.insectnet_class ?? null
 }
 // Highest of the populated confidences. 0 when both are missing (shouldn't
@@ -1511,7 +1659,7 @@ function statusBadgeClass(s: ReviewerStatus): string {
 function statusLabel(s: ReviewerStatus): string {
   return s[0].toUpperCase() + s.slice(1)
 }
-function suggestedClass(d: Detection): ClassName | null {
+function suggestedClass(d: Detection): PollinatorClass | null {
   if (d.yolo_class == null) return d.insectnet_class
   if (d.insectnet_class == null) return d.yolo_class
   return (d.insectnet_confidence ?? 0) >= (d.yolo_confidence ?? 0)
@@ -1524,14 +1672,14 @@ function suggestedClass(d: Detection): ClassName | null {
 // moves into that class group. Returns null for rejected/unsure/
 // unreviewed — those use the detector-state fallback in
 // groupedDetections.
-function settledClass(d: Detection): ClassName | null {
+function settledClass(d: Detection): PollinatorClass | null {
   if (d.reviewer_status === 'confirmed' || d.reviewer_status === 'corrected') {
     return effectiveLabel(d)
   }
   return null
 }
 
-function effectiveLabel(d: Detection): ClassName | null {
+function effectiveLabel(d: Detection): PollinatorClass | null {
   // Rejected = background, which isn't one of the four class labels. Clear
   // any class hint so the Label panel doesn't end up with both Fly and
   // Background ticked when a previously-consensus-Fly is rejected.
@@ -1550,7 +1698,7 @@ function effectiveLabel(d: Detection): ClassName | null {
 async function patchDetection(
   id: number,
   status: ReviewerStatus,
-  label: ClassName | null,
+  label: PollinatorClass | null,
 ): Promise<boolean> {
   try {
     const res = await api(`/api/pollinator/detections/${id}/`, {
@@ -1569,7 +1717,7 @@ async function patchDetection(
 async function postBulkReview(
   ids: number[],
   status: ReviewerStatus,
-  label: ClassName | null,
+  label: PollinatorClass | null,
 ): Promise<boolean> {
   try {
     const res = await api('/api/analysis/detections/bulk/', {
@@ -1592,7 +1740,11 @@ function clearFailedSave(id: number) {
   failedSaves.value = new Map(failedSaves.value)
 }
 
-async function applyAction(status: ReviewerStatus, label: ClassName | null, advanceAfter = false) {
+async function applyAction(
+  status: ReviewerStatus,
+  label: PollinatorClass | null,
+  advanceAfter = false,
+) {
   if (!selected.value) return
   const d = selected.value
   // If a previous save for this detection already failed, keep its original
@@ -1659,10 +1811,10 @@ watch([belowThresholdIds, viewBelowOnly], ([ids, on]) => {
   if (on && ids.length === 0) viewBelowOnly.value = false
 })
 
-async function submitBulk(ids: number[], status: ReviewerStatus, label: ClassName | null) {
+async function submitBulk(ids: number[], status: ReviewerStatus, label: PollinatorClass | null) {
   if (!ids.length) return
   const idSet = new Set(ids)
-  const snapshot = new Map<number, { status: ReviewerStatus; label: ClassName | null }>()
+  const snapshot = new Map<number, { status: ReviewerStatus; label: PollinatorClass | null }>()
   for (const d of detections.value) {
     if (idSet.has(d.id)) {
       const existing = failedSaves.value.get(d.id)
@@ -1696,7 +1848,7 @@ async function submitBulk(ids: number[], status: ReviewerStatus, label: ClassNam
   }
 }
 
-async function applyToBulk(status: ReviewerStatus, label: ClassName | null) {
+async function applyToBulk(status: ReviewerStatus, label: PollinatorClass | null) {
   const ids = [...bulkIds.value]
   // If the bulk includes the primary selection, advance selectedId off
   // it before the commit. siblingOverlays keeps the selected row's bbox
@@ -1718,7 +1870,7 @@ async function retryFailedSaves() {
     // Group by intended (status, label) so we can retry as bulk requests.
     const groups = new Map<
       string,
-      { status: ReviewerStatus; label: ClassName | null; ids: number[] }
+      { status: ReviewerStatus; label: PollinatorClass | null; ids: number[] }
     >()
     for (const [id, entry] of failedSaves.value) {
       const key = `${entry.status}::${entry.label ?? ''}`
@@ -1760,7 +1912,7 @@ function dismissFailedSaves() {
 // as 'corrected' so reviewer_label is always populated. Rows with no derivable
 // class are skipped and surfaced to the reviewer.
 async function bulkConfirm() {
-  const buckets = new Map<ClassName, number[]>()
+  const buckets = new Map<PollinatorClass, number[]>()
   let skipped = 0
   for (const d of detections.value) {
     if (!bulkIds.value.has(d.id)) continue
@@ -1795,7 +1947,7 @@ function onBulkCorrectChange() {
 // Confirmed only when both models agreed and the user picked that class.
 // When models disagree there's no single prediction to confirm, so any pick
 // is a correction (and the label is preserved server-side).
-function confirmAs(cls: ClassName | null, advanceAfter = false) {
+function confirmAs(cls: PollinatorClass | null, advanceAfter = false) {
   if (!selected.value || cls == null) return
   const d = selected.value
   const consensus = d.yolo_class != null && d.yolo_class === d.insectnet_class ? d.yolo_class : null
@@ -1847,6 +1999,53 @@ function setShiftRange(fromIdx: number, toIdx: number) {
   const next = new Set(stableBulkIds.value)
   for (let i = lo; i <= hi; i++) next.add(list[i].id)
   bulkIds.value = next
+}
+
+// Image-first up/down: jump to the first detection of the next or
+// previous unique source image in filteredDetections order. Bulk
+// extension via shift is intentionally ignored — extending a bulk
+// across whole images isn't the gesture users want from arrow keys
+// here. Left/right keys keep their per-crop step.
+function navigateImage(direction: 1 | -1) {
+  const sel = selected.value
+  if (!sel) return
+  const list = filteredDetections.value
+  const currentIdx = list.findIndex((d) => d.id === sel.id)
+  if (currentIdx < 0) return
+  const currentFilename = sel.source_image_filename
+
+  if (direction === 1) {
+    for (let i = currentIdx + 1; i < list.length; i++) {
+      if (list[i].source_image_filename !== currentFilename) {
+        selectedId.value = list[i].id
+        anchorId.value = list[i].id
+        stableBulkIds.value = new Set(bulkIds.value)
+        return
+      }
+    }
+    return
+  }
+
+  // Prev image: walk back until the filename changes, then keep
+  // walking until it changes again — that's the first detection of
+  // the previous image.
+  let prevImageLast = -1
+  for (let i = currentIdx - 1; i >= 0; i--) {
+    if (list[i].source_image_filename !== currentFilename) {
+      prevImageLast = i
+      break
+    }
+  }
+  if (prevImageLast < 0) return
+  const prevFilename = list[prevImageLast].source_image_filename
+  let prevImageFirst = prevImageLast
+  for (let i = prevImageLast - 1; i >= 0; i--) {
+    if (list[i].source_image_filename !== prevFilename) break
+    prevImageFirst = i
+  }
+  selectedId.value = list[prevImageFirst].id
+  anchorId.value = list[prevImageFirst].id
+  stableBulkIds.value = new Set(bulkIds.value)
 }
 
 function navigate(delta: number, extend: boolean) {
@@ -1908,7 +2107,7 @@ function onKeydown(e: KeyboardEvent) {
   // Keyboard actions auto-advance to the next tile so the reviewer can
   // fly through a queue without touching the mouse. Mouse-driven actions
   // (Label panel clicks, footer buttons) stay put — see applyAction.
-  const classKeyAction = (cls: ClassName) =>
+  const classKeyAction = (cls: PollinatorClass) =>
     bulkMode ? applyToBulk('corrected', cls) : confirmAs(cls, true)
   switch (e.key) {
     case '1':
@@ -1945,12 +2144,22 @@ function onKeydown(e: KeyboardEvent) {
       break
     case 'ArrowDown':
     case 'j':
-      navigate(GRID_COLS.value, e.shiftKey)
+      // Image-first: up/down cycle SOURCE IMAGES, left/right cycle
+      // crops within the current image. Crop-first keeps its grid nav.
+      if (settings.reviewLayout === 'image-first') {
+        navigateImage(1)
+      } else {
+        navigate(GRID_COLS.value, e.shiftKey)
+      }
       e.preventDefault()
       break
     case 'ArrowUp':
     case 'k':
-      navigate(-GRID_COLS.value, e.shiftKey)
+      if (settings.reviewLayout === 'image-first') {
+        navigateImage(-1)
+      } else {
+        navigate(-GRID_COLS.value, e.shiftKey)
+      }
       e.preventDefault()
       break
     case 'ArrowRight':
