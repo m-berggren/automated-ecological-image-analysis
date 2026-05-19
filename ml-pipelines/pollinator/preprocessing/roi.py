@@ -6,12 +6,31 @@ in cfg['roi_bbox'] (or nothing, meaning full image) and builds a zone from it.
 Marker auto-detection lives here as a primitive that the application layer
 (future preview endpoint, CLI helper, etc.) can call to suggest a default
 rectangle, but the pipeline itself never calls find_marker.
+
+cfg['roi_bbox'] accepts either shape:
+    - sequence [x, y, w, h]
+    - dict {'x', 'y', 'width', 'height'}  (matches the frontend ROIDrawer)
+The dict form is what the UI naturally emits; the sequence form is what the
+older code paths produced. Either round-trips through ``_bbox_xywh``.
 """
 
-from typing import Optional
+from typing import Optional, Union
 
 import cv2
 import numpy as np
+
+
+def _bbox_xywh(bbox: Union[dict, tuple, list]) -> tuple[int, int, int, int]:
+    """Coerce either dict (x/y/width/height) or sequence (x, y, w, h) to ints."""
+    if isinstance(bbox, dict):
+        return (
+            int(bbox['x']),
+            int(bbox['y']),
+            int(bbox['width']),
+            int(bbox['height']),
+        )
+    x, y, w, h = bbox
+    return int(x), int(y), int(w), int(h)
 
 
 def find_marker(image: np.ndarray, cfg: dict) -> Optional[tuple]:
@@ -53,11 +72,13 @@ def build_marker_zone(image: np.ndarray, marker: tuple, radius: int) -> np.ndarr
     return zone
 
 
-def build_zone_from_bbox(image_shape: tuple, bbox: tuple) -> np.ndarray:
-    """Rectangular zone from an explicit (x, y, w, h) bbox."""
+def build_zone_from_bbox(
+    image_shape: tuple, bbox: Union[dict, tuple, list]
+) -> np.ndarray:
+    """Rectangular zone from a bbox in (x, y, w, h) or {x, y, width, height} form."""
     h, w = image_shape[:2]
     zone = np.zeros((h, w), dtype=np.uint8)
-    x, y, bw, bh = (int(v) for v in bbox)
+    x, y, bw, bh = _bbox_xywh(bbox)
     x = max(0, min(x, w))
     y = max(0, min(y, h))
     bw = max(0, min(bw, w - x))

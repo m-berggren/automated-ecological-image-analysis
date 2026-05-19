@@ -9,9 +9,11 @@
           v-for="opt in FILTER_OPTIONS"
           :key="opt.value"
           class="px-3 py-1.5 rounded-md font-medium transition-colors"
-          :class="statusFilter === opt.value
-            ? 'bg-primary text-primary-foreground'
-            : 'text-muted-foreground hover:bg-muted'"
+          :class="
+            statusFilter === opt.value
+              ? 'bg-primary text-primary-foreground'
+              : 'text-muted-foreground hover:bg-muted'
+          "
           @click="statusFilter = opt.value"
         >
           {{ opt.label }}
@@ -19,8 +21,8 @@
         </button>
       </div>
       <span class="text-xs text-muted-foreground ml-auto">
-        {{ filteredRuns.length }} {{ filteredRuns.length === 1 ? 'run' : 'runs' }}
-        across {{ groupedByUpload.length }}
+        {{ filteredRuns.length }} {{ filteredRuns.length === 1 ? 'run' : 'runs' }} across
+        {{ groupedByUpload.length }}
         {{ groupedByUpload.length === 1 ? 'upload' : 'uploads' }}
       </span>
       <RouterLink
@@ -35,13 +37,11 @@
     <div class="flex-1 overflow-auto">
       <div v-if="loading" class="p-8 text-sm text-muted-foreground">Loading…</div>
       <div v-else-if="loadError" class="p-8 text-sm text-red-600">{{ loadError }}</div>
-      <div
-        v-else-if="!filteredRuns.length"
-        class="p-12 text-center text-sm text-muted-foreground"
-      >
+      <div v-else-if="!filteredRuns.length" class="p-12 text-center text-sm text-muted-foreground">
         No runs match this filter. Start one from the
         <RouterLink to="/pollinators/upload" class="text-primary hover:underline">
-          Upload page</RouterLink>.
+          Upload page</RouterLink
+        >.
       </div>
 
       <div v-else class="p-6 space-y-4">
@@ -50,7 +50,9 @@
           :key="group.upload?.id ?? 'orphan'"
           class="rounded-xl border border-border bg-card overflow-hidden shadow-md"
         >
-          <header class="px-5 py-4 bg-primary/[0.22] border-b border-border flex items-baseline gap-3">
+          <header
+            class="px-5 py-4 bg-primary/[0.22] border-b border-border flex items-baseline gap-3"
+          >
             <input
               v-if="group.upload && editingUploadId === group.upload.id"
               ref="renameInputRef"
@@ -69,9 +71,7 @@
             >
               {{ group.upload.name || `Upload #${group.upload.id}` }}
             </h2>
-            <h2 v-else class="font-bold text-lg tracking-tight">
-              Unattached runs
-            </h2>
+            <h2 v-else class="font-bold text-lg tracking-tight">Unattached runs</h2>
             <span v-if="group.upload" class="text-xs text-muted-foreground">
               {{ group.upload.image_count.toLocaleString() }} images
             </span>
@@ -97,7 +97,9 @@
                     </span>
                   </div>
                   <div class="text-xs text-muted-foreground mt-0.5">
-                    <template v-if="run.status === 'completed' && run.completed_at && run.started_at">
+                    <template
+                      v-if="run.status === 'completed' && run.completed_at && run.started_at"
+                    >
                       took {{ humanDuration(durationSeconds(run)) }} ·
                     </template>
                     <template v-else-if="run.status === 'failed'">
@@ -159,9 +161,11 @@
                   {{ exportingRunId === run.id ? 'Exporting…' : 'Export CSV' }}
                 </button>
                 <RouterLink
-                  :to="run.status === 'completed'
-                    ? `/pollinators/runs/${run.id}/review`
-                    : `/pollinators/runs/${run.id}/detect`"
+                  :to="
+                    run.status === 'completed'
+                      ? `/pollinators/runs/${run.id}/review`
+                      : `/pollinators/runs/${run.id}/detect`
+                  "
                   class="text-xs px-2 py-1 rounded border border-border hover:bg-muted shrink-0"
                 >
                   {{ run.status === 'completed' ? 'Review' : 'Open' }}
@@ -186,7 +190,7 @@
 </template>
 
 <script setup lang="ts">
-import { computed, nextTick, onMounted, ref } from 'vue'
+import { computed, nextTick, onMounted, onUnmounted, ref } from 'vue'
 import { RouterLink, useRoute } from 'vue-router'
 import PageHeader from '@/components/PageHeader.vue'
 import CsvExportDialog, { type CsvExportMode } from '@/components/CsvExportDialog.vue'
@@ -316,7 +320,7 @@ async function commitRename(upload: Upload) {
 }
 
 function isRunInFlight(run: Run): boolean {
-  return run.status === 'pending' || run.status === 'running'
+  return ACTIVE_STATUSES.has(run.status)
 }
 
 async function deleteRun(run: Run) {
@@ -394,6 +398,14 @@ const previewMode = computed<string | null>(() => {
   return typeof value === 'string' ? value : null
 })
 
+// Poll the runs list every 5 s while the user has the page open so
+// processed_image_count and status changes show up without a manual
+// refresh. Preview mode (mocked data) doesn't poll — the bundle is
+// static. Background polls reuse loadFromApi but skip the loading
+// spinner so the table doesn't flash on each tick.
+let pollHandle: ReturnType<typeof setInterval> | null = null
+const REFRESH_MS = 5000
+
 onMounted(async () => {
   if (previewMode.value) {
     const bundle = await loadPreview(previewMode.value)
@@ -405,6 +417,13 @@ onMounted(async () => {
     }
   }
   await loadFromApi()
+  pollHandle = setInterval(() => {
+    void loadFromApi({ silent: true })
+  }, REFRESH_MS)
+})
+
+onUnmounted(() => {
+  if (pollHandle) clearInterval(pollHandle)
 })
 
 async function loadPreview(_mode: string): Promise<ListBundle | null> {
@@ -436,33 +455,35 @@ function resolveBundle(raw: { uploads: UploadMock[]; runs: RunMock[] }): ListBun
   }
 }
 
-async function loadFromApi() {
+async function loadFromApi({ silent = false }: { silent?: boolean } = {}) {
   try {
     const [runsRes, uploadsRes] = await Promise.all([
       api('/api/analysis/runs/?module=pollinators'),
       api('/api/datasets/uploads/?module=pollinators'),
     ])
     if (!runsRes.ok) {
-      loadError.value = `Runs: HTTP ${runsRes.status}`
+      if (!silent) loadError.value = `Runs: HTTP ${runsRes.status}`
       return
     }
     if (!uploadsRes.ok) {
-      loadError.value = `Uploads: HTTP ${uploadsRes.status}`
+      if (!silent) loadError.value = `Uploads: HTTP ${uploadsRes.status}`
       return
     }
     runs.value = await runsRes.json()
     uploads.value = await uploadsRes.json()
   } catch (e) {
-    loadError.value = e instanceof Error ? e.message : String(e)
+    if (!silent) loadError.value = e instanceof Error ? e.message : String(e)
   } finally {
-    loading.value = false
+    if (!silent) loading.value = false
   }
 }
+
+const ACTIVE_STATUSES = new Set(['pending', 'running', 'paused'])
 
 const filteredRuns = computed(() => {
   switch (statusFilter.value) {
     case 'active':
-      return runs.value.filter((r) => r.status === 'pending' || r.status === 'running')
+      return runs.value.filter((r) => ACTIVE_STATUSES.has(r.status))
     case 'completed':
       return runs.value.filter((r) => r.status === 'completed')
     case 'failed':
@@ -481,10 +502,14 @@ const FILTER_OPTIONS = computed(() =>
 
 function countFor(status: StatusFilter): number {
   switch (status) {
-    case 'all': return runs.value.length
-    case 'active': return runs.value.filter((r) => r.status === 'pending' || r.status === 'running').length
-    case 'completed': return runs.value.filter((r) => r.status === 'completed').length
-    case 'failed': return runs.value.filter((r) => r.status === 'failed').length
+    case 'all':
+      return runs.value.length
+    case 'active':
+      return runs.value.filter((r) => ACTIVE_STATUSES.has(r.status)).length
+    case 'completed':
+      return runs.value.filter((r) => r.status === 'completed').length
+    case 'failed':
+      return runs.value.filter((r) => r.status === 'failed').length
   }
 }
 
@@ -502,7 +527,7 @@ const groupedByUpload = computed(() => {
     groups.get(key)!.push(r)
   }
   const out = Array.from(groups.entries()).map(([uploadId, groupRuns]) => ({
-    upload: uploadId == null ? null : uploadsById.value.get(uploadId) ?? null,
+    upload: uploadId == null ? null : (uploadsById.value.get(uploadId) ?? null),
     runs: [...groupRuns].sort(
       (a, b) => new Date(b.created_at).getTime() - new Date(a.created_at).getTime(),
     ),
@@ -565,11 +590,18 @@ function classRows(run: Run) {
 
 function statusClass(s: string): string {
   switch (s) {
-    case 'completed': return 'bg-green-200 text-green-800'
-    case 'running': return 'bg-blue-200 text-blue-800'
-    case 'failed': return 'bg-red-200 text-red-800'
-    case 'pending': return 'bg-amber-200 text-amber-800'
-    default: return 'bg-muted text-muted-foreground'
+    case 'completed':
+      return 'bg-green-200 text-green-800'
+    case 'running':
+      return 'bg-blue-200 text-blue-800'
+    case 'paused':
+      return 'bg-amber-100 text-amber-700'
+    case 'failed':
+      return 'bg-red-200 text-red-800'
+    case 'pending':
+      return 'bg-amber-200 text-amber-800'
+    default:
+      return 'bg-muted text-muted-foreground'
   }
 }
 </script>

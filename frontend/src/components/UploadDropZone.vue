@@ -122,9 +122,7 @@ const activeKey = computed(() => internalActive.value)
 const active = computed<UploadTab | undefined>(() =>
   props.tabs.find((t) => t.key === activeKey.value),
 )
-const activePlaceholder = computed(
-  () => active.value?.placeholder ?? props.placeholder,
-)
+const activePlaceholder = computed(() => active.value?.placeholder ?? props.placeholder)
 const activeHelper = computed(() => active.value?.helper ?? props.helper)
 
 function setActive(key: string) {

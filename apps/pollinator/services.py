@@ -1,33 +1,31 @@
 """Execution of the pollinator inference pipeline.
 
-run_inference_pipeline is the synchronous core: invoked directly it blocks
-until the pipeline finishes. spawn_inference_pipeline runs the same work in
-a daemon thread so the HTTP request can return immediately.
+The Django worker drives the ML pipeline one image at a time. After every
+image we persist any detections it produced, write per-detection crops,
+bump ``processed_image_count`` on the run, and check whether the row has
+been flipped to ``paused``/``cancelled`` by the user.
 
-The pollinator package is imported lazily inside run_inference_pipeline so
-Django can boot without the heavy ML dependencies (torch, ultralytics,
-etc). They are only required when an actual run executes.
-
-The threading-based runner is fine for development and small deployments.
-A process restart kills any in-flight run, leaving its row stuck in
-status='running'. Production should swap this for a persistent queue
-(Celery, RQ, or similar) without changing the run_inference_pipeline body.
+``run_inference_pipeline`` is the synchronous core. ``spawn_inference_pipeline``
+wraps it in a daemon thread for HTTP-triggered runs. The threading model is
+fine for development. In production swap for a persistent queue (Celery / RQ)
+without changing the body of run_inference_pipeline.
 """
 
 from __future__ import annotations
 
-import json
+import io
 import logging
-import tempfile
 import threading
 from pathlib import Path
 
 from django.conf import settings
-from django.db import close_old_connections, transaction
+from django.core.files.base import ContentFile
+from django.core.files.storage import default_storage
+from django.db import close_old_connections
 from django.utils import timezone
+from PIL import Image
 
 from apps.analysis.cancellation import RunCancelled
-from apps.analysis.crops import write_detection_crop
 from apps.analysis.models import (
     Detection,
     DetectionStatus,
@@ -46,283 +44,344 @@ logger = logging.getLogger(__name__)
 _ACTIVITY_LOG_CAP = 200
 
 
-def _make_progress_callback(run_id: int):
-    """Build a callback the pipeline calls at progress milestones.
+class RunPaused(BaseException):
+    """Raised between images when the run's status is flipped to PAUSED.
 
-    Updates processed_image_count on every call. When a message is
-    provided, appends a {time, message, level} entry to activity_log
-    (capped at the last 200 entries).
+    Like ``RunCancelled``, inherits from ``BaseException`` so it bypasses
+    bare ``except Exception:`` blocks inside the ML code and lands at the
+    worker's own pause handler.
     """
 
-    def cb(processed: int, total: int, message: str = '', level: str = 'info') -> None:
-        # Cancellation check: re-read the row's status. If externally flipped
-        # to CANCELLED, raise — propagates through the ML pipeline (which uses
-        # `except Exception:`) and lands at the worker's try/except for
-        # cooperative cancellation.
-        current = (
-            InferenceRun.objects.filter(pk=run_id)
-            .values_list('status', flat=True)
-            .first()
+
+def _peek_status(run_id: int) -> str | None:
+    return (
+        InferenceRun.objects.filter(pk=run_id).values_list('status', flat=True).first()
+    )
+
+
+def _append_log(run_id: int, message: str, level: str = 'info') -> None:
+    """Append one entry to the run's activity_log (capped at the latest 200).
+
+    The polling UI on PollinatorsDetect reads activity_log in newest-first
+    order, so it's safe to keep this best-effort: a failed update logs and
+    continues rather than aborting the run.
+    """
+    try:
+        run = InferenceRun.objects.get(pk=run_id)
+        log = list(run.activity_log or [])
+        log.append(
+            {
+                'time': timezone.now().isoformat(),
+                'message': message,
+                'level': level,
+            }
         )
-        if current == JobStatus.CANCELLED:
-            raise RunCancelled(f'Inference run {run_id} cancelled by user')
+        run.activity_log = log[-_ACTIVITY_LOG_CAP:]
+        run.save(update_fields=['activity_log'])
+    except Exception:
+        logger.exception(f'Activity log write failed for run {run_id}')
 
+
+def _persist_image_results(
+    run: InferenceRun,
+    image,
+    detections: list[dict],
+    crop_dir: Path,
+) -> tuple[int, dict, dict]:
+    """Write Detection + PollinatorDetection rows + crop files for one image.
+
+    Returns (count, by_class_delta, by_source_delta) so the caller can roll
+    them into the run-level aggregates.
+    """
+    if not detections:
+        return 0, {}, {}
+
+    by_class: dict[str, int] = {}
+    by_source: dict[str, int] = {}
+
+    # Open the source image once so we can render every crop for this frame
+    # without re-decoding the JPEG.
+    src_path = Path(image.file.path)
+    try:
+        src_img = Image.open(src_path)
+        src_img.load()
+        src_img = src_img.convert('RGB')
+    except Exception:
+        logger.exception(f'Failed to open source image {src_path}')
+        return 0, {}, {}
+
+    image_stem = src_path.stem
+    crop_dir.mkdir(parents=True, exist_ok=True)
+
+    # Build the row objects in memory first so we can persist both tables
+    # with two bulk_create calls (3 SQL per image total, instead of 3 SQL
+    # per detection). Crops are rendered after bulk_create so we have the
+    # final Detection pks if anything ever wants them, and one bulk_update
+    # writes every crop FileField at the end.
+    det_objs: list[Detection] = []
+    pol_kwargs: list[dict] = []
+    for d in detections:
+        bbox = d.get('bbox') or {}
+        # Normalize raw model labels (e.g. InsectNet emits 'butterfly_moth')
+        # to canonical pollinator classes before they reach the DB.
+        yolo_class = canonical_class(d.get('yolo_class')) or ''
+        insectnet_class = canonical_class(d.get('insectnet_class')) or ''
+        primary_class = yolo_class or insectnet_class
+        primary_conf = (
+            d.get('yolo_confidence') if yolo_class else d.get('insectnet_confidence')
+        )
+        det_objs.append(
+            Detection(
+                inference_run=run,
+                image=image,
+                bbox=bbox,
+                confidence=float(primary_conf or 0.0),
+                predicted_class=primary_class,
+                area=float(bbox.get('w', 0)) * float(bbox.get('h', 0)),
+                status=DetectionStatus.PENDING,
+            )
+        )
+        pol_kwargs.append(
+            {
+                'yolo_class': yolo_class,
+                'yolo_confidence': d.get('yolo_confidence'),
+                'insectnet_class': insectnet_class,
+                'insectnet_confidence': d.get('insectnet_confidence'),
+                'binary_confidence': d.get('binary_confidence'),
+                'class_probs': d.get('class_probs') or {},
+                'source': d.get('source') or '',
+                'merge_iou': d.get('merge_iou'),
+            }
+        )
+        if primary_class:
+            by_class[primary_class] = by_class.get(primary_class, 0) + 1
+        src_key = d.get('source') or ''
+        if src_key:
+            by_source[src_key] = by_source.get(src_key, 0) + 1
+
+    created = Detection.objects.bulk_create(det_objs)
+    PollinatorDetection.objects.bulk_create(
+        [PollinatorDetection(detection=det, **kw) for det, kw in zip(created, pol_kwargs)]
+    )
+
+    # Render crops, then one bulk_update writes every FileField name.
+    crops_to_update: list[Detection] = []
+    for idx, (det, d) in enumerate(zip(created, detections), start=1):
+        bbox = d.get('bbox') or {}
         try:
-            updates: dict = {'processed_image_count': processed}
-            if total:
-                updates['image_count'] = total
-            if message:
-                run = InferenceRun.objects.get(pk=run_id)
-                log = list(run.activity_log or [])
-                log.append(
-                    {
-                        'time': timezone.now().isoformat(),
-                        'message': message,
-                        'level': level,
-                    }
-                )
-                run.activity_log = log[-_ACTIVITY_LOG_CAP:]
-                for k, v in updates.items():
-                    setattr(run, k, v)
-                run.save(update_fields=list(updates.keys()) + ['activity_log'])
-            else:
-                InferenceRun.objects.filter(pk=run_id).update(**updates)
-        except RunCancelled:
-            raise
+            x1 = float(bbox['x1'])
+            y1 = float(bbox['y1'])
+            x2 = float(bbox['x2'])
+            y2 = float(bbox['y2'])
+        except (KeyError, TypeError, ValueError):
+            continue
+        if x2 <= x1 or y2 <= y1:
+            continue
+        try:
+            crop_img = src_img.crop((x1, y1, x2, y2))
+            buf = io.BytesIO()
+            crop_img.save(buf, 'JPEG', quality=85)
+            relative_name = (
+                f'runs/{run.module}/{run.pk}/crops/{image_stem}_{idx:02d}.jpg'
+            )
+            saved = default_storage.save(relative_name, ContentFile(buf.getvalue()))
+            det.crop.name = saved
+            crops_to_update.append(det)
         except Exception:
-            logger.exception(f'Progress callback failed for run {run_id}')
+            logger.exception(f'Failed to write crop for detection {det.pk}')
 
-    return cb
+    if crops_to_update:
+        Detection.objects.bulk_update(crops_to_update, ['crop'])
+
+    return len(created), by_class, by_source
+
+
+def _build_pipeline(run: InferenceRun):
+    """Materialise the ML pipeline object for this run.
+
+    Loads model file paths from the run's frozen config, resolves them
+    against the storage backend, and instantiates PollinatorInferencePipeline
+    with the same knobs the user picked on PollinatorsUpload.
+    """
+    from pollinator.workflows.inference import PollinatorInferencePipeline
+
+    config = run.config or {}
+    yolo_id = (config.get('yolo') or {}).get('model_version_id')
+    binary_id = (config.get('binary_classifier') or {}).get('model_version_id')
+    group_id = (config.get('group_classifier') or {}).get('model_version_id')
+    if not yolo_id or not binary_id or not group_id:
+        raise ValueError(
+            'Run config must include yolo.model_version_id, '
+            'binary_classifier.model_version_id, and '
+            'group_classifier.model_version_id'
+        )
+
+    yolo_mv = ModelVersion.objects.get(pk=yolo_id)
+    binary_mv = ModelVersion.objects.get(pk=binary_id)
+    group_mv = ModelVersion.objects.get(pk=group_id)
+
+    yolo_path = resolve_model_path(yolo_mv.model_file_path)
+    binary_path = resolve_model_path(binary_mv.model_file_path)
+    group_path = resolve_model_path(group_mv.model_file_path)
+
+    prep_config: dict = {}
+    if isinstance(config.get('preprocessing'), dict):
+        prep_config.update(config['preprocessing'])
+
+    yolo_conf = float((config.get('yolo') or {}).get('confidence', 0.25))
+    binary_thr = float((config.get('binary_classifier') or {}).get('confidence', 0.5))
+    group_thr = float((config.get('group_classifier') or {}).get('confidence', 0.0))
+
+    yolo_tile_cfg = (yolo_mv.parameters or {}).get('tile_config') or {}
+    yolo_slice_size = int(yolo_tile_cfg.get('tile_size', 640))
+    yolo_overlap = float(yolo_tile_cfg.get('overlap', 0.2))
+
+    return PollinatorInferencePipeline(
+        yolo_model=str(yolo_path),
+        binary_model=str(binary_path),
+        group_model=str(group_path),
+        config=prep_config,
+        yolo_confidence=yolo_conf,
+        yolo_slice_size=yolo_slice_size,
+        yolo_overlap=yolo_overlap,
+        binary_threshold=binary_thr,
+        group_threshold=group_thr,
+    )
 
 
 def run_inference_pipeline(run: InferenceRun) -> None:
     """Run the pollinator pipeline for one InferenceRun, persist results.
 
-    Status flow: pending -> running -> completed / failed.
-    On failure, error_message is populated and the exception is re-raised
-    so the caller can decide whether to surface it (sync view) or just log
-    it (async worker).
+    Status flow: pending -> running -> completed / paused / cancelled / failed.
+
+    The per-image checkpoint (``processed_image_count`` + per-image detection
+    rows) means a paused run can resume by reading ``processed_image_count``
+    and skipping that many images.
     """
     try:
         run.status = JobStatus.RUNNING
-        run.started_at = timezone.now()
+        if run.started_at is None:
+            run.started_at = timezone.now()
         run.save(update_fields=['status', 'started_at'])
-
-        from pollinator.workflows.inference import run_pipeline as _run_pipeline
 
         upload = run.upload
         if upload is None:
             raise ValueError('Run has no upload; cannot determine image set')
 
-        images = list(upload.images.all())
+        # Order by EXIF capture time so the per-image loop matches the
+        # camera's chronological sequence (background-subtraction needs
+        # adjacent frames in time, not adjacent uploads). id is a stable
+        # tiebreaker for images whose EXIF is missing or duplicated.
+        images = list(
+            upload.images.all().order_by('captured_at', 'id'),
+        )
         if not images:
             raise ValueError('Upload has no images to process')
 
+        # 1-based start_at_image from the UI; clamp to the available range.
         config = run.config or {}
-        yolo_id = (config.get('yolo') or {}).get('model_version_id')
-        binary_id = (config.get('binary_classifier') or {}).get('model_version_id')
-        group_id = (config.get('group_classifier') or {}).get('model_version_id')
-        if not yolo_id or not binary_id or not group_id:
-            raise ValueError(
-                'Run config must include yolo.model_version_id, '
-                'binary_classifier.model_version_id, and '
-                'group_classifier.model_version_id'
-            )
+        start_at = int(config.get('start_at_image', 1) or 1)
+        start_at = max(1, start_at)
+        # Resume from wherever the loop last checkpointed if that's further
+        # along than the user's start_at_image.
+        resume_from = max(start_at, run.processed_image_count + 1)
 
-        yolo_mv = ModelVersion.objects.get(pk=yolo_id)
-        binary_mv = ModelVersion.objects.get(pk=binary_id)
-        group_mv = ModelVersion.objects.get(pk=group_id)
+        run.image_count = len(images)
+        run.save(update_fields=['image_count'])
 
-        yolo_path = resolve_model_path(yolo_mv.model_file_path)
-        binary_path = resolve_model_path(binary_mv.model_file_path)
-        group_path = resolve_model_path(group_mv.model_file_path)
-
-        prep_config: dict = {}
-        if 'preprocessing' in config and isinstance(config['preprocessing'], dict):
-            prep_config.update(config['preprocessing'])
-
-        yolo_conf = float((config.get('yolo') or {}).get('confidence', 0.25))
-        binary_thr = float(
-            (config.get('binary_classifier') or {}).get('confidence', 0.5)
+        _append_log(
+            run.pk,
+            f'Starting run on {len(images)} images (from image {resume_from}).',
         )
-        # Group threshold defaults to 0 -> keep every group call (current
-        # behaviour). When the upload sets it, sub-threshold group calls are
-        # stripped to insectnet_class='' inside the pipeline.
-        group_thr = float((config.get('group_classifier') or {}).get('confidence', 0.0))
-        # Frontend start_at_image is 1-based; library skip_first_n is 0-based.
-        skip_first = max(0, int(config.get('start_at_image', 1)) - 1)
 
-        # Tile geometry recorded on the YOLO ModelVersion when it was trained.
-        # Inference must slice at the same scale or detections degrade.
-        yolo_tile_cfg = (yolo_mv.parameters or {}).get('tile_config') or {}
-        yolo_slice_size = int(yolo_tile_cfg.get('tile_size', 640))
-        yolo_overlap = float(yolo_tile_cfg.get('overlap', 0.2))
+        _append_log(run.pk, 'Loading models…')
+        pipeline = _build_pipeline(run)
 
-        # The pipeline expects all images for one camera plot in a single dir.
-        # Symlink the upload's files into a temp dir so other uploads in the
-        # same module folder do not bleed into this run.
-        with tempfile.TemporaryDirectory(prefix=f'run_{run.pk}_') as tmpdir:
-            tmp = Path(tmpdir)
-            for img in images:
-                if not img.file:
-                    continue
-                src = Path(img.file.path)
-                dst = tmp / Path(img.file.name).name
-                if not dst.exists():
-                    dst.symlink_to(src)
+        # Prime against the full sorted image set so background sampling is
+        # representative even when we're resuming mid-sequence.
+        image_paths = [Path(img.file.path) for img in images if img.file]
+        _append_log(run.pk, 'Sampling background…')
+        pipeline.prime(image_paths)
 
-            output_dir = Path(settings.MEDIA_ROOT) / 'runs' / str(run.pk)
-            output_dir.mkdir(parents=True, exist_ok=True)
+        crop_dir = (
+            Path(settings.MEDIA_ROOT) / 'runs' / run.module / str(run.pk) / 'crops'
+        )
 
-            progress_cb = _make_progress_callback(run.pk)
+        total_det = run.detection_count
+        by_class = dict(run.detections_by_class or {})
+        by_source = dict(run.detections_by_source or {})
 
-            result = _run_pipeline(
-                image_dir=str(tmp),
-                output_dir=str(output_dir),
-                yolo_model=str(yolo_path),
-                binary_model=str(binary_path),
-                group_model=str(group_path),
-                config=prep_config,
-                yolo_confidence=yolo_conf,
-                yolo_slice_size=yolo_slice_size,
-                yolo_overlap=yolo_overlap,
-                binary_threshold=binary_thr,
-                group_threshold=group_thr,
-                skip_first_n=skip_first,
-                progress_callback=progress_cb,
-            )
-
-        json_path = Path(result['output_json'])
-        with open(json_path) as f:
-            output = json.load(f)
-
-        run_summary = output.get('run', {})
-        detections_json = output.get('detections', [])
-
-        images_by_name = {Path(img.file.name).name: img for img in images if img.file}
-
-        det_objs: list[Detection] = []
-        pol_data: list[dict] = []
-        for d in detections_json:
-            image = images_by_name.get(d.get('image_name'))
-            if image is None:
+        for idx, image in enumerate(images, start=1):
+            if idx < resume_from:
                 continue
-            bbox = d.get('bbox') or {}
-            # Normalize raw model labels to canonical pollinator classes.
-            # The InsectNet model emits 'butterfly_moth' but the rest of
-            # the system (and the DB) speak canonical names. canonical_class
-            # is the single gate that keeps the storage layer clean.
-            yolo_class = canonical_class(d.get('yolo_class'))
-            insectnet_class = canonical_class(d.get('insectnet_class'))
-            primary_class = yolo_class or insectnet_class
-            primary_conf = (
-                d.get('yolo_confidence')
-                if yolo_class
-                else d.get('insectnet_confidence')
-            )
-            det_objs.append(
-                Detection(
-                    inference_run=run,
-                    image=image,
-                    bbox=bbox,
-                    confidence=float(primary_conf or 0.0),
-                    predicted_class=primary_class,
-                    area=float(bbox.get('w', 0)) * float(bbox.get('h', 0)),
-                    status=DetectionStatus.PENDING,
-                )
-            )
-            pol_data.append(
-                {
-                    'yolo_class': yolo_class,
-                    'yolo_confidence': d.get('yolo_confidence'),
-                    'insectnet_class': insectnet_class,
-                    'insectnet_confidence': d.get('insectnet_confidence'),
-                    'binary_confidence': d.get('binary_confidence'),
-                    'class_probs': d.get('class_probs') or {},
-                    'source': d.get('source') or '',
-                    'merge_iou': d.get('merge_iou'),
-                }
-            )
 
-        with transaction.atomic():
-            created = Detection.objects.bulk_create(det_objs)
-            PollinatorDetection.objects.bulk_create(
-                [
-                    PollinatorDetection(detection=det, **data)
-                    for det, data in zip(created, pol_data)
-                ]
-            )
+            status = _peek_status(run.pk)
+            if status == JobStatus.CANCELLED:
+                raise RunCancelled(f'Inference run {run.pk} cancelled by user')
+            if status == JobStatus.PAUSED:
+                raise RunPaused(f'Inference run {run.pk} paused by user')
 
-        # Render the per-detection crop files after the rows are committed
-        # so we have stable detection pks for the filenames, and so a PIL
-        # failure on one image can't roll back the whole run. Ping the
-        # progress callback every 50 crops so the activity log advances
-        # past the final pipeline tick instead of looking frozen.
-        total_dets = len(created)
-        n_images = int(run_summary.get('n_images', len(images)))
-        if total_dets:
+            if not image.file:
+                continue
+            img_path = Path(image.file.path)
+
             try:
-                progress_cb(n_images, n_images, f'Writing {total_dets} crops...')
-            except RunCancelled:
-                pass
-        crop_updates: list[Detection] = []
-        for idx, det in enumerate(created, start=1):
-            if write_detection_crop(det):
-                crop_updates.append(det)
-            if idx % 50 == 0 or idx == total_dets:
-                # Heavy work is already done; finishing the remaining crops
-                # is cheap. Don't propagate a cancel here — we'd just orphan
-                # half-written files. The post-loop status check below honours
-                # the cancellation request instead.
-                try:
-                    progress_cb(n_images, n_images, f'Crops: {idx}/{total_dets}')
-                except RunCancelled:
-                    pass
-        if crop_updates:
-            Detection.objects.bulk_update(crop_updates, ['crop'])
+                detections = pipeline.process_image(img_path)
+            except Exception:
+                logger.exception(f'Pipeline failed on {img_path.name}')
+                run.failed_image_count = (run.failed_image_count or 0) + 1
+                run.processed_image_count = idx
+                run.save(
+                    update_fields=['failed_image_count', 'processed_image_count'],
+                )
+                continue
 
-        # If cancel landed while crops were being written, preserve the
-        # CANCELLED status instead of overwriting with COMPLETED. The user
-        # gets a cancelled run with detections + crops they can still review
-        # or delete; either is more useful than discarding everything.
-        current_status = (
-            InferenceRun.objects.filter(pk=run.pk)
-            .values_list('status', flat=True)
-            .first()
-        )
-        if current_status == JobStatus.CANCELLED:
-            logger.info(
-                f'Run {run.pk} cancelled after inference; detections + crops preserved'
+            n, cls_delta, src_delta = _persist_image_results(
+                run, image, detections, crop_dir
             )
-            return
+            total_det += n
+            for k, v in cls_delta.items():
+                by_class[k] = by_class.get(k, 0) + v
+            for k, v in src_delta.items():
+                by_source[k] = by_source.get(k, 0) + v
+
+            run.processed_image_count = idx
+            run.detection_count = total_det
+            run.detections_by_class = by_class
+            run.detections_by_source = by_source
+            run.save(
+                update_fields=[
+                    'processed_image_count',
+                    'detection_count',
+                    'detections_by_class',
+                    'detections_by_source',
+                ],
+            )
 
         run.status = JobStatus.COMPLETED
         run.completed_at = timezone.now()
-        run.processed_image_count = int(run_summary.get('n_images', len(images)))
-        run.detection_count = len(det_objs)
-        run.detections_by_class = run_summary.get('detections_by_class', {})
-        run.detections_by_source = run_summary.get('detections_by_source', {})
-        run.save(
-            update_fields=[
-                'status',
-                'completed_at',
-                'processed_image_count',
-                'detection_count',
-                'detections_by_class',
-                'detections_by_source',
-            ]
+        run.save(update_fields=['status', 'completed_at'])
+        _append_log(
+            run.pk,
+            f'Run complete: {total_det} detections across {run.processed_image_count} images.',
         )
-        logger.info(f'Inference run {run.pk} completed: {len(det_objs)} detections')
+        logger.info(f'Inference run {run.pk} completed: {total_det} detections')
 
+    except RunPaused:
+        # User-initiated pause. Status is already PAUSED (set by the pause
+        # endpoint). Detections for completed images stay; resume picks up
+        # at processed_image_count + 1.
+        logger.info(f'Inference run {run.pk} paused by user')
+        _append_log(
+            run.pk,
+            f'Paused at image {run.processed_image_count}/{run.image_count}.',
+            level='warn',
+        )
     except RunCancelled:
-        # Status is already CANCELLED (set by the cancel endpoint). No
-        # Detection rows have been persisted (bulk_create is inside the
-        # transaction.atomic block below the try). Just stamp the
-        # finalisation fields and exit without re-raising — this is a
-        # clean user-initiated stop, not a failure.
         logger.info(f'Inference run {run.pk} cancelled by user')
         run.completed_at = timezone.now()
         run.save(update_fields=['completed_at'])
+        _append_log(run.pk, 'Cancelled by user.', level='warn')
     except Exception as e:
         logger.exception(f'Inference run {run.pk} failed')
         run.status = JobStatus.FAILED
@@ -333,7 +392,7 @@ def run_inference_pipeline(run: InferenceRun) -> None:
 
 
 def _run_in_thread(run_id: int) -> None:
-    """Background-thread entry point. Each thread gets its own DB connection;
+    """Background-thread entry. Each thread gets its own DB connection;
     close_old_connections at the end prevents leaks for short-lived runs."""
     try:
         run = InferenceRun.objects.get(pk=run_id)
@@ -349,9 +408,9 @@ def _run_in_thread(run_id: int) -> None:
 def spawn_inference_pipeline(run: InferenceRun) -> None:
     """Start a daemon thread that runs the pipeline for the given run.
 
-    Returns immediately. The caller (typically the create view) should
-    serialise the run row before this returns so the response includes
-    status='pending' (the worker will flip to running shortly after).
+    Returns immediately. The caller (typically the start/resume view)
+    should serialise the run row before this returns so the response
+    includes ``status='pending'`` (the worker will flip to running shortly).
     """
     thread = threading.Thread(
         target=_run_in_thread,
