@@ -471,7 +471,7 @@
               {{ selectedTrack.label }} ·
               <span class="font-mono">{{ drawerIncludedCount }}</span>
               of
-              <span class="font-mono">{{ drawerThumbnails.length }}</span>
+              <span class="font-mono">{{ drawerVisibleCount }}</span>
               included
             </span>
             <button
@@ -517,47 +517,115 @@
             </span>
           </div>
           <div class="flex-1 overflow-auto p-4">
-            <div
-              v-if="!drawerThumbnails.length"
-              class="text-xs text-muted-foreground text-center py-12"
-            >
-              No samples available for this track yet.
-            </div>
-            <div v-else class="grid grid-cols-5 gap-2">
-              <label
-                v-for="thumb in drawerThumbnails"
-                :key="thumb.id"
-                class="aspect-square rounded border flex items-center justify-center text-2xl relative overflow-hidden cursor-pointer transition-opacity"
-                :class="
-                  excludedSampleIds.has(thumb.id)
-                    ? 'opacity-30 border-border'
-                    : 'border-border hover:border-primary/40'
-                "
-                :style="{
-                  backgroundColor: excludedSampleIds.has(thumb.id) ? 'transparent' : thumb.bg,
-                }"
-                :title="thumb.label"
+            <!-- Detector: per-image table. YOLO's training unit is the image, so
+                 a thumbnail grid would be misleading (the crops on disk are
+                 per-detection, not what YOLO consumes). -->
+            <template v-if="drawerIsDetector">
+              <div
+                v-if="!detectorTableRows.length"
+                class="text-xs text-muted-foreground text-center py-12"
               >
-                <input
-                  type="checkbox"
-                  :checked="!excludedSampleIds.has(thumb.id)"
-                  class="absolute top-1.5 left-1.5 z-10 accent-primary"
-                  @change="toggleSampleInclusion(thumb.id)"
-                />
-                <span class="opacity-50">{{ thumb.glyph }}</span>
-                <div
-                  class="absolute bottom-0 left-0 right-0 h-1.5"
-                  :style="{ backgroundColor: thumb.color }"
-                />
-              </label>
-            </div>
-            <p
-              v-if="drawerThumbnails.length"
-              class="text-xs text-muted-foreground mt-4 text-center"
-            >
-              Placeholder thumbnails. Real crops will replace these once the training-pool endpoint
-              is wired.
-            </p>
+                No fully-reviewed images available for this track yet.
+              </div>
+              <table v-else class="w-full text-xs">
+                <thead class="text-muted-foreground border-b border-border">
+                  <tr>
+                    <th class="text-left font-medium py-2 px-2">Include</th>
+                    <th class="text-left font-medium py-2 px-2">Image</th>
+                    <th class="text-right font-medium py-2 px-2">Detections</th>
+                    <th class="text-left font-medium py-2 px-2">Classes</th>
+                  </tr>
+                </thead>
+                <tbody>
+                  <tr
+                    v-for="row in detectorTableRows"
+                    :key="row.id"
+                    class="border-b border-border/40 hover:bg-muted/40"
+                    :class="excludedSampleIds.has(String(row.id)) ? 'opacity-40' : ''"
+                  >
+                    <td class="py-1.5 px-2">
+                      <input
+                        type="checkbox"
+                        :checked="!excludedSampleIds.has(String(row.id))"
+                        class="accent-primary"
+                        @change="toggleSampleInclusion(String(row.id))"
+                      />
+                    </td>
+                    <td class="py-1.5 px-2 font-mono truncate max-w-[260px]">
+                      {{ row.image_filename }}
+                    </td>
+                    <td class="py-1.5 px-2 text-right font-mono">{{ row.detection_count }}</td>
+                    <td class="py-1.5 px-2 text-muted-foreground">
+                      {{ (row.classes || []).join(', ') }}
+                    </td>
+                  </tr>
+                </tbody>
+              </table>
+              <p
+                v-if="detectorTableRows.length === POOL_SAMPLE_LIMIT"
+                class="text-xs text-muted-foreground mt-4 text-center"
+              >
+                Showing first {{ POOL_SAMPLE_LIMIT }} images. Use the class filter to see other
+                slices.
+              </p>
+            </template>
+
+            <!-- Binary / group: thumbnail grid with real crop images when the
+                 endpoint returns crop_url, falling back to the colored glyph
+                 card (e.g. when the crop file is missing). -->
+            <template v-else>
+              <div
+                v-if="!drawerThumbnails.length"
+                class="text-xs text-muted-foreground text-center py-12"
+              >
+                No samples available for this track yet.
+              </div>
+              <div v-else class="grid grid-cols-5 gap-2">
+                <label
+                  v-for="thumb in drawerThumbnails"
+                  :key="thumb.id"
+                  class="aspect-square rounded border flex items-center justify-center text-2xl relative overflow-hidden cursor-pointer transition-opacity"
+                  :class="
+                    excludedSampleIds.has(thumb.id)
+                      ? 'opacity-30 border-border'
+                      : 'border-border hover:border-primary/40'
+                  "
+                  :style="{
+                    backgroundColor:
+                      excludedSampleIds.has(thumb.id) || thumb.cropUrl
+                        ? 'transparent'
+                        : thumb.bg,
+                  }"
+                  :title="thumb.label"
+                >
+                  <input
+                    type="checkbox"
+                    :checked="!excludedSampleIds.has(thumb.id)"
+                    class="absolute top-1.5 left-1.5 z-10 accent-primary"
+                    @change="toggleSampleInclusion(thumb.id)"
+                  />
+                  <img
+                    v-if="thumb.cropUrl"
+                    :src="thumb.cropUrl"
+                    :alt="thumb.label"
+                    class="absolute inset-0 w-full h-full object-cover"
+                    loading="lazy"
+                  />
+                  <span v-else class="opacity-50">{{ thumb.glyph }}</span>
+                  <div
+                    class="absolute bottom-0 left-0 right-0 h-1.5"
+                    :style="{ backgroundColor: thumb.color }"
+                  />
+                </label>
+              </div>
+              <p
+                v-if="drawerThumbnails.length === POOL_SAMPLE_LIMIT"
+                class="text-xs text-muted-foreground mt-4 text-center"
+              >
+                Showing first {{ POOL_SAMPLE_LIMIT }} crops. Use the class filter to see other
+                slices.
+              </p>
+            </template>
           </div>
         </aside>
       </div>
@@ -653,9 +721,17 @@ interface ActiveJob {
   val_accuracy: number
 }
 
+// Per-detection sample (binary, group): id is the Detection PK, crop_url
+// points at Detection.crop. Per-image sample (detector): id is the
+// ImageAsset PK and crop_url is absent; image_filename + detection_count +
+// classes drive the detector table view.
 interface PoolSample {
-  id: string
-  class: string
+  id: number | string
+  class?: string
+  crop_url?: string | null
+  image_filename?: string
+  detection_count?: number
+  classes?: string[]
 }
 
 interface DataPool {
@@ -877,6 +953,7 @@ interface BackendPoolResponse {
   consumed: number
   new_since_active: number
   by_class: Record<string, number>
+  samples?: PoolSample[]
 }
 
 // Pool endpoint is module-scoped and per-track. Failures per-track are
@@ -896,6 +973,7 @@ async function loadPools() {
           total_samples: pool.available,
           new_since_active: pool.new_since_active,
           by_class: pool.by_class || {},
+          samples: pool.samples,
         }
       } catch {
         // ignore — track keeps its zeroed pool
@@ -1357,11 +1435,36 @@ function selectAllSamples() {
 }
 
 function deselectAllSamples() {
-  for (const t of drawerThumbnails.value) excludedSampleIds.add(t.id)
+  if (drawerIsDetector.value) {
+    for (const r of detectorTableRows.value) excludedSampleIds.add(String(r.id))
+  } else {
+    for (const t of drawerThumbnails.value) excludedSampleIds.add(t.id)
+  }
 }
 
-const drawerIncludedCount = computed(
-  () => drawerThumbnails.value.filter((t) => !excludedSampleIds.has(t.id)).length,
+// Cap kept in sync with apps/pollinator/views.py:_POOL_SAMPLE_LIMIT. The
+// drawer is for spot-checking representative samples, not exhaustive review.
+const POOL_SAMPLE_LIMIT = 200
+
+const drawerIsDetector = computed(() => selectedTrack.value?.id === 'detector')
+
+const detectorTableRows = computed<PoolSample[]>(() => {
+  if (!selectedTrack.value) return []
+  const samples = selectedTrack.value.data_pool.samples ?? []
+  const filter = drawerFilter.value
+  if (filter === 'all') return samples
+  return samples.filter((s) => (s.classes ?? []).includes(filter))
+})
+
+const drawerIncludedCount = computed(() => {
+  if (drawerIsDetector.value) {
+    return detectorTableRows.value.filter((r) => !excludedSampleIds.has(String(r.id))).length
+  }
+  return drawerThumbnails.value.filter((t) => !excludedSampleIds.has(t.id)).length
+})
+
+const drawerVisibleCount = computed(() =>
+  drawerIsDetector.value ? detectorTableRows.value.length : drawerThumbnails.value.length,
 )
 
 const drawerClasses = computed(() => {
@@ -1382,9 +1485,10 @@ interface DrawerThumbnail {
   glyph: string
   color: string
   bg: string
+  cropUrl?: string | null
 }
 
-function thumbnailFor(id: string, cls: string): DrawerThumbnail {
+function thumbnailFor(id: string, cls: string, cropUrl?: string | null): DrawerThumbnail {
   const color = CLASS_COLORS[cls] ?? '#9aa3ab'
   return {
     id,
@@ -1392,6 +1496,7 @@ function thumbnailFor(id: string, cls: string): DrawerThumbnail {
     glyph: CLASS_GLYPHS[cls] ?? '?',
     color,
     bg: color + '14',
+    cropUrl: cropUrl ?? null,
   }
 }
 
@@ -1402,7 +1507,7 @@ const drawerThumbnails = computed<DrawerThumbnail[]>(() => {
   if (pool.samples) {
     return pool.samples
       .filter((s) => filter === 'all' || s.class === filter)
-      .map((s) => thumbnailFor(s.id, s.class))
+      .map((s) => thumbnailFor(String(s.id), s.class ?? '?', s.crop_url))
   }
   // No per-sample listing yet: synthesise placeholder cards from class
   // counts so the drawer layout still renders.

@@ -586,6 +586,23 @@ class PollinatorTrainingCreateView(generics.CreateAPIView):
         )
 
 
+# Cap on per-sample listings returned by the pool endpoint. The drawer is for
+# spot-checking representative crops, not exhaustive review (the review UI is
+# the right place for that). Class filter on the client lets a reviewer see
+# different slices without paginating.
+_POOL_SAMPLE_LIMIT = 200
+
+
+def _crop_url(request: Request, detection: Detection) -> str | None:
+    crop = detection.crop
+    if not crop:
+        return None
+    try:
+        return request.build_absolute_uri(crop.url)
+    except ValueError:
+        return None
+
+
 class PollinatorTrainingPoolView(APIView):
     """GET /api/pollinator/training/pool/?track=<track>
 
@@ -603,7 +620,10 @@ class PollinatorTrainingPoolView(APIView):
                                   # active version exists (everything is "new").
           "by_class": {           # absent for binary (only insect/background)
             "bumblebee": 5, "fly": 18, "butterfly": 4, "other": 15
-          }
+          },
+          "samples": [...]        # up to _POOL_SAMPLE_LIMIT items; shape
+                                  # differs by track (per-image for detector,
+                                  # per-detection-with-crop_url otherwise).
         }
     """
 
@@ -629,13 +649,38 @@ class PollinatorTrainingPoolView(APIView):
                 if active_trained_at is None
                 or (d.reviewed_at and d.reviewed_at > active_trained_at)
             }
+            # Group eligible detections per image so the drawer can show
+            # one row per image with its detection count + class roster.
+            per_image: dict[int, dict] = {}
+            for d in eligible:
+                entry = per_image.get(d.image_id)
+                if entry is None:
+                    entry = {
+                        'image_id': d.image_id,
+                        'image_filename': Path(d.image.file.name).name,
+                        'detection_count': 0,
+                        'classes': set(),
+                    }
+                    per_image[d.image_id] = entry
+                entry['detection_count'] += 1
+                entry['classes'].add(d.reviewer_label or d.predicted_class)
+            samples = [
+                {
+                    'id': e['image_id'],
+                    'image_filename': e['image_filename'],
+                    'detection_count': e['detection_count'],
+                    'classes': sorted(e['classes']),
+                }
+                for e in list(per_image.values())[:_POOL_SAMPLE_LIMIT]
+            ]
             return Response(
                 {
                     'track': track,
-                    'available': len({d.image_id for d in eligible}),
+                    'available': len(per_image),
                     'consumed': consumed,
                     'new_since_active': len(new_image_ids),
                     'by_class': dict(by_class),
+                    'samples': samples,
                 }
             )
 
@@ -647,6 +692,13 @@ class PollinatorTrainingPoolView(APIView):
                 if active_trained_at is None
                 or (d.reviewed_at and d.reviewed_at > active_trained_at)
             )
+            labelled = [(d, 'insect') for d in accepted] + [
+                (d, 'background') for d in rejected
+            ]
+            samples = [
+                {'id': d.pk, 'class': cls, 'crop_url': _crop_url(request, d)}
+                for d, cls in labelled[:_POOL_SAMPLE_LIMIT]
+            ]
             return Response(
                 {
                     'track': track,
@@ -657,6 +709,7 @@ class PollinatorTrainingPoolView(APIView):
                         'insect': len(accepted),
                         'background': len(rejected),
                     },
+                    'samples': samples,
                 }
             )
 
@@ -669,6 +722,14 @@ class PollinatorTrainingPoolView(APIView):
             if active_trained_at is None
             or (d.reviewed_at and d.reviewed_at > active_trained_at)
         )
+        samples = [
+            {
+                'id': d.pk,
+                'class': d.reviewer_label or d.predicted_class,
+                'crop_url': _crop_url(request, d),
+            }
+            for d in eligible[:_POOL_SAMPLE_LIMIT]
+        ]
         return Response(
             {
                 'track': track,
@@ -676,6 +737,7 @@ class PollinatorTrainingPoolView(APIView):
                 'consumed': consumed,
                 'new_since_active': new_count,
                 'by_class': dict(by_class),
+                'samples': samples,
             }
         )
 

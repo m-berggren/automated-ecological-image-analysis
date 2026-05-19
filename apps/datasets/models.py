@@ -5,8 +5,6 @@ from django.db import models
 class Module(models.TextChoices):
     SEEDS = 'seeds', 'Seeds'
     POLLINATORS = 'pollinators', 'Pollinators'
-    POLLEN = 'pollen', 'Pollen'
-    FLOWERS = 'flowers', 'Flowers'
 
 
 class ImagePurpose(models.TextChoices):
@@ -21,14 +19,12 @@ class Weather(models.TextChoices):
 
 
 class ExclusionReason(models.TextChoices):
+    """Only the values emitted by apps/pollinator/exif._determine_exclusion
+    live here. Add new entries if/when the EXIF gate learns to detect more
+    rejection categories (snow, fog, no-flowers, ...)."""
+
     FLASH_FIRED = 'flash_fired', 'Flash fired'
     OUT_OF_FOCUS = 'out_of_focus', 'Out of focus'
-    NO_FLOWERS = 'no_flowers', 'No visible flowers'
-    DRIED_FLOWERS = 'dried_flowers', 'Dried flowers'
-    SNOW = 'snow', 'Snow'
-    NIGHT = 'night', 'Night'
-    FOG = 'fog', 'Fog'
-    OTHER = 'other', 'Other'
 
 
 class UploadStatus(models.TextChoices):
@@ -113,9 +109,6 @@ class ImageAsset(models.Model):
     flash_fired = models.BooleanField(null=True, blank=True)
     exif = models.JSONField(default=dict, blank=True)
 
-    site = models.CharField(max_length=100, blank=True)
-    plot = models.CharField(max_length=100, blank=True)
-
     weather = models.CharField(
         max_length=20,
         choices=Weather.choices,
@@ -141,38 +134,3 @@ class ImageAsset(models.Model):
 
     def __str__(self) -> str:
         return f'{self.module}/{self.file.name}'
-
-
-class Annotation(models.Model):
-    """Human ground-truth bounding box.
-
-    Allowed class_label values per module:
-    - seeds: 'seed' / 'inactive' / 'unsure' (unsure is transient — must
-      be resolved to seed/inactive or deleted before training).
-    - pollinators: 'bumblebee' / 'fly' / 'butterfly' / 'other'.
-    """
-
-    image = models.ForeignKey(
-        ImageAsset,
-        on_delete=models.CASCADE,
-        related_name='annotations',
-    )
-    class_label = models.CharField(max_length=50)
-    bbox = models.JSONField(help_text='{x, y, w, h, rotation}')
-
-    created_by = models.ForeignKey(
-        settings.AUTH_USER_MODEL,
-        on_delete=models.SET_NULL,
-        null=True,
-        blank=True,
-        related_name='annotations',
-    )
-    created_at = models.DateTimeField(auto_now_add=True)
-
-    class Meta:
-        indexes = [
-            models.Index(fields=['image', 'class_label']),
-        ]
-
-    def __str__(self) -> str:
-        return f'{self.image_id}:{self.class_label}'
