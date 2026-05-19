@@ -7,6 +7,27 @@
     <div v-else-if="loadError" class="text-sm text-red-600">{{ loadError }}</div>
 
     <template v-else-if="run">
+      <!-- GPU-busy banner: another pollinator run is currently RUNNING,
+           so Start / Resume of this one is locked. Only shown when the
+           active run is a different row than the one we're looking at. -->
+      <div
+        v-if="blockingRun && blockingRun.id !== run.id"
+        class="rounded-md border border-amber-300 bg-amber-50 text-amber-800 text-sm px-4 py-2 flex items-center justify-between"
+      >
+        <span>
+          <span class="font-medium">Pipeline busy:</span>
+          run #{{ blockingRun.id }}{{ blockingRun.name ? ` "${blockingRun.name}"` : '' }} is
+          currently running ({{ blockingRun.processed_image_count.toLocaleString() }} /
+          {{ blockingRun.image_count.toLocaleString() }}). You can't start or resume another
+          run until it finishes or is paused.
+        </span>
+        <RouterLink
+          :to="`/pollinators/runs/${blockingRun.id}/detect`"
+          class="ml-3 shrink-0 text-xs underline hover:no-underline"
+        >
+          Open it →
+        </RouterLink>
+      </div>
       <!-- Status card -->
       <section class="rounded-xl border bg-surface p-5" :class="statusBorderClass">
         <div class="flex items-center gap-3 mb-3">
@@ -40,6 +61,10 @@
           </div>
           <div class="mt-2 text-xs text-muted-foreground">
             <template v-if="run.status === 'completed'"> Completed in {{ elapsedHuman }} </template>
+            <template v-else-if="run.status === 'paused'">
+              Paused at image {{ run.processed_image_count.toLocaleString() }}. Adjust the start
+              image below and resume.
+            </template>
             <template v-else>
               {{ elapsedHuman }} elapsed
               <span v-if="etaHuman"> · ~{{ etaHuman }} remaining</span>
@@ -47,14 +72,51 @@
           </div>
         </div>
 
+        <!-- Start-at-image: editable while the run hasn't begun (or is
+             paused), shown read-only once the worker is chewing through
+             images. -->
+        <div
+          v-if="run.status === 'pending' || run.status === 'paused'"
+          class="mt-4 flex items-center gap-3 text-sm"
+        >
+          <label class="text-muted-foreground">Start at image</label>
+          <input
+            v-model.number="startAtImage"
+            type="number"
+            min="1"
+            :max="run.image_count || undefined"
+            class="w-24 px-2 py-1 rounded border border-border bg-background text-sm font-mono"
+          />
+          <span class="text-xs text-muted-foreground">
+            1-based index into the sorted upload. Useful for skipping ahead.
+          </span>
+        </div>
+
         <div class="mt-4 flex gap-2">
+          <button
+            v-if="run.status === 'running'"
+            class="text-sm px-3 py-1.5 rounded-md border border-border hover:bg-muted disabled:opacity-50"
+            :disabled="actionInFlight"
+            @click="onPause"
+          >
+            {{ actionInFlight ? 'Pausing…' : 'Pause' }}
+          </button>
+          <button
+            v-if="run.status === 'paused'"
+            class="text-sm px-3 py-1.5 rounded-md border border-border hover:bg-muted disabled:opacity-50 disabled:cursor-not-allowed"
+            :disabled="actionInFlight || resumeBlocked"
+            :title="resumeBlocked ? `Blocked by run #${blockingRun?.id}` : ''"
+            @click="onResume"
+          >
+            {{ actionInFlight ? 'Resuming…' : 'Resume' }}
+          </button>
           <button
             v-if="canCancel"
             class="text-sm px-3 py-1.5 rounded-md border border-border hover:bg-muted disabled:opacity-50"
-            :disabled="cancelling"
+            :disabled="actionInFlight"
             @click="onCancel"
           >
-            {{ cancelling ? 'Cancelling…' : 'Cancel run' }}
+            {{ actionInFlight ? 'Cancelling…' : 'Cancel run' }}
           </button>
           <RouterLink
             v-if="canOpenReview"
@@ -66,7 +128,7 @@
           <button
             v-if="run.status === 'failed'"
             class="ml-auto text-sm px-3 py-1.5 rounded-md border border-border hover:bg-muted disabled:opacity-50"
-            :disabled="rerunning || run.upload == null || !run.module"
+            :disabled="actionInFlight || run.upload == null || !run.module"
             :title="
               run.upload == null || !run.module
                 ? 'Original upload missing from this run record'
@@ -74,7 +136,7 @@
             "
             @click="onRerun"
           >
-            {{ rerunning ? 'Restarting…' : 'Re-run with same config' }}
+            {{ actionInFlight ? 'Restarting…' : 'Re-run with same config' }}
           </button>
         </div>
       </section>
@@ -166,7 +228,7 @@ import PollinatorsStepper from '@/components/PollinatorsStepper.vue'
 import { api } from '@/api'
 import { confirm } from '@/lib/confirm'
 
-type RunStatus = 'pending' | 'running' | 'completed' | 'failed' | 'cancelled'
+type RunStatus = 'pending' | 'running' | 'paused' | 'completed' | 'failed' | 'cancelled'
 type PreviewMode = 'queued' | 'running' | 'completed' | 'failed'
 
 interface ActivityEntry {
@@ -232,7 +294,6 @@ const SOURCE_LABELS: Record<string, string> = {
 const route = useRoute()
 const router = useRouter()
 const run = ref<RunDetail | null>(null)
-const rerunning = ref(false)
 const loading = ref(true)
 const loadError = ref('')
 const showConfig = ref(false)
@@ -257,11 +318,16 @@ onMounted(async () => {
       return
     }
   }
-  void loadRun()
+  void loadRun().then(() => loadActive())
   pollHandle = setInterval(() => {
-    if (run.value && (run.value.status === 'pending' || run.value.status === 'running')) {
+    const s = run.value?.status
+    if (s === 'pending' || s === 'running' || s === 'paused') {
       void loadRun()
     }
+    // Always poll active-run state so a blocking run finishing elsewhere
+    // unblocks Resume here on the next tick, even when our own run is
+    // sitting idle in paused.
+    void loadActive()
   }, 3000)
 })
 
@@ -313,13 +379,22 @@ async function loadRun() {
       return
     }
     const data = await res.json()
-    run.value = {
+    const next: RunDetail = {
       processed_image_count: 0,
       failed_image_count: 0,
       detections_by_class: {},
       detections_by_source: {},
       activity_log: [],
       ...data,
+    }
+    run.value = next
+    // Keep the start-at-image input in sync with the server's view of
+    // config so a Resume always reflects the latest checkpoint.
+    const cfgStart = (next.config as Record<string, unknown>)?.start_at_image
+    if (typeof cfgStart === 'number') {
+      startAtImage.value = cfgStart
+    } else {
+      startAtImage.value = Math.max(1, (next.processed_image_count || 0) + 1)
     }
   } catch (e) {
     loadError.value = e instanceof Error ? e.message : String(e)
@@ -349,10 +424,14 @@ const statusLabel = computed(() => {
       return 'Queued'
     case 'running':
       return 'Running'
+    case 'paused':
+      return 'Paused'
     case 'completed':
       return 'Completed'
     case 'failed':
       return 'Failed'
+    case 'cancelled':
+      return 'Cancelled'
     default:
       return ''
   }
@@ -364,10 +443,14 @@ const statusBadgeClass = computed(() => {
       return 'bg-muted text-muted-foreground'
     case 'running':
       return 'bg-blue-100 text-blue-700'
+    case 'paused':
+      return 'bg-amber-100 text-amber-700'
     case 'completed':
       return 'bg-green-100 text-green-700'
     case 'failed':
       return 'bg-red-100 text-red-700'
+    case 'cancelled':
+      return 'bg-muted text-muted-foreground'
     default:
       return 'bg-muted text-muted-foreground'
   }
@@ -407,7 +490,12 @@ const timingLine = computed(() => {
   return `Created ${created}`
 })
 
-const canCancel = computed(() => run.value?.status === 'pending' || run.value?.status === 'running')
+const canCancel = computed(
+  () =>
+    run.value?.status === 'pending' ||
+    run.value?.status === 'running' ||
+    run.value?.status === 'paused',
+)
 const canOpenReview = computed(
   () =>
     !!run.value &&
@@ -457,10 +545,83 @@ function logLevelClass(level: ActivityEntry['level']): string {
   return ''
 }
 
-const cancelling = ref(false)
+// One in-flight flag covers Pause / Resume / Cancel / Re-run so the buttons
+// can't double-fire while a request is on the wire.
+const actionInFlight = ref(false)
+const startAtImage = ref(1)
+
+// Tracks the run currently RUNNING in this module (if any). Polled
+// alongside loadRun() so the banner / Resume-disabled state stays fresh.
+interface BlockingRun {
+  id: number
+  name: string
+  status: RunStatus
+  image_count: number
+  processed_image_count: number
+}
+const blockingRun = ref<BlockingRun | null>(null)
+const resumeBlocked = computed(
+  () =>
+    !!blockingRun.value && !!run.value && blockingRun.value.id !== run.value.id,
+)
+
+async function loadActive() {
+  if (!run.value?.module) return
+  try {
+    const res = await api(
+      `/api/analysis/runs/active/?module=${encodeURIComponent(run.value.module)}`,
+    )
+    if (!res.ok) return
+    const data = await res.json()
+    blockingRun.value = data.active ?? null
+  } catch (e) {
+    console.warn('Failed to fetch active-run state', e)
+  }
+}
+
+async function callAction(path: string, body?: Record<string, unknown>) {
+  if (!run.value || actionInFlight.value) return
+  if (previewMode.value) return
+  actionInFlight.value = true
+  try {
+    const res = await api(`/api/analysis/runs/${run.value.id}/${path}/`, {
+      method: 'POST',
+      body: JSON.stringify(body ?? {}),
+    })
+    if (!res.ok) {
+      let detail = `HTTP ${res.status}`
+      try {
+        const errBody = await res.json()
+        detail = errBody.error || errBody.detail || detail
+      } catch {}
+      loadError.value = `${path} failed: ${detail}`
+      // A 409 here is almost always "someone else is RUNNING"; refresh
+      // the banner so the user sees who's blocking them.
+      if (res.status === 409) void loadActive()
+      return
+    }
+    const data = await res.json()
+    run.value = { ...run.value, ...data }
+    // Pause/Resume/Cancel each change who occupies the GPU. Refresh
+    // the banner so the disabled state of other tabs settles fast.
+    void loadActive()
+  } catch (e) {
+    loadError.value = e instanceof Error ? e.message : String(e)
+  } finally {
+    actionInFlight.value = false
+  }
+}
+
+async function onPause() {
+  await callAction('pause')
+}
+
+async function onResume() {
+  await callAction('resume', { start_at_image: Math.max(1, startAtImage.value || 1) })
+}
 
 async function onCancel() {
-  if (!run.value || cancelling.value) return
+  if (!run.value || actionInFlight.value) return
   if (previewMode.value) {
     run.value.status = 'cancelled'
     run.value.error_message = 'Cancelled by user.'
@@ -469,44 +630,24 @@ async function onCancel() {
   const ok = await confirm({
     title: 'Cancel run',
     message:
-      'Cancel this run?\nThe worker stops at the next checkpoint and partial results are discarded.',
+      'Cancel this run?\nThe worker stops at the next checkpoint and partial results are kept.',
     confirmLabel: 'Cancel run',
     cancelLabel: 'Keep running',
     variant: 'danger',
   })
   if (!ok) return
-  cancelling.value = true
-  try {
-    const res = await api(`/api/analysis/runs/${run.value.id}/cancel/`, {
-      method: 'POST',
-    })
-    if (!res.ok) {
-      let detail = `HTTP ${res.status}`
-      try {
-        const body = await res.json()
-        detail = body.error || body.detail || detail
-      } catch {}
-      loadError.value = `Cancel failed: ${detail}`
-      return
-    }
-    const data = await res.json()
-    run.value = { ...run.value, ...data }
-  } catch (e) {
-    loadError.value = e instanceof Error ? e.message : String(e)
-  } finally {
-    cancelling.value = false
-  }
+  await callAction('cancel')
 }
 
 async function onRerun() {
-  if (!run.value || rerunning.value) return
+  if (!run.value || actionInFlight.value) return
   if (previewMode.value) return
   const r = run.value
   if (r.upload == null || !r.module) {
     loadError.value = 'Cannot restart: original upload or module missing from this run.'
     return
   }
-  rerunning.value = true
+  actionInFlight.value = true
   try {
     const res = await api('/api/analysis/runs/', {
       method: 'POST',
@@ -528,11 +669,11 @@ async function onRerun() {
       return
     }
     const newRun = await res.json()
-    await router.push(`/pollinators/runs/${newRun.id}`)
+    await router.push(`/pollinators/runs/${newRun.id}/detect`)
   } catch (e) {
     loadError.value = e instanceof Error ? e.message : String(e)
   } finally {
-    rerunning.value = false
+    actionInFlight.value = false
   }
 }
 </script>
