@@ -1,5 +1,6 @@
 from pathlib import Path
 import random
+import os
 
 from rest_framework.parsers import MultiPartParser
 from rest_framework.views import APIView
@@ -117,6 +118,13 @@ class SeedReferenceReviewView(APIView):
 
         image = run.images.first()
 
+        if image is None:
+            return Response(
+                {"error": "No images attached to this inference run"},
+                status=404
+            )
+
+
         detections = run.detections.filter(image=image)
 
         return Response({
@@ -124,16 +132,21 @@ class SeedReferenceReviewView(APIView):
                 "id": run.id,
                 "name": run.name,
             },
+
             "image": {
                 "id": image.id,
-                "image_url": image.file.url,
-                "filename": image.filename,
+                "image_url": request.build_absolute_uri(image.file.url),
+                "filename": os.path.basename(image.file.name),
             },
             "detections": [
                 {
                     "id": d.id,
                     "confidence": d.confidence,
-                    "bbox": d.bbox,
+
+                    "bbox_x": d.bbox["x1"],
+                    "bbox_y": d.bbox["y1"],
+                    "bbox_width": d.bbox["x2"] - d.bbox["x1"],
+                    "bbox_height": d.bbox["y2"] - d.bbox["y1"],
                 }
                 for d in detections
             ]

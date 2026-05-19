@@ -217,7 +217,7 @@ async function loadFromApi() {
   const id = route.params.id
 
   try {
-    const response = await api(`/api/analysis/runs/${id}/reference-review/`)
+    const response = await api(`/api/seeds/runs/${id}/reference-review/`)
 
     if (!response.ok) {
       loadError.value = `HTTP ${response.status}`
@@ -265,7 +265,7 @@ async function proceedToCalculation() {
   const id = route.params.id
 
   try {
-    const response = await api(`/api/analysis/runs/${id}/reference-seed/`, {
+    const response = await api(`/api/seeds/runs/${id}/reference-seed/`, {
       method: 'POST',
 
       headers: {
