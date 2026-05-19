@@ -47,9 +47,13 @@
         <header>
           <h2 class="text-base font-semibold">Auto-select for export</h2>
           <p class="text-sm text-muted-foreground">
-            When on, confirmed detections that pass the per-model thresholds get a blue ring on the
-            export page to mark them as auto-picked. Their export inclusion still matches whatever
-            the reviewer has explicitly toggled; this is a visual cue, not a commit.
+            When on, confirmed detections that pass the YOLO and Group thresholds get a blue ring on
+            the export page to mark them as auto-picked. Their export inclusion still matches
+            whatever the reviewer has explicitly toggled; this is a visual cue, not a commit.
+          </p>
+          <p class="text-sm text-muted-foreground mt-1">
+            The threshold values are set on the Review page (under the source image) — the same
+            sliders that filter the visible grid also drive this auto-select indicator.
           </p>
         </header>
 
@@ -61,25 +65,6 @@
           />
           <span>Enable auto-select indicator on export</span>
         </label>
-
-        <div
-          class="grid grid-cols-1 md:grid-cols-2 gap-4 pt-2"
-          :class="settings.exportAutoSelect ? '' : 'opacity-50 pointer-events-none'"
-        >
-          <label v-for="row in thresholdRows" :key="row.key" class="space-y-1">
-            <span class="text-xs text-muted-foreground">{{ row.label }}</span>
-            <input
-              type="number"
-              min="0"
-              max="1"
-              step="0.05"
-              :value="settings.exportThresholds[row.key]"
-              class="w-full px-2 py-1.5 rounded border border-border bg-background text-sm font-mono"
-              @change="onThresholdChange(row.key, $event)"
-            />
-            <span class="block text-[11px] text-muted-foreground">{{ row.help }}</span>
-          </label>
-        </div>
       </section>
 
       <!-- Reset -->
@@ -97,11 +82,7 @@
 
 <script setup lang="ts">
 import PageHeader from '@/components/PageHeader.vue'
-import {
-  usePollinatorSettingsStore,
-  type ExportThresholds,
-  type ReviewLayout,
-} from '@/stores/pollinatorSettings'
+import { usePollinatorSettingsStore, type ReviewLayout } from '@/stores/pollinatorSettings'
 
 const settings = usePollinatorSettingsStore()
 
@@ -113,38 +94,16 @@ interface LayoutOption {
 
 const layoutOptions: LayoutOption[] = [
   {
-    value: 'crop-first',
-    label: 'Crop-first',
-    description:
-      'Grid of crops grouped by review status and class. Selecting a crop shows its source image with sibling bboxes faded out. Best for tight, high-throughput review.',
-  },
-  {
     value: 'image-first',
     label: 'Image-first',
     description:
       'Scrollable rail of source images on the left. Selecting an image shows it large with all its crops. Best when context inside the image matters.',
   },
-]
-
-interface ThresholdRow {
-  key: keyof ExportThresholds
-  label: string
-  help: string
-}
-
-const thresholdRows: ThresholdRow[] = [
-  { key: 'yolo', label: 'YOLO confidence', help: 'Detector score from the YOLO branch' },
   {
-    key: 'group',
-    label: 'Group confidence',
-    help: "InsectNet group classifier's probability for the assigned class",
+    value: 'crop-first',
+    label: 'Crop-first',
+    description:
+      'Grid of crops grouped by review status and class. Selecting a crop shows its source image with sibling bboxes faded out. Best for tight, high-throughput review.',
   },
 ]
-
-function onThresholdChange(key: keyof ExportThresholds, event: Event) {
-  const target = event.target as HTMLInputElement
-  const v = Number.parseFloat(target.value)
-  if (Number.isNaN(v)) return
-  settings.setExportThreshold(key, v)
-}
 </script>

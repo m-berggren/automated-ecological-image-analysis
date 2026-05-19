@@ -39,11 +39,8 @@
                 activeImage.detections.length === 1 ? '' : 's'
               }}
             </span>
-            <span v-if="isZoomed" class="text-[11px] text-muted-foreground font-mono ml-2">
+            <span v-if="isZoomed" class="ml-auto text-[11px] text-muted-foreground font-mono">
               {{ Math.round(zoom.scale * 100) }}%
-            </span>
-            <span class="ml-auto text-xs text-muted-foreground font-mono">
-              {{ activeIndex + 1 }} / {{ images.length }}
             </span>
           </header>
           <div
@@ -118,16 +115,17 @@
             </div>
             <!-- Reset-zoom button. Only visible when zoomed in; clicking
                  returns the view to 1×. -->
-            <button
-              v-if="isZoomed"
-              class="absolute bottom-3 right-3 z-10 p-2 rounded-md bg-black/55 text-white hover:bg-black/75 cursor-pointer"
-              title="Reset zoom"
-              @mousedown.stop
-              @contextmenu.prevent
-              @click.stop="resetZoom"
-            >
-              <ZoomOut class="w-4 h-4" />
-            </button>
+            <Tooltip text="Reset zoom · alt+scroll to zoom · right-drag (or alt+left-drag) to pan">
+              <button
+                v-if="isZoomed"
+                class="absolute bottom-3 right-3 z-10 p-2 rounded-md bg-black/55 text-white hover:bg-black/75 cursor-pointer"
+                @mousedown.stop
+                @contextmenu.prevent
+                @click.stop="resetZoom"
+              >
+                <ZoomOut class="w-4 h-4" />
+              </button>
+            </Tooltip>
           </div>
         </div>
       </div>
@@ -191,18 +189,28 @@
                    crops regardless of class name length. -->
               <div class="min-w-0 flex-1 text-xs space-y-0.5 font-mono">
                 <div class="flex items-center gap-2">
-                  <span class="text-muted-foreground w-16 text-[10px]">YOLO</span>
+                  <Tooltip text="YOLO detector branch: object detection score.">
+                    <span class="text-muted-foreground w-16 text-[10px] cursor-help">YOLO</span>
+                  </Tooltip>
                   <span class="w-10 tabular-nums">
                     {{ d.yolo_confidence != null ? d.yolo_confidence.toFixed(2) : '—' }}
                   </span>
-                  <span class="font-medium">{{ classAbbr(d.yolo_class) }}</span>
+                  <Tooltip :text="classFullName(d.yolo_class)">
+                    <span class="font-medium cursor-help">{{ classAbbr(d.yolo_class) }}</span>
+                  </Tooltip>
                 </div>
                 <div class="flex items-center gap-2">
-                  <span class="text-muted-foreground w-16 text-[10px]">InsectNet</span>
+                  <Tooltip
+                    text="4-Group classifier: probability for the assigned class (fly / bumblebee / butterfly / other)."
+                  >
+                    <span class="text-muted-foreground w-16 text-[10px] cursor-help">4-Group</span>
+                  </Tooltip>
                   <span class="w-10 tabular-nums">
                     {{ d.insectnet_confidence != null ? d.insectnet_confidence.toFixed(2) : '—' }}
                   </span>
-                  <span class="font-medium">{{ classAbbr(d.insectnet_class) }}</span>
+                  <Tooltip :text="classFullName(d.insectnet_class)">
+                    <span class="font-medium cursor-help">{{ classAbbr(d.insectnet_class) }}</span>
+                  </Tooltip>
                 </div>
               </div>
             </div>
@@ -217,6 +225,7 @@
 import { computed, onBeforeUnmount, ref, watch } from 'vue'
 import { ChevronsLeft, ChevronsRight, ZoomOut } from 'lucide-vue-next'
 import type { Detection, PollinatorClass } from '@/types/pollinator'
+import Tooltip from '@/components/Tooltip.vue'
 import ImageThumbnailRail, { type RailItem } from '@/components/pollinator/ImageThumbnailRail.vue'
 
 const props = defineProps<{
@@ -305,11 +314,6 @@ const activeImage = computed<ImageGroup | null>(() => {
   return images.value.find((i) => i.filename === activeFilename.value) ?? null
 })
 
-const activeIndex = computed(() => {
-  if (!activeFilename.value) return -1
-  return images.value.findIndex((i) => i.filename === activeFilename.value)
-})
-
 function selectImage(img: ImageGroup) {
   manualFilename.value = img.filename
   const first = img.detections[0]
@@ -386,6 +390,21 @@ function classAbbr(cls: PollinatorClass | null): string {
       return 'Other'
     default:
       return '—'
+  }
+}
+
+function classFullName(cls: PollinatorClass | null): string {
+  switch (cls) {
+    case 'fly':
+      return 'Fly'
+    case 'bumblebee':
+      return 'Bumblebee'
+    case 'butterfly':
+      return 'Butterfly'
+    case 'other':
+      return 'Other'
+    default:
+      return 'No class assigned'
   }
 }
 

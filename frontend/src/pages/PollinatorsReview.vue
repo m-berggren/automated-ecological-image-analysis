@@ -1,6 +1,35 @@
 <template>
   <PageHeader :title="headerTitle" subtitle="Confirm, correct, or reject detections" />
   <PollinatorsStepper current="review" :runId="run?.id" />
+  <div
+    v-if="detections.length > 0"
+    class="px-8 py-1.5 border-b border-border bg-surface flex items-center gap-3 text-xs text-muted-foreground"
+  >
+    <span
+      v-if="imageFirstPageInfo"
+      class="inline-flex items-center gap-1.5 px-2 py-0.5 rounded bg-muted"
+    >
+      <span class="font-medium text-foreground">Image</span>
+      <span class="font-mono tabular-nums text-foreground"
+        >{{ imageFirstPageInfo.current.toLocaleString() }} /
+        {{ imageFirstPageInfo.total.toLocaleString() }}</span
+      >
+    </span>
+    <span class="inline-flex items-center gap-1.5 px-2 py-0.5 rounded bg-muted">
+      <span class="font-mono tabular-nums text-foreground">{{
+        filteredDetections.length.toLocaleString()
+      }}</span>
+      <span>visible</span>
+      <span class="text-muted-foreground/50">/</span>
+      <span class="font-mono tabular-nums text-foreground">{{
+        detections.length.toLocaleString()
+      }}</span>
+      <span>total crops</span>
+    </span>
+    <span v-if="loadProgress.total && loadProgress.loaded < loadProgress.total" class="italic">
+      loading {{ loadProgress.loaded.toLocaleString() }}/{{ loadProgress.total.toLocaleString() }}…
+    </span>
+  </div>
 
   <div v-if="loading" class="flex-1 p-8 text-sm text-muted-foreground">Loading…</div>
   <div v-else-if="loadError" class="flex-1 p-8 text-sm text-red-600">{{ loadError }}</div>
@@ -90,7 +119,7 @@
                   }}</span>
                 </div>
                 <div class="flex items-center gap-2">
-                  <span class="text-muted-foreground w-16 text-[10px]">InsectNet</span>
+                  <span class="text-muted-foreground w-16 text-[10px]">4-Group</span>
                   <span class="w-10 tabular-nums">
                     {{
                       selected.insectnet_confidence != null
@@ -111,13 +140,19 @@
 
           <!-- Thresholds -->
           <div class="px-4 py-2 space-y-1 min-h-0 overflow-auto">
-            <div
-              class="text-[10px] xl:text-[11px] font-semibold uppercase tracking-wider text-muted-foreground"
+            <Tooltip
+              text="Crops below either threshold are hidden from view. These same values also drive the auto-select indicator on the export page."
             >
-              Thresholds
-            </div>
+              <div
+                class="text-[10px] xl:text-[11px] font-semibold uppercase tracking-wider text-muted-foreground cursor-help"
+              >
+                Thresholds
+              </div>
+            </Tooltip>
             <div class="grid grid-cols-[auto_1fr_auto] items-center gap-x-2 gap-y-1 text-xs">
-              <label for="img-yolo-min" class="text-muted-foreground">YOLO ≥</label>
+              <Tooltip text="Minimum YOLO detector confidence. Crops without a YOLO score pass.">
+                <label for="img-yolo-min" class="text-muted-foreground cursor-help">YOLO ≥</label>
+              </Tooltip>
               <input
                 id="img-yolo-min"
                 type="range"
@@ -128,17 +163,21 @@
                 class="w-full accent-primary"
               />
               <span class="font-mono w-10 text-right">{{ yoloMinConf.toFixed(2) }}</span>
-              <label for="img-insectnet-min" class="text-muted-foreground">InsectNet ≥</label>
+              <Tooltip
+                text="Minimum 4-group classifier confidence (fly / bumblebee / butterfly / other). Crops without a group score pass."
+              >
+                <label for="img-group-min" class="text-muted-foreground cursor-help">Group ≥</label>
+              </Tooltip>
               <input
-                id="img-insectnet-min"
+                id="img-group-min"
                 type="range"
                 min="0"
                 max="1"
                 step="0.05"
-                v-model.number="insectnetMinConf"
+                v-model.number="groupMinConf"
                 class="w-full accent-primary"
               />
-              <span class="font-mono w-10 text-right">{{ insectnetMinConf.toFixed(2) }}</span>
+              <span class="font-mono w-10 text-right">{{ groupMinConf.toFixed(2) }}</span>
             </div>
           </div>
 
@@ -194,19 +233,27 @@
               </label>
             </div>
             <div class="flex gap-2 pt-1">
-              <button
-                class="flex-1 px-2 py-1 rounded-md text-sm font-medium border border-amber-300 text-amber-700 hover:bg-amber-50"
-                @click="commitUnsure"
+              <Tooltip
+                text="Mark the selection as unsure — parks it for later revisit (shortcut: u)."
               >
-                Unsure
-              </button>
-              <button
-                class="flex-1 px-2 py-1 rounded-md text-sm font-medium bg-primary text-primary-foreground hover:bg-primary/90 disabled:opacity-50 disabled:cursor-not-allowed"
-                :disabled="!canConfirm"
-                @click="commitPending"
+                <button
+                  class="flex-1 px-2 py-1 rounded-md text-sm font-medium border border-amber-300 text-amber-700 hover:bg-amber-50"
+                  @click="commitUnsure"
+                >
+                  Unsure
+                </button>
+              </Tooltip>
+              <Tooltip
+                text="Apply the chosen label to the selection (shortcuts: 1-4 for classes, x for reject, ⏎ for the suggested class)."
               >
-                Confirm
-              </button>
+                <button
+                  class="flex-1 px-2 py-1 rounded-md text-sm font-medium bg-primary text-primary-foreground hover:bg-primary/90 disabled:opacity-50 disabled:cursor-not-allowed"
+                  :disabled="!canConfirm"
+                  @click="commitPending"
+                >
+                  Confirm
+                </button>
+              </Tooltip>
             </div>
           </div>
         </div>
@@ -274,17 +321,17 @@
               class="w-full accent-primary"
             />
             <span class="font-mono w-10 text-right">{{ yoloMinConf.toFixed(2) }}</span>
-            <label for="insectnet-min" class="text-muted-foreground">InsectNet ≥</label>
+            <label for="group-min" class="text-muted-foreground">Group ≥</label>
             <input
-              id="insectnet-min"
+              id="group-min"
               type="range"
               min="0"
               max="1"
               step="0.05"
-              v-model.number="insectnetMinConf"
+              v-model.number="groupMinConf"
               class="w-full accent-primary"
             />
-            <span class="font-mono w-10 text-right">{{ insectnetMinConf.toFixed(2) }}</span>
+            <span class="font-mono w-10 text-right">{{ groupMinConf.toFixed(2) }}</span>
           </div>
           <!-- Search + below-threshold toggle. Same row when the section
                is wide enough; stacks when not (search on top, button
@@ -688,7 +735,7 @@
                     class="flex items-center gap-2"
                     :class="selected.insectnet_class == null ? 'opacity-60' : ''"
                   >
-                    <span class="text-muted-foreground w-16 xl:w-20">InsectNet</span>
+                    <span class="text-muted-foreground w-16 xl:w-20">4-Group</span>
                     <span
                       class="w-2 h-2 rounded-full shrink-0"
                       :style="{ backgroundColor: classColor(selected.insectnet_class) }"
@@ -828,6 +875,7 @@ import { computed, nextTick, onMounted, onUnmounted, ref, watch } from 'vue'
 import { RouterLink, useRoute } from 'vue-router'
 import { ZoomIn } from 'lucide-vue-next'
 import PageHeader from '@/components/PageHeader.vue'
+import Tooltip from '@/components/Tooltip.vue'
 import PollinatorsStepper from '@/components/PollinatorsStepper.vue'
 import ROIOverlay from '@/components/ROIOverlay.vue'
 import { api } from '@/api'
@@ -871,21 +919,28 @@ const selectedId = ref<number | null>(null)
 const statusFilter = ref<StatusFilter>('pending')
 type ClassFilter = PollinatorClass | 'background' | 'all'
 const classFilter = ref<ClassFilter>('all')
-// Per-branch confidence sliders. Seeded from the run's own config in
-// loadFromApi so the review view starts in the same regime the run was
-// actually created with — whatever the reviewer set on the upload page
-// is what they see here, not a hard-coded default. The literals here
-// are just a placeholder before the run loads. Detections with no score
-// in a branch pass that branch's filter so preprocessing-only crops
-// aren't dropped by the YOLO slider, etc.
-const yoloMinConf = ref(0)
-const insectnetMinConf = ref(0)
+// Per-branch confidence sliders. Bound to the pollinator-settings store
+// so the values are also what drives the export auto-select indicator —
+// one slider, two effects: filter the visible grid AND mark crops as
+// auto-picked on the export page. Detections with no score in a branch
+// pass that branch's filter so preprocessing-only crops aren't dropped
+// by the YOLO slider, etc.
+const yoloMinConf = computed<number>({
+  get: () => settings.exportThresholds.yolo,
+  set: (v) => settings.setExportThreshold('yolo', v),
+})
+// The wire field is `insectnet_confidence`, but the value it carries is
+// the group classifier's top-class probability. Variable name follows the
+// store key for clarity.
+const groupMinConf = computed<number>({
+  get: () => settings.exportThresholds.group,
+  set: (v) => settings.setExportThreshold('group', v),
+})
 
 function passesSliders(d: Detection): boolean {
   const yoloOk = d.yolo_confidence == null || d.yolo_confidence >= yoloMinConf.value
-  const insectnetOk =
-    d.insectnet_confidence == null || d.insectnet_confidence >= insectnetMinConf.value
-  return yoloOk && insectnetOk
+  const groupOk = d.insectnet_confidence == null || d.insectnet_confidence >= groupMinConf.value
+  return yoloOk && groupOk
 }
 const bulkIds = ref<Set<number>>(new Set())
 const bulkCorrectClass = ref<'' | PollinatorClass>('')
@@ -916,21 +971,6 @@ const searchQuery = ref('')
 const SEARCH_MIN_LEN = 3
 
 onMounted(load)
-
-// Seed confidence sliders from the run's own config so the review starts
-// at the same thresholds the upload page picked. Falls back to 0 ("no
-// filter") when the run was created without an explicit threshold for
-// that branch. Watching run (rather than awaiting it in onMounted) keeps
-// the loading flow inside useRunDetections.
-watch(
-  run,
-  (r) => {
-    if (!r) return
-    yoloMinConf.value = r.config?.yolo?.confidence ?? 0
-    insectnetMinConf.value = r.config?.binary_classifier?.confidence ?? 0
-  },
-  { immediate: true },
-)
 
 const headerTitle = computed(() =>
   run.value ? `Review · ${run.value.name || `Run #${run.value.id}`}` : 'Review',
@@ -1124,6 +1164,27 @@ const imageParityById = computed(() => {
 })
 
 const selected = computed(() => detections.value.find((d) => d.id === selectedId.value) ?? null)
+
+// Image-first page indicator: count unique source-image filenames in the
+// filtered view, find where the active selection sits in that order.
+// Returns null in crop-first or when nothing is selected — the strip
+// below the stepper only renders the indicator when this resolves.
+const imageFirstPageInfo = computed<{ current: number; total: number } | null>(() => {
+  if (settings.reviewLayout !== 'image-first') return null
+  const filenames: string[] = []
+  const seen = new Set<string>()
+  for (const d of filteredDetections.value) {
+    if (d.source_image_filename && !seen.has(d.source_image_filename)) {
+      seen.add(d.source_image_filename)
+      filenames.push(d.source_image_filename)
+    }
+  }
+  if (filenames.length === 0) return null
+  const activeFilename = selected.value?.source_image_filename ?? filenames[0]
+  const idx = filenames.indexOf(activeFilename)
+  if (idx < 0) return { current: 1, total: filenames.length }
+  return { current: idx + 1, total: filenames.length }
+})
 
 // Only pick an initial selection when nothing is selected. We deliberately
 // do not snap to list[0] when the current selection falls out of the

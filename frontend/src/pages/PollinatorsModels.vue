@@ -584,8 +584,8 @@ const folderPreview = computed<FolderPreview>(() => {
 
 const UPLOAD_KIND_OPTIONS = [
   { value: 'detector', label: 'YOLO detector' },
-  { value: 'binary_classifier', label: 'EfficientNet binary classifier' },
-  { value: 'group_classifier', label: 'InsectNet group classifier' },
+  { value: 'binary_classifier', label: 'Binary Classifier' },
+  { value: 'group_classifier', label: 'Group Classifier' },
 ]
 
 function openUpload() {
