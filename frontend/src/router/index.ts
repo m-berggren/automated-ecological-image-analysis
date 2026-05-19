@@ -4,6 +4,7 @@ import SeedsUpload from '@/pages/SeedsUpload.vue'
 import SeedsRuns from '@/pages/SeedsRuns.vue'
 import SeedsDetect from '@/pages/SeedsDetect.vue'
 import SeedsReview from '@/pages/SeedsReview.vue'
+import SeedsReview2 from '@/pages/SeedsReview2.vue'
 import SeedsModels from '@/pages/SeedsModels.vue'
 import SeedsTraining from '@/pages/SeedsTraining.vue'
 import SeedsExport from '@/pages/SeedsExport.vue'
@@ -34,6 +35,8 @@ const router = createRouter({
         { path: 'seeds/runs', component: SeedsRuns },
         { path: 'seeds/runs/:id/detect', component: SeedsDetect },
         { path: 'seeds/runs/:id/review', component: SeedsReview },
+        { path: 'seeds/runs/:id/review-final', component: SeedsReview2 },
+        { path: 'seeds/runs/:id/export', component: SeedsExport },
         { path: 'seeds/training', component: SeedsTraining },
         { path: 'seeds/models', component: SeedsModels },
         { path: 'seeds/runs/:id/export', component: SeedsExport },

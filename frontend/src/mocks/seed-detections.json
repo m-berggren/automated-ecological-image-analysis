@@ -6,6 +6,18 @@
       "status": "completed",
       "detection_count": 12
     },
+    "images_list": [
+      {
+        "id": 1,
+        "filename": "example_image_01.jpg",
+        "image_url": "https://picsum.photos/id/12/1200/800"
+      },
+      {
+        "id": 2,
+        "filename": "example_image_02.jpg",
+        "image_url": "https://picsum.photos/id/15/1200/800"
+      }
+    ],
     "detections": [
       {
         "id": 1,
