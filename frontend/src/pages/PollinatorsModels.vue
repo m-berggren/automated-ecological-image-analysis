@@ -693,6 +693,8 @@ async function loadPreview(_mode: string): Promise<Track[] | null> {
       is_active: v.is_active,
       metrics: v.metrics,
       parameters: v.parameters,
+      sample_count: 0,
+      training_duration_seconds: 0,
       trained_at: new Date(now + v.trained_at_offset_seconds * 1000).toISOString(),
       artifacts: [],
     })),
