@@ -138,7 +138,9 @@ def load_progress_for_task(task_idx):
     if not tasks:
         return
     task_idx = max(0, min(int(task_idx), len(tasks) - 1))
-    _, _, _, cam_name, _ = tasks[task_idx]
+    # Task tuples may contain extra metadata fields, e.g. prediction_meta.
+    # Use indexing so progress loading works with both old and new task formats.
+    cam_name = tasks[task_idx][3]
     progress_file = Path(get_json_path(cam_name, OUTPUT_DIR))
     if current_progress_file == progress_file:
         return
@@ -167,6 +169,7 @@ for cam_dir in sorted(RESULTS_DIR.iterdir()):
     image_crops: dict = defaultdict(list)
     seen_crops: dict = defaultdict(set)
     bbox_map: dict = {}
+    prediction_meta: dict = {}
 
     with open(csv_path, encoding='utf-8') as f:
         for row in csv.DictReader(f):
@@ -187,6 +190,39 @@ for cam_dir in sorted(RESULTS_DIR.iterdir()):
                     bbox_map[crop_fn] = (bx, by, bw, bh)
             except (ValueError, TypeError):
                 pass
+
+            def _row_float(name):
+                try:
+                    raw = row.get(name, '')
+                    return float(raw) if raw not in ('', None) else None
+                except (TypeError, ValueError):
+                    return None
+
+            pred_label = (
+                row.get('five_class_label')
+                or row.get('predicted_class')
+                or row.get('class_label')
+                or row.get('group_label')
+                or row.get('label')
+                or ''
+            )
+            pred_conf = (
+                _row_float('five_class_confidence')
+                or _row_float('confidence')
+                or _row_float('group_confidence')
+                or _row_float('score')
+            )
+            class_conf = {}
+            for cls in ('bumblebee', 'fly', 'butterfly_moth', 'butterfly', 'other', 'background'):
+                val = _row_float(f'conf_{cls}')
+                if val is not None:
+                    class_conf[cls] = val
+            if pred_label or pred_conf is not None or class_conf:
+                prediction_meta[crop_fn] = {
+                    'label': pred_label,
+                    'confidence': pred_conf,
+                    'class_confidences': class_conf,
+                }
 
     # Index debug_dir once: bucket files by the "{cam_prefix}__{img_stem}"
     # prefix so each image becomes one dict lookup instead of up to 5 globs.
@@ -217,11 +253,11 @@ for cam_dir in sorted(RESULTS_DIR.iterdir()):
         stem = f'{cam_prefix}__{img_stem}'
         debug_img = pick_debug(debug_by_stem.get(stem, []))
         if crops:
-            tasks.append((debug_img, img_name, crops, cam_dir.name, bbox_map))
+            tasks.append((debug_img, img_name, crops, cam_dir.name, bbox_map, prediction_meta))
 
 total_images = len(tasks)
-total_crops = sum(len(c) for _, _, c, _, _ in tasks)
-all_crop_fns = {cf for _, _, crops, _, _ in tasks for _, cf in crops}
+total_crops = sum(len(c) for _, _, c, _, _, _ in tasks)
+all_crop_fns = {cf for _, _, crops, _, _, _ in tasks for _, cf in crops}
 
 
 def clamp_task_idx(idx):
@@ -332,7 +368,9 @@ def save_session(task_idx):
         return
     try:
         idx = clamp_task_idx(task_idx)
-        _, img_name, _, cam_name, _ = tasks[idx]
+        # Task tuples may contain extra metadata fields, e.g. prediction_meta.
+        img_name = tasks[idx][1]
+        cam_name = tasks[idx][3]
         current_settings = normalized_settings(state if 'state' in globals() else {})
         data = {
             'results_dir': str(RESULTS_DIR),
@@ -354,7 +392,7 @@ def load_initial_task_idx():
         return 0
     cam_name = data.get('cam_name')
     image_name = data.get('image_name')
-    for i, (_, im, _, cam, _) in enumerate(tasks):
+    for i, (_, im, _, cam, _, _) in enumerate(tasks):
         if cam == cam_name and im == image_name:
             return i
     saved = data.get('task_idx', 0)
@@ -378,7 +416,7 @@ if not tasks:
     print('No tasks found. Check --results path.')
     sys.exit(0)
 
-bbox_total = sum(len(bm) for _, _, _, _, bm in tasks)
+bbox_total = sum(len(bm) for _, _, _, _, bm, _ in tasks)
 print(
     f'bbox entries: {bbox_total}/{total_crops}'
     + (' -- WARNING: no bbox data, debug sync disabled' if bbox_total == 0 else '')
@@ -435,6 +473,45 @@ def get_badge(label):
     return BADGES.get(label, (label[:3].upper() if label else ''))
 
 
+def _fmt_conf(value):
+    if value is None:
+        return ''
+    try:
+        value = float(value)
+    except (TypeError, ValueError):
+        return ''
+    if value <= 1.0:
+        return f'{value * 100:.0f}%'
+    return f'{value:.2f}'
+
+
+def get_prediction_text(crop_fn, prediction_meta, compact=False):
+    meta = prediction_meta.get(crop_fn, {}) if isinstance(prediction_meta, dict) else {}
+    label = str(meta.get('label') or '').strip()
+    conf = _fmt_conf(meta.get('confidence'))
+    if label and conf:
+        text = f'{label} {conf}'
+    elif label:
+        text = label
+    elif conf:
+        text = f'pred {conf}'
+    else:
+        return ''
+    if compact and len(text) > 24:
+        text = text[:21] + '...'
+    return text
+
+
+def get_prediction_detail(crop_fn, prediction_meta):
+    meta = prediction_meta.get(crop_fn, {}) if isinstance(prediction_meta, dict) else {}
+    confs = meta.get('class_confidences') or {}
+    parts = []
+    for cls in ('bumblebee', 'fly', 'butterfly_moth', 'butterfly', 'other', 'background'):
+        if cls in confs:
+            parts.append(f'{cls}={_fmt_conf(confs[cls])}')
+    return '  '.join(parts)
+
+
 # ── Keybindings ───────────────────────────────────────────────────────────────
 KEYS = {
     'prev_image': ('a', 'A'),
@@ -489,7 +566,7 @@ def get_row_heights(task_idx: int, visible_indices=None) -> list:
     cache_key = task_idx if visible_indices is None else None
     if cache_key is not None and cache_key in row_heights_cache:
         return row_heights_cache[task_idx]
-    _, _, crops, _, _ = tasks[task_idx]
+    _, _, crops, _, _, _ = tasks[task_idx]
     if visible_indices is None:
         visible_indices = list(range(len(crops)))
     n_rows = max(1, (len(visible_indices) - 1) // CROP_COLS + 1)
@@ -693,7 +770,7 @@ def on_trackbar(val):
 # ── Filter / visibility helpers ───────────────────────────────────────────────
 def get_visible_crop_indices(task_idx=None):
     task_idx = state['task_idx'] if task_idx is None else clamp_task_idx(task_idx)
-    _, _, crops, _, _ = tasks[task_idx]
+    _, _, crops, _, _, _ = tasks[task_idx]
     filter_label = state.get('filter_label')
     show_only_unlabeled = state.get('show_only_unlabeled', False)
     indices = []
@@ -710,7 +787,7 @@ def get_visible_crop_indices(task_idx=None):
 def get_selectable_crop_indices(task_idx=None):
     indices = get_visible_crop_indices(task_idx)
     if state.get('skip_labeled_crops', False):
-        _, _, crops, _, _ = tasks[
+        _, _, crops, _, _, _ = tasks[
             state['task_idx'] if task_idx is None else clamp_task_idx(task_idx)
         ]
         indices = [i for i in indices if crops[i][1] not in progress]
@@ -1259,7 +1336,7 @@ def get_recent_single_label_crop(crops):
 # ── Overlay builders ──────────────────────────────────────────────────────────
 def build_debug_overlay(task_idx: int):
     task_idx = clamp_task_idx(task_idx)
-    debug_path, _, crops, _, bbox_map = tasks[task_idx]
+    debug_path, _, crops, _, bbox_map, _ = tasks[task_idx]
     if debug_path is None or not Path(debug_path).exists():
         return None
     img = cv2.imread(str(debug_path))
@@ -1308,7 +1385,7 @@ def build_debug_overlay(task_idx: int):
 
 def hit_debug_overlay_bbox(task_idx: int, x: int, y: int):
     task_idx = clamp_task_idx(task_idx)
-    debug_path, _, crops, _, bbox_map = tasks[task_idx]
+    debug_path, _, crops, _, bbox_map, _ = tasks[task_idx]
     if debug_path is None or not Path(debug_path).exists():
         return None
     img = cv2.imread(str(debug_path))
@@ -1340,7 +1417,7 @@ def hit_debug_overlay_bbox(task_idx: int, x: int, y: int):
     return best_i
 
 
-def build_preview_overlay(crop_path, crop_fn):
+def build_preview_overlay(crop_path, crop_fn, prediction_meta=None):
     img = cv2.imread(str(crop_path))
     if img is None:
         return None
@@ -1356,16 +1433,23 @@ def build_preview_overlay(crop_path, crop_fn):
     cy = (WIN_H - ih) // 2
     cx = (WIN_W - iw) // 2
     canvas[cy : cy + ih, cx : cx + iw] = img
-    info = f'{crop_fn}  |  {orig_w}x{orig_h}px  |  click or any key to close'
+    pred = get_prediction_text(crop_fn, prediction_meta or {})
+    detail = get_prediction_detail(crop_fn, prediction_meta or {})
+    info = f'{crop_fn}  |  {orig_w}x{orig_h}px'
+    if pred:
+        info += f'  |  prediction: {pred}'
+    info += '  |  click or any key to close'
     cv2.putText(
         canvas,
         info,
-        (10, WIN_H - 10),
+        (10, WIN_H - 28 if detail else WIN_H - 10),
         cv2.FONT_HERSHEY_SIMPLEX,
         0.4,
         (160, 160, 160),
         1,
     )
+    if detail:
+        put_fitted_text(canvas, detail, 10, WIN_H - 8, WIN_W - 20, 0.34, (190, 190, 90), 1)
     return canvas
 
 
@@ -1386,7 +1470,7 @@ def on_mouse(event, x, y, flags, param):
             state['overlay_kind'] = None
         return
 
-    _, _, crops, _, _ = tasks[state['task_idx']]
+    _, _, crops, _, _, _ = tasks[state['task_idx']]
     max_scroll = max(0, get_total_rows() - ROWS_VISIBLE)
 
     if event == cv2.EVENT_MOUSEWHEEL:
@@ -1413,7 +1497,7 @@ def on_mouse(event, x, y, flags, param):
         key_dp = str(debug_path) if debug_path else ''
         if key_dp in debug_cache:
             _, dbg_scale, dbg_ox, dbg_oy, dbg_draw_x = debug_cache[key_dp]
-            _, _, crops_cur, _, bbox_map = tasks[state['task_idx']]
+            _, _, crops_cur, _, bbox_map, _ = tasks[state['task_idx']]
             local_y = y - DEBUG_TOP
             for i, (_, crop_fn) in enumerate(crops_cur):
                 if crop_fn not in bbox_map:
@@ -1457,7 +1541,7 @@ def crop_rect(display_pos: int, visible_indices=None):
     y = DEBUG_BOTTOM + PAD
     x1 = CROP_PAD_X + col * (CROP_SIZE + CROP_PAD_X)
 
-    _, _, crops, _, _ = tasks[state['task_idx']]
+    _, _, crops, _, _, _ = tasks[state['task_idx']]
     if display_pos < len(visible_indices):
         crop_idx = visible_indices[display_pos]
         entry = thumb_cache.get(str(crops[crop_idx][0]))
@@ -1490,7 +1574,7 @@ def apply_label(crop_fn, crop_path, label):
 def batch_label_or_undo(
     state, label, tasks, progress, labeled_dir, save_progress, apply_label
 ):
-    _, _, crops, _, _ = tasks[state['task_idx']]
+    _, _, crops, _, _, _ = tasks[state['task_idx']]
     last = state.get('last_batch')
     if last and last['task_idx'] == state['task_idx'] and last['label'] == label:
         undone = 0
@@ -1530,7 +1614,7 @@ def render():
     idx = clamp_task_idx(state['task_idx'])
     state['task_idx'] = idx
     sel = state['selected_idx']
-    debug_path, img_name, crops, cam_name, bbox_map = tasks[idx]
+    debug_path, img_name, crops, cam_name, bbox_map, prediction_meta = tasks[idx]
     crops_labels = {cf: progress.get(cf) for _, cf in crops}
     visible_indices = get_visible_crop_indices(idx)
     heights = get_row_heights(idx, visible_indices)
@@ -1641,6 +1725,33 @@ def render():
         (180, 180, 180),
         1,
     )
+
+    # Show model prediction for the selected crop, if available
+    if sel is not None and sel < len(crops):
+        sel_fn = crops[sel][1]
+        pred_line = get_prediction_text(sel_fn, prediction_meta)
+        pred_detail = get_prediction_detail(sel_fn, prediction_meta)
+        if pred_line:
+            cv2.putText(
+                canvas,
+                f'Model prediction: {pred_line}',
+                (10, 82),
+                cv2.FONT_HERSHEY_SIMPLEX,
+                0.34,
+                (210, 210, 120),
+                1,
+            )
+        if pred_detail:
+            put_fitted_text(
+                canvas,
+                pred_detail,
+                360,
+                82,
+                WIN_W - 370,
+                0.30,
+                (170, 170, 120),
+                1,
+            )
 
     # ── Footer ────────────────────────────────────────────────────────────────
     render_footer(canvas, g_done, total_rows)
@@ -1783,13 +1894,29 @@ def render():
 
         # Size + filename meta
         meta_y = ty + th_h + badge_h
+        pred_text = get_prediction_text(crop_fn, prediction_meta, compact=True)
+        pred_h = 0
+        if pred_text:
+            pred_fs = 0.30
+            (_, pred_h), _ = cv2.getTextSize(
+                pred_text, cv2.FONT_HERSHEY_SIMPLEX, pred_fs, 1
+            )
+            cv2.putText(
+                canvas,
+                f'pred: {pred_text}',
+                (tx, meta_y + pred_h + 6),
+                cv2.FONT_HERSHEY_SIMPLEX,
+                pred_fs,
+                (190, 190, 90),
+                1,
+            )
         if orig_w > 0:
             size_text = f'{orig_w}x{orig_h}'
             size_fs = 0.30
             (_, size_h), _ = cv2.getTextSize(
                 size_text, cv2.FONT_HERSHEY_SIMPLEX, size_fs, 1
             )
-            size_y = meta_y + size_h + 7
+            size_y = meta_y + pred_h + size_h + 18
             cv2.putText(
                 canvas,
                 size_text,
@@ -1800,7 +1927,7 @@ def render():
                 1,
             )
         else:
-            size_y = meta_y + 18
+            size_y = meta_y + pred_h + 26
         m = _re.search(r'_crop_(\d+)', crop_fn)
         prefix = f'#{m.group(1)} ' if m else ''
         short = ('..' + crop_fn[-12:]) if len(crop_fn) > 14 else crop_fn
@@ -1894,9 +2021,9 @@ while True:
             state['selected_idx'] = i
             clear_last_single_label()
             scroll_crop_into_view(i)
-            _, _, crops, _, _ = tasks[state['task_idx']]
+            _, _, crops, _, _, _ = tasks[state['task_idx']]
             if state.get('click_bbox_preview', True) and i < len(crops):
-                state['overlay'] = build_preview_overlay(*crops[i])
+                state['overlay'] = build_preview_overlay(crops[i][0], crops[i][1], tasks[state['task_idx']][5])
                 state['overlay_kind'] = 'preview'
         elif val == -2:
             state['overlay'] = build_debug_overlay(state['task_idx'])
@@ -1904,9 +2031,9 @@ while True:
         elif val == -3:
             sel = state['selected_idx']
             if state.get('second_click_preview', True) and sel is not None:
-                _, _, crops, _, _ = tasks[state['task_idx']]
+                _, _, crops, _, _, _ = tasks[state['task_idx']]
                 if sel < len(crops):
-                    state['overlay'] = build_preview_overlay(*crops[sel])
+                    state['overlay'] = build_preview_overlay(crops[sel][0], crops[sel][1], tasks[state['task_idx']][5])
                     state['overlay_kind'] = 'preview'
         elif val == -1:
             state['selected_idx'] = None
@@ -1945,14 +2072,14 @@ while True:
                 state['overlay_kind'] = None
         continue
 
-    _, _, crops, _, _ = tasks[state['task_idx']]
+    _, _, crops, _, _, _ = tasks[state['task_idx']]
     nav = state.get('nav_mode', 'image')
 
     # ── Preview ───────────────────────────────────────────────────────────────
     if ascii_key in KEY_ORDS['preview']:
         sel = state['selected_idx']
         if sel is not None and sel < len(crops):
-            state['overlay'] = build_preview_overlay(*crops[sel])
+            state['overlay'] = build_preview_overlay(crops[sel][0], crops[sel][1], tasks[state['task_idx']][5])
             state['overlay_kind'] = 'preview'
 
     # ── Clear ─────────────────────────────────────────────────────────────────
