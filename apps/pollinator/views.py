@@ -643,13 +643,6 @@ class PollinatorDetectorDatasetUploadView(APIView):
         )
 
 
-# Cap on per-sample listings returned by the pool endpoint. The drawer is for
-# spot-checking representative crops, not exhaustive review (the review UI is
-# the right place for that). Class filter on the client lets a reviewer see
-# different slices without paginating.
-_POOL_SAMPLE_LIMIT = 200
-
-
 def _crop_url(request: Request, detection: Detection) -> str | None:
     crop = detection.crop
     if not crop:
@@ -678,9 +671,9 @@ class PollinatorTrainingPoolView(APIView):
           "by_class": {           # absent for binary (only insect/background)
             "bumblebee": 5, "fly": 18, "butterfly": 4, "other": 15
           },
-          "samples": [...]        # up to _POOL_SAMPLE_LIMIT items; shape
-                                  # differs by track (per-image for detector,
-                                  # per-detection-with-crop_url otherwise).
+          "samples": [...]        # all eligible items; shape differs by track
+                                  # (per-image for detector, per-detection-with-
+                                  # crop_url otherwise). The client paginates.
         }
     """
 
@@ -748,7 +741,7 @@ class PollinatorTrainingPoolView(APIView):
                     'detection_count': e['detection_count'],
                     'classes': sorted(e['classes']),
                 }
-                for e in list(per_image.values())[:_POOL_SAMPLE_LIMIT]
+                for e in per_image.values()
             ]
             return Response(
                 {
@@ -774,7 +767,7 @@ class PollinatorTrainingPoolView(APIView):
             ]
             samples = [
                 {'id': d.pk, 'class': cls, 'crop_url': _crop_url(request, d)}
-                for d, cls in labelled[:_POOL_SAMPLE_LIMIT]
+                for d, cls in labelled
             ]
             return Response(
                 {
@@ -805,7 +798,7 @@ class PollinatorTrainingPoolView(APIView):
                 'class': d.reviewer_label or d.predicted_class,
                 'crop_url': _crop_url(request, d),
             }
-            for d in eligible[:_POOL_SAMPLE_LIMIT]
+            for d in eligible
         ]
         return Response(
             {

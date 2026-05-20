@@ -312,6 +312,7 @@ class TrainingJobListSerializer(serializers.ModelSerializer):
     detail round-trip, and the initiator's username."""
 
     initiated_by = serializers.SerializerMethodField()
+    sample_count = serializers.SerializerMethodField()
 
     class Meta:
         model = TrainingJob
@@ -323,6 +324,7 @@ class TrainingJobListSerializer(serializers.ModelSerializer):
             'config',
             'resulting_model',
             'image_count',
+            'sample_count',
             'current_epoch',
             'total_epochs',
             'metrics',
@@ -337,6 +339,13 @@ class TrainingJobListSerializer(serializers.ModelSerializer):
         if not user:
             return ''
         return user.get_username() or ''
+
+    def get_sample_count(self, obj: TrainingJob) -> int:
+        # Reviewed detections consumed by the job (crops for classifiers,
+        # boxes for the detector) — the same figure as the resulting
+        # ModelVersion.sample_count. image_count counts unique images, which
+        # undercounts when an image carries several detections.
+        return obj.training_detections.count()
 
 
 class TrainingJobDetailSerializer(serializers.ModelSerializer):

@@ -173,6 +173,67 @@ def _make_progress_callback(job_id: int):
     return cb
 
 
+class _ActivityLogHandler(logging.Handler):
+    """Mirrors the ml-pipeline's `pollinator.*` INFO logs (dataset split,
+    background sampling, per-epoch metrics, etc.) into the job's activity_log
+    so the in-app training log matches the console output.
+
+    Scoped to the training thread (one job runs at a time, but inference may
+    log on `pollinator.*` from another thread concurrently) and fail-safe:
+    a logging error must never abort training."""
+
+    # Min seconds between DB flushes. Buffering avoids a write per log line,
+    # which on SQLite would lock the DB and starve the UI's status polls.
+    _FLUSH_INTERVAL = 2.0
+
+    def __init__(self, job_id: int, thread_ident: int):
+        super().__init__(level=logging.INFO)
+        self.job_id = job_id
+        self.thread_ident = thread_ident
+        self._buffer: list[dict] = []
+        self._last_flush = 0.0
+
+    def emit(self, record: logging.LogRecord) -> None:
+        if threading.get_ident() != self.thread_ident:
+            return
+        try:
+            # Trim only blank leading/trailing lines; keep interior spacing so
+            # the trainers' aligned tables (right-padded columns) render right
+            # in the monospace log panel.
+            message = record.getMessage().strip('\n')
+            if not message.strip():
+                return
+            self._buffer.append(
+                {
+                    'time': timezone.now().isoformat(),
+                    'message': message,
+                    'level': record.levelname.lower(),
+                }
+            )
+            import time as _time
+
+            if _time.monotonic() - self._last_flush >= self._FLUSH_INTERVAL:
+                self.flush()
+        except Exception:
+            pass
+
+    def flush(self) -> None:
+        if not self._buffer:
+            return
+        try:
+            import time as _time
+
+            job = TrainingJob.objects.get(pk=self.job_id)
+            log = list(job.activity_log or [])
+            log.extend(self._buffer)
+            job.activity_log = log[-_ACTIVITY_LOG_CAP:]
+            job.save(update_fields=['activity_log'])
+            self._buffer.clear()
+            self._last_flush = _time.monotonic()
+        except Exception:
+            pass
+
+
 # ──────────────────────────────────────────────────────────────────────────
 # Dataset construction
 # ──────────────────────────────────────────────────────────────────────────
@@ -660,6 +721,12 @@ def run_training_job(job: TrainingJob) -> None:
     # Staged user-uploaded detector dataset (if any); removed in finally.
     uploaded_dir: Optional[Path] = None
 
+    # Mirror ml-pipeline INFO logs into the job's activity_log for the live UI
+    # log. Attached to the `pollinator` logger root; detached in finally.
+    pipeline_logger = logging.getLogger('pollinator')
+    log_handler = _ActivityLogHandler(job.pk, threading.get_ident())
+    pipeline_logger.addHandler(log_handler)
+
     try:
         job.status = JobStatus.RUNNING
         job.save(update_fields=['status'])
@@ -865,6 +932,8 @@ def run_training_job(job: TrainingJob) -> None:
         job.save(update_fields=['status', 'error_message', 'completed_at'])
         raise
     finally:
+        log_handler.flush()  # persist any buffered log lines
+        pipeline_logger.removeHandler(log_handler)
         if uploaded_dir is not None:
             shutil.rmtree(uploaded_dir, ignore_errors=True)
         if dataset_dir is not None:
