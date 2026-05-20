@@ -809,6 +809,36 @@ class ImageExcludeTrainingView(APIView):
         return Response({'id': img.pk, 'exclude_from_training': excluded})
 
 
+class DetectionExcludeTrainingView(APIView):
+    """POST /api/analysis/detections/<pk>/exclude-training/
+
+    Body: {"excluded": true|false}. Toggles Detection.exclude_from_training,
+    the reviewer flag marking a crop as unfit for binary/group classifier
+    training. Set by un-ticking the crop in the training pool drawer; the
+    classifier pool builders skip crops where this is True. Distinct from
+    excluded_from_export (CSV only) and ImageAsset.exclude_from_training
+    (image-level, detector training).
+    """
+
+    def post(self, request: Request, pk: int) -> Response:
+        try:
+            d = Detection.objects.get(pk=pk)
+        except Detection.DoesNotExist:
+            return Response(
+                {'error': 'Detection not found'},
+                status=status.HTTP_404_NOT_FOUND,
+            )
+        excluded = request.data.get('excluded')
+        if not isinstance(excluded, bool):
+            return Response(
+                {'error': 'excluded must be a boolean'},
+                status=status.HTTP_400_BAD_REQUEST,
+            )
+        d.exclude_from_training = excluded
+        d.save(update_fields=['exclude_from_training'])
+        return Response({'id': d.pk, 'exclude_from_training': excluded})
+
+
 class InferenceRunReviewSettingsView(APIView):
     """POST /api/analysis/runs/<id>/review-settings/
 

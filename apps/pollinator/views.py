@@ -755,10 +755,16 @@ class PollinatorTrainingPoolView(APIView):
             )
 
         if track == 'binary':
-            accepted, rejected = _collect_binary_pool(lineage_source)
+            # include_excluded so user-deselected crops still render (greyed) in
+            # the drawer; counts below are computed on the trainable subset only.
+            accepted, rejected = _collect_binary_pool(
+                lineage_source, include_excluded=True
+            )
+            trainable_accepted = [d for d in accepted if not d.exclude_from_training]
+            trainable_rejected = [d for d in rejected if not d.exclude_from_training]
             new_count = sum(
                 1
-                for d in (*accepted, *rejected)
+                for d in (*trainable_accepted, *trainable_rejected)
                 if active_trained_at is None
                 or (d.reviewed_at and d.reviewed_at > active_trained_at)
             )
@@ -766,29 +772,37 @@ class PollinatorTrainingPoolView(APIView):
                 (d, 'background') for d in rejected
             ]
             samples = [
-                {'id': d.pk, 'class': cls, 'crop_url': _crop_url(request, d)}
+                {
+                    'id': d.pk,
+                    'class': cls,
+                    'crop_url': _crop_url(request, d),
+                    'exclude_from_training': d.exclude_from_training,
+                }
                 for d, cls in labelled
             ]
             return Response(
                 {
                     'track': track,
-                    'available': len(accepted) + len(rejected),
+                    'available': len(trainable_accepted) + len(trainable_rejected),
                     'consumed': consumed,
                     'new_since_active': new_count,
                     'by_class': {
-                        'insect': len(accepted),
-                        'background': len(rejected),
+                        'insect': len(trainable_accepted),
+                        'background': len(trainable_rejected),
                     },
                     'samples': samples,
                 }
             )
 
         # group
-        eligible = _collect_group_pool(POLLINATOR_CLASSES, lineage_source)
-        by_class = Counter((d.reviewer_label or d.predicted_class) for d in eligible)
+        eligible = _collect_group_pool(
+            POLLINATOR_CLASSES, lineage_source, include_excluded=True
+        )
+        trainable = [d for d in eligible if not d.exclude_from_training]
+        by_class = Counter((d.reviewer_label or d.predicted_class) for d in trainable)
         new_count = sum(
             1
-            for d in eligible
+            for d in trainable
             if active_trained_at is None
             or (d.reviewed_at and d.reviewed_at > active_trained_at)
         )
@@ -797,13 +811,14 @@ class PollinatorTrainingPoolView(APIView):
                 'id': d.pk,
                 'class': d.reviewer_label or d.predicted_class,
                 'crop_url': _crop_url(request, d),
+                'exclude_from_training': d.exclude_from_training,
             }
             for d in eligible
         ]
         return Response(
             {
                 'track': track,
-                'available': len(eligible),
+                'available': len(trainable),
                 'consumed': consumed,
                 'new_since_active': new_count,
                 'by_class': dict(by_class),

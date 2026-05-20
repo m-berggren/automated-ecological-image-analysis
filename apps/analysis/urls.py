@@ -2,6 +2,7 @@ from django.urls import path
 
 from .views import (
     DetectionBulkView,
+    DetectionExcludeTrainingView,
     DetectionExclusionView,
     ImageExcludeTrainingView,
     InferenceRunAbortView,
@@ -71,6 +72,11 @@ urlpatterns = [
         'detections/<int:pk>/exclude/',
         DetectionExclusionView.as_view(),
         name='detection-exclude',
+    ),
+    path(
+        'detections/<int:pk>/exclude-training/',
+        DetectionExcludeTrainingView.as_view(),
+        name='detection-exclude-training',
     ),
     path(
         'images/<int:pk>/exclude-training/',

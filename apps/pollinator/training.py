@@ -512,26 +512,33 @@ def _collect_detector_pool(
 def _collect_binary_pool(
     source_model: Optional[ModelVersion],
     exclude_ids: Optional[set[int]] = None,
+    include_excluded: bool = False,
 ) -> tuple[list, list]:
     """Binary eligibility: accepted (insect) + rejected (background).
     Excludes detections already consumed by source_model's lineage, and any
-    detections the user deselected in the pool drawer (by detection id)."""
+    detections the user deselected in the pool drawer (by detection id). Crops
+    flagged exclude_from_training are dropped for actual training; the pool
+    drawer passes include_excluded=True so they still render (greyed)."""
     consumed = _consumed_detection_ids(source_model)
     exclude_ids = exclude_ids or set()
+
+    def base(detection_status):
+        qs = Detection.objects.filter(
+            inference_run__module=Module.POLLINATORS,
+            status=detection_status,
+        )
+        if not include_excluded:
+            qs = qs.exclude(exclude_from_training=True)
+        return qs.select_related('image')
+
     accepted = [
         d
-        for d in Detection.objects.filter(
-            inference_run__module=Module.POLLINATORS,
-            status=DetectionStatus.ACCEPTED,
-        ).select_related('image')
+        for d in base(DetectionStatus.ACCEPTED)
         if d.id not in consumed and d.id not in exclude_ids
     ]
     rejected = [
         d
-        for d in Detection.objects.filter(
-            inference_run__module=Module.POLLINATORS,
-            status=DetectionStatus.REJECTED,
-        ).select_related('image')
+        for d in base(DetectionStatus.REJECTED)
         if d.id not in consumed and d.id not in exclude_ids
     ]
     return accepted, rejected
@@ -541,17 +548,23 @@ def _collect_group_pool(
     class_filter: list,
     source_model: Optional[ModelVersion],
     exclude_ids: Optional[set[int]] = None,
+    include_excluded: bool = False,
 ) -> list:
     """Group eligibility: accepted detections only; class comes from
     reviewer_label (if corrected) or predicted_class. Excludes detections
     already consumed by source_model's lineage, and any detections the user
-    deselected in the pool drawer (by detection id)."""
+    deselected in the pool drawer (by detection id). Crops flagged
+    exclude_from_training are dropped for actual training; the pool drawer
+    passes include_excluded=True so they still render (greyed)."""
     consumed = _consumed_detection_ids(source_model)
     exclude_ids = exclude_ids or set()
     qs = Detection.objects.filter(
         inference_run__module=Module.POLLINATORS,
         status=DetectionStatus.ACCEPTED,
-    ).select_related('image')
+    )
+    if not include_excluded:
+        qs = qs.exclude(exclude_from_training=True)
+    qs = qs.select_related('image')
     return [
         d
         for d in qs

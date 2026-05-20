@@ -411,6 +411,17 @@ class Detection(models.Model):
             'so a manual include/exclude decision is sticky across re-runs.'
         ),
     )
+    exclude_from_training = models.BooleanField(
+        default=False,
+        help_text=(
+            'Reviewer flag: exclude this crop from binary/group classifier '
+            'training. Set by un-ticking the crop in the training pool drawer; '
+            'the crop stays visible (greyed) and can be re-included. Distinct '
+            'from excluded_from_export (which only affects CSV export) and from '
+            'ImageAsset.exclude_from_training (which governs YOLO detector '
+            'training at the image level).'
+        ),
+    )
 
     class Meta:
         indexes = [
