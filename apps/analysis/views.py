@@ -13,16 +13,21 @@ from rest_framework.request import Request
 from rest_framework.response import Response
 from rest_framework.views import APIView
 
-from apps.datasets.models import UploadStatus
+from apps.datasets.models import ImageAsset, UploadStatus
 from apps.pollinator.services import spawn_inference_pipeline
 
 from .engulfment import apply_engulfment_exclusions
+from .artifacts import (
+    classify_artifact,
+    metrics_from_results_csv,
+    metrics_from_results_json,
+    params_from_args_yaml,
+)
 from .models import (
     Detection,
     InferenceRun,
     JobStatus,
     ModelArtifact,
-    ModelArtifactKind,
     ModelVersion,
     TrainingJob,
 )
@@ -33,6 +38,7 @@ from .serializers import (
     InferenceRunDetailSerializer,
     InferenceRunListSerializer,
     ModelVersionSerializer,
+    ModelVersionUpdateSerializer,
     TrainingJobDetailSerializer,
     TrainingJobListSerializer,
 )
@@ -50,105 +56,24 @@ def _parse_bool(value: str) -> bool | None:
     return None
 
 
-# Map Ultralytics YOLO training-run filenames (basename only) to the
-# corresponding ModelArtifactKind. Names that don't appear here are skipped
-# unless they match one of the *_batch* prefixes used for sample tiles.
-_ARTIFACT_NAME_MAP = {
-    'BoxF1_curve.png': ModelArtifactKind.F1_CURVE,
-    'BoxP_curve.png': ModelArtifactKind.PRECISION_CURVE,
-    'BoxPR_curve.png': ModelArtifactKind.PR_CURVE,
-    'BoxR_curve.png': ModelArtifactKind.RECALL_CURVE,
-    'F1_curve.png': ModelArtifactKind.F1_CURVE,
-    'P_curve.png': ModelArtifactKind.PRECISION_CURVE,
-    'PR_curve.png': ModelArtifactKind.PR_CURVE,
-    'R_curve.png': ModelArtifactKind.RECALL_CURVE,
-    'confusion_matrix.png': ModelArtifactKind.CONFUSION_MATRIX,
-    'confusion_matrix_normalized.png': ModelArtifactKind.CONFUSION_MATRIX,
-    'labels.jpg': ModelArtifactKind.LABELS,
-    'labels_correlogram.jpg': ModelArtifactKind.LABELS,
-    'results.csv': ModelArtifactKind.RESULTS_CSV,
-    'results.png': ModelArtifactKind.TRAINING_CURVE,
-}
-_SAMPLE_PREDICTION_PREFIXES = ('train_batch', 'val_batch')
-
-
-def _classify_artifact(basename: str) -> tuple[str | None, str]:
-    """Return (ModelArtifactKind value, caption) for a known artifact filename,
-    or (None, '') if the name isn't a recognized run-folder asset.
-    Caption disambiguates confusion-matrix variants and similar."""
-    if basename in _ARTIFACT_NAME_MAP:
-        caption = 'normalized' if basename == 'confusion_matrix_normalized.png' else ''
-        return _ARTIFACT_NAME_MAP[basename], caption
-    if any(basename.startswith(p) for p in _SAMPLE_PREDICTION_PREFIXES):
-        return ModelArtifactKind.SAMPLE_PREDICTIONS, basename
-    return None, ''
-
-
 def _parse_args_yaml(file_obj: UploadedFile) -> dict:
-    """Pull hyperparams out of Ultralytics args.yaml. Returns {} on any
-    failure so a corrupt yaml doesn't fail the whole upload."""
-    try:
-        import yaml
-
-        data = yaml.safe_load(file_obj.read())
-    except Exception:
-        logger.exception('Failed to parse args.yaml from upload')
-        return {}
-    if not isinstance(data, dict):
-        return {}
-    out: dict = {}
-    for key in (
-        'epochs',
-        'imgsz',
-        'batch',
-        'lr0',
-        'optimizer',
-        'model',
-        'data',
-        'patience',
-    ):
-        if key in data:
-            out[f'yolo_{key}'] = data[key]
-    return out
+    """Pull hyperparams out of an uploaded Ultralytics args.yaml. Thin adapter
+    over the shared parser in apps.analysis.artifacts so uploaded and
+    incrementally-trained models expose identical yolo_ fields."""
+    raw = file_obj.read()
+    if isinstance(raw, bytes):
+        raw = raw.decode('utf-8', errors='replace')
+    return params_from_args_yaml(raw)
 
 
 def _parse_results_csv(file_obj: UploadedFile) -> dict:
-    """Extract the final-epoch validation metrics from an Ultralytics
-    results.csv. Returns the canonical metric names used by the UI:
-    precision, recall, mAP50, mAP50-95. Empty on any failure."""
-    try:
-        import csv
-        import io
-
-        raw = file_obj.read()
-        if isinstance(raw, bytes):
-            raw = raw.decode('utf-8', errors='replace')
-        reader = csv.DictReader(io.StringIO(raw))
-        rows = [row for row in reader if any(v.strip() for v in row.values())]
-    except Exception:
-        logger.exception('Failed to parse results.csv from upload')
-        return {}
-    if not rows:
-        return {}
-    final = rows[-1]
-    # Ultralytics column names are like 'metrics/precision(B)' for detector
-    # runs and 'metrics/precision(M)' for segmentation. Strip the suffix.
-    out: dict = {}
-    aliases = {
-        'precision': ('metrics/precision(B)', 'metrics/precision'),
-        'recall': ('metrics/recall(B)', 'metrics/recall'),
-        'mAP50': ('metrics/mAP50(B)', 'metrics/mAP50'),
-        'mAP50-95': ('metrics/mAP50-95(B)', 'metrics/mAP50-95'),
-    }
-    for nice, candidates in aliases.items():
-        for col in candidates:
-            if col in final and final[col].strip():
-                try:
-                    out[nice] = float(final[col])
-                except ValueError:
-                    pass
-                break
-    return out
+    """Extract final-epoch validation metrics from an uploaded Ultralytics
+    results.csv (precision, recall, mAP50, mAP50-95). Thin adapter over the
+    shared parser in apps.analysis.artifacts."""
+    raw = file_obj.read()
+    if isinstance(raw, bytes):
+        raw = raw.decode('utf-8', errors='replace')
+    return metrics_from_results_csv(raw)
 
 
 def _extract_checkpoint_metadata(path: Path) -> dict:
@@ -285,9 +210,9 @@ class ModelVersionListCreateView(generics.ListAPIView):
             )
 
         # Resolve weights source. Single-file mode wins if both forms are
-        # present; folder mode looks for weights/best.pt then weights/last.pt
-        # anywhere in the tree (Ultralytics outputs nest these one level
-        # deep under the run name).
+        # present; folder mode ranks candidate weight files: best > last, a
+        # weights/ subfolder preferred but not required (classifier runs save
+        # best.pth at the run root), accepting both .pt and .pth.
         # Pair each artifact upload with its relative path so downstream code
         # can route by parent directory regardless of how the browser mangled
         # the multipart filename.
@@ -300,26 +225,33 @@ class ModelVersionListCreateView(generics.ListAPIView):
             weights_upload.name if weights_upload else None
         )
         if chosen_weights is None:
-            best, last = None, None
+            chosen_rank = 99
             for f, rel in artifact_entries:
                 tail = rel.rsplit('/', 1)[-1] if '/' in rel else rel
+                # Suffix match so classifier checkpoint names
+                # (efficientnet_binary_best.pth, group_insectnet_best.pth) and
+                # Ultralytics weights/best.pt all qualify.
+                low = tail.lower()
+                is_best = low.endswith('best.pt') or low.endswith('best.pth')
+                is_last = low.endswith('last.pt') or low.endswith('last.pth')
+                if not (is_best or is_last):
+                    continue
                 parent = rel.rsplit('/', 2)[-2] if rel.count('/') >= 1 else ''
-                if parent == 'weights' and tail == 'best.pt':
-                    best = f
-                elif parent == 'weights' and tail == 'last.pt':
-                    last = f
-            chosen_weights = best or last
+                rank = (0 if parent == 'weights' else 2) + (0 if is_best else 1)
+                if rank < chosen_rank:
+                    chosen_rank = rank
+                    chosen_weights = f
+                    chosen_weights_name = tail
             if chosen_weights is None:
                 return Response(
                     {
                         'detail': (
                             'No weights file found in the uploaded folder. '
-                            'Expected weights/best.pt or weights/last.pt.'
+                            'Expected best.pt/.pth or last.pt/.pth (ideally under weights/).'
                         )
                     },
                     status=status.HTTP_400_BAD_REQUEST,
                 )
-            chosen_weights_name = chosen_weights.name
 
         dest_dir = Path(settings.MEDIA_ROOT) / 'models' / module
         dest_dir.mkdir(parents=True, exist_ok=True)
@@ -349,6 +281,15 @@ class ModelVersionListCreateView(generics.ListAPIView):
                     f.seek(0)
                 except Exception:
                     pass
+            elif tail.endswith('results.json'):
+                raw = f.read()
+                if isinstance(raw, bytes):
+                    raw = raw.decode('utf-8', errors='replace')
+                metrics.update(metrics_from_results_json(raw))
+                try:
+                    f.seek(0)
+                except Exception:
+                    pass
 
         mv = ModelVersion.objects.create(
             module=module,
@@ -368,7 +309,7 @@ class ModelVersionListCreateView(generics.ListAPIView):
             tail = rel.rsplit('/', 1)[-1] if '/' in rel else rel
             if not tail or tail == 'args.yaml':
                 continue
-            kind_value, caption = _classify_artifact(tail)
+            kind_value, caption = classify_artifact(tail)
             if kind_value is None:
                 skipped += 1
                 continue
@@ -840,6 +781,76 @@ class DetectionExclusionView(APIView):
         return Response({'id': d.pk, 'excluded_from_export': excluded})
 
 
+class ImageExcludeTrainingView(APIView):
+    """POST /api/analysis/images/<pk>/exclude-training/
+
+    Body: {"excluded": true|false}. Toggles ImageAsset.exclude_from_training,
+    the reviewer flag marking an image as unfit for YOLO detector training
+    (more real insects than boxes). The training-set builder skips images
+    where this is True.
+    """
+
+    def post(self, request: Request, pk: int) -> Response:
+        try:
+            img = ImageAsset.objects.get(pk=pk)
+        except ImageAsset.DoesNotExist:
+            return Response(
+                {'error': 'Image not found'},
+                status=status.HTTP_404_NOT_FOUND,
+            )
+        excluded = request.data.get('excluded')
+        if not isinstance(excluded, bool):
+            return Response(
+                {'error': 'excluded must be a boolean'},
+                status=status.HTTP_400_BAD_REQUEST,
+            )
+        img.exclude_from_training = excluded
+        img.save(update_fields=['exclude_from_training'])
+        return Response({'id': img.pk, 'exclude_from_training': excluded})
+
+
+class InferenceRunReviewSettingsView(APIView):
+    """POST /api/analysis/runs/<id>/review-settings/
+
+    Merges a partial dict into the run's review_settings JSON. Accepts any
+    subset of: auto_select (bool), yolo_threshold (0..1), group_threshold
+    (0..1). These are per-run reviewer/export preferences; when a key is
+    absent the frontend resolves the default from the run's config
+    confidence values, so review sliders start where the run was processed.
+    """
+
+    def post(self, request: Request, pk: int) -> Response:
+        try:
+            run = InferenceRun.objects.get(pk=pk)
+        except InferenceRun.DoesNotExist:
+            return Response(
+                {'error': 'Run not found'},
+                status=status.HTTP_404_NOT_FOUND,
+            )
+        data = request.data
+        merged = dict(run.review_settings or {})
+        if 'auto_select' in data:
+            v = data['auto_select']
+            if not isinstance(v, bool):
+                return Response(
+                    {'error': 'auto_select must be a boolean'},
+                    status=status.HTTP_400_BAD_REQUEST,
+                )
+            merged['auto_select'] = v
+        for key in ('yolo_threshold', 'group_threshold'):
+            if key in data:
+                v = data[key]
+                if isinstance(v, bool) or not isinstance(v, (int, float)):
+                    return Response(
+                        {'error': f'{key} must be a number'},
+                        status=status.HTTP_400_BAD_REQUEST,
+                    )
+                merged[key] = max(0.0, min(1.0, float(v)))
+        run.review_settings = merged
+        run.save(update_fields=['review_settings'])
+        return Response({'id': run.pk, 'review_settings': run.review_settings})
+
+
 class InferenceRunRecomputeExclusionsView(APIView):
     """POST /api/analysis/runs/<id>/recompute-exclusions/
 
@@ -974,8 +985,9 @@ class TrainingJobCancelView(APIView):
         return _cancel_job_row(job, TrainingJobDetailSerializer)
 
 
-class ModelVersionDetailView(generics.RetrieveDestroyAPIView):
+class ModelVersionDetailView(generics.RetrieveUpdateDestroyAPIView):
     """GET    /api/analysis/models/<pk>/   read one model version.
+    PATCH  /api/analysis/models/<pk>/   rename (version_name / description).
     DELETE /api/analysis/models/<pk>/   remove the version + its weights.
 
     Refuses to delete a model that any InferenceRun depends on (FK is
@@ -988,6 +1000,11 @@ class ModelVersionDetailView(generics.RetrieveDestroyAPIView):
     queryset = ModelVersion.objects.all()
     serializer_class = ModelVersionSerializer
     lookup_field = 'pk'
+
+    def get_serializer_class(self):
+        if self.request.method in ('PATCH', 'PUT'):
+            return ModelVersionUpdateSerializer
+        return ModelVersionSerializer
 
     # Mirrors the upload gate in ModelVersionListCreateView. Set both to
     # True to restore staff-only model management.

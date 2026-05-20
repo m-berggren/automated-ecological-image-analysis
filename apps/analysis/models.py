@@ -297,6 +297,13 @@ class InferenceRun(models.Model):
     )
     error_message = models.TextField(blank=True)
 
+    # Per-run reviewer/export preferences, distinct from the frozen `config`.
+    # Shape: {auto_select: bool, yolo_threshold: float, group_threshold: float}.
+    # Any missing key falls back (on the frontend) to the run's config
+    # confidence values, so a fresh run's review sliders start at whatever
+    # it was processed with rather than a hard-coded default.
+    review_settings = models.JSONField(default=dict, blank=True)
+
     initiated_by = models.ForeignKey(
         settings.AUTH_USER_MODEL,
         on_delete=models.SET_NULL,

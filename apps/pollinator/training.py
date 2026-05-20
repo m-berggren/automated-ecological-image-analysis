@@ -111,8 +111,8 @@ TILE_CONFIG_DEFAULTS: dict = {
     'use_tiles': True,
     'tile_size': 640,
     'overlap': 0.2,
-    'min_area': 0.3,
-    'keep_empty_tiles': False,
+    'min_area': 0.1,
+    'keep_empty_tiles': {'train': 2, 'val': 5, 'test': True},
 }
 
 
@@ -370,24 +370,58 @@ def _validate_config(config: dict) -> tuple[str, int, list, dict, int]:
     return track, int(from_id), list(class_filter), splits, epochs
 
 
-def _consumed_detection_ids(track: str) -> set[int]:
-    """Detection IDs already used in a successfully-completed training job
-    for this track. Pulled across all jobs and unioned."""
+def _lineage_model_ids(source_model: Optional[ModelVersion]) -> list[int]:
+    """ModelVersion ids in source_model's ancestry chain, including itself,
+    walked via the source_model_version FK. Empty for a None source."""
+    ids: list[int] = []
+    seen: set[int] = set()
+    mv = source_model
+    while mv is not None and mv.pk not in seen:
+        seen.add(mv.pk)
+        ids.append(mv.pk)
+        mv = mv.source_model_version
+    return ids
+
+
+def _consumed_detection_ids(source_model: Optional[ModelVersion]) -> set[int]:
+    """Detection IDs already consumed by completed training jobs in
+    source_model's ancestry chain (lineage), whose resulting model still
+    exists.
+
+    Lineage-scoped, not track-global: fine-tuning a model excludes only what
+    that model's own ancestry already trained on, so a fresh/unrelated base
+    model (no ancestry, e.g. a manual upload) starts with the full pool
+    available. A None source therefore consumes nothing.
+
+    resulting_model is SET_NULL on delete, and a deleted model also drops out
+    of any descendant's ancestry chain, so deleting a model releases its
+    detections back into the pool."""
+    lineage_ids = _lineage_model_ids(source_model)
+    if not lineage_ids:
+        return set()
     return set(
         TrainingJob.objects.filter(
             module=Module.POLLINATORS,
             status=JobStatus.COMPLETED,
-            config__track=track,
+            resulting_model_id__in=lineage_ids,
         ).values_list('training_detections__id', flat=True)
     ) - {None}
 
 
-def _collect_detector_pool(class_filter: list) -> list:
+def _collect_detector_pool(
+    class_filter: list,
+    source_model: Optional[ModelVersion],
+    exclude_image_ids: Optional[set[int]] = None,
+) -> list:
     """YOLO eligibility: images where every Detection has status != PENDING.
     Returns the ACCEPTED detections on those images as bbox labels (rejected
     detections on the same image are ignored — they're already false
-    positives the reviewer flagged out)."""
-    consumed = _consumed_detection_ids('detector')
+    positives the reviewer flagged out). Excludes detections already consumed
+    by source_model's lineage, and any images the user deselected in the pool
+    drawer (the detector's training unit is the image, so exclusions are by
+    image id)."""
+    consumed = _consumed_detection_ids(source_model)
+    exclude_image_ids = exclude_image_ids or set()
     images_with_pending = set(
         Detection.objects.filter(
             inference_run__module=Module.POLLINATORS,
@@ -400,30 +434,36 @@ def _collect_detector_pool(class_filter: list) -> list:
             status=DetectionStatus.ACCEPTED,
         )
         .exclude(image_id__in=images_with_pending)
+        # Reviewer-flagged under-annotated images: their un-boxed insects would
+        # train the detector to treat real insects as background. Drop them.
+        .exclude(image__exclude_from_training=True)
         .select_related('image')
     )
-    if class_filter:
-        # Use reviewer_label when set, else predicted_class.
-        # Filter applied client-side because the right field varies per row.
-        pass
     return [
         d
         for d in qs
         if d.id not in consumed
+        and d.image_id not in exclude_image_ids
         and (d.reviewer_label or d.predicted_class) in class_filter
     ]
 
 
-def _collect_binary_pool() -> tuple[list, list]:
-    """Binary eligibility: accepted (insect) + rejected (background)."""
-    consumed = _consumed_detection_ids('binary')
+def _collect_binary_pool(
+    source_model: Optional[ModelVersion],
+    exclude_ids: Optional[set[int]] = None,
+) -> tuple[list, list]:
+    """Binary eligibility: accepted (insect) + rejected (background).
+    Excludes detections already consumed by source_model's lineage, and any
+    detections the user deselected in the pool drawer (by detection id)."""
+    consumed = _consumed_detection_ids(source_model)
+    exclude_ids = exclude_ids or set()
     accepted = [
         d
         for d in Detection.objects.filter(
             inference_run__module=Module.POLLINATORS,
             status=DetectionStatus.ACCEPTED,
         ).select_related('image')
-        if d.id not in consumed
+        if d.id not in consumed and d.id not in exclude_ids
     ]
     rejected = [
         d
@@ -431,15 +471,22 @@ def _collect_binary_pool() -> tuple[list, list]:
             inference_run__module=Module.POLLINATORS,
             status=DetectionStatus.REJECTED,
         ).select_related('image')
-        if d.id not in consumed
+        if d.id not in consumed and d.id not in exclude_ids
     ]
     return accepted, rejected
 
 
-def _collect_group_pool(class_filter: list) -> list:
+def _collect_group_pool(
+    class_filter: list,
+    source_model: Optional[ModelVersion],
+    exclude_ids: Optional[set[int]] = None,
+) -> list:
     """Group eligibility: accepted detections only; class comes from
-    reviewer_label (if corrected) or predicted_class."""
-    consumed = _consumed_detection_ids('group')
+    reviewer_label (if corrected) or predicted_class. Excludes detections
+    already consumed by source_model's lineage, and any detections the user
+    deselected in the pool drawer (by detection id)."""
+    consumed = _consumed_detection_ids(source_model)
+    exclude_ids = exclude_ids or set()
     qs = Detection.objects.filter(
         inference_run__module=Module.POLLINATORS,
         status=DetectionStatus.ACCEPTED,
@@ -448,6 +495,7 @@ def _collect_group_pool(class_filter: list) -> list:
         d
         for d in qs
         if d.id not in consumed
+        and d.id not in exclude_ids
         and (d.reviewer_label or d.predicted_class) in class_filter
     ]
 
@@ -513,11 +561,11 @@ def _train_detector(
         'val': result.get('val_metrics', {}),
         'test': result.get('test_metrics', {}),
     }
+    # Hyperparameters (yolo_imgsz/epochs/lr0/batch/...) are merged in after
+    # training from the run's args.yaml, matching the manual-upload path so
+    # both model cards expose identical fields. Keep only the
+    # incremental-specific context here.
     parameters = {
-        'img_size': img_size,
-        'epochs': epochs,
-        'lr': defaults['lr'],
-        'batch': defaults['batch'],
         'source_model_version_id': source.pk,
         'class_filter': class_filter,
         'mode': 'incremental',
@@ -609,6 +657,8 @@ def run_training_job(job: TrainingJob) -> None:
     # job fails before dataset assembly. Trained weights live in weights_dir
     # (sibling of dataset_dir), so this cleanup never touches them.
     dataset_dir: Optional[Path] = None
+    # Staged user-uploaded detector dataset (if any); removed in finally.
+    uploaded_dir: Optional[Path] = None
 
     try:
         job.status = JobStatus.RUNNING
@@ -620,15 +670,34 @@ def run_training_job(job: TrainingJob) -> None:
 
         source = ModelVersion.objects.get(pk=from_id)
 
+        # Samples the user deselected in the pool drawer. Detector ids are
+        # image ids (its training unit); classifier ids are detection ids.
+        excluded_ids: set[int] = set()
+        for x in config.get('excluded_sample_ids') or []:
+            try:
+                excluded_ids.add(int(x))
+            except (TypeError, ValueError):
+                pass
+
         # Collect detections — per-track eligibility + consumption guard.
         # `consumed_detections` is the exact set we stamp onto the job's
         # training_detections M2M after a successful run; it can include
         # rejected detections (binary background) too.
         if track == 'detector':
-            eligible = _collect_detector_pool(class_filter)
+            eligible = _collect_detector_pool(class_filter, source, excluded_ids)
             consumed_detections = eligible
+            token = config.get('uploaded_detector_token')
+            if token:
+                from .detector_upload import staging_dir_for
+
+                uploaded_dir = staging_dir_for(token)
+                if uploaded_dir is None:
+                    raise ValueError(
+                        f'uploaded detector dataset {token!r} not found or expired; '
+                        f're-upload before starting the job'
+                    )
         elif track == 'binary':
-            accepted, rejected = _collect_binary_pool()
+            accepted, rejected = _collect_binary_pool(source, excluded_ids)
             if not accepted:
                 raise ValueError('No accepted detections available for binary training')
             if not rejected:
@@ -636,10 +705,12 @@ def run_training_job(job: TrainingJob) -> None:
             eligible = accepted  # for image_count / class subdirs
             consumed_detections = accepted + rejected
         else:  # group
-            eligible = _collect_group_pool(class_filter)
+            eligible = _collect_group_pool(class_filter, source, excluded_ids)
             consumed_detections = eligible
 
-        if not eligible:
+        # An uploaded dataset is sufficient on its own for the detector track,
+        # so only block when there's neither reviewed data nor an upload.
+        if not eligible and uploaded_dir is None:
             raise ValueError(
                 f'No new data available for {track} retraining — either everything '
                 f'is already consumed by previous training, or no detections match '
@@ -658,6 +729,14 @@ def run_training_job(job: TrainingJob) -> None:
 
         if track == 'detector':
             n = _build_detector_dataset(eligible, class_filter, splits, dataset_dir)
+            if uploaded_dir is not None:
+                from .detector_upload import merge_uploaded_into_dataset
+
+                n += merge_uploaded_into_dataset(
+                    uploaded_dir, dataset_dir, class_filter, splits
+                )
+                job.image_count = n
+                job.save(update_fields=['image_count'])
             if n == 0:
                 raise ValueError('Detector dataset build produced 0 images')
             weights_path, metrics, parameters = _train_detector(
@@ -704,11 +783,18 @@ def run_training_job(job: TrainingJob) -> None:
 
         # Persist new ModelVersion + finalise job + stamp consumed detections
         # so future runs of the same track exclude them.
+        # Honour a user-supplied name when given and free; otherwise auto-name.
+        # Falling back on collision avoids failing a finished training run just
+        # because the chosen name was taken between submit and completion.
+        desired_name = (config.get('version_name') or '').strip()
+        if not desired_name or ModelVersion.objects.filter(version_name=desired_name).exists():
+            desired_name = _next_version_name(track)
+
         with transaction.atomic():
             new_mv = ModelVersion.objects.create(
                 module=Module.POLLINATORS,
                 kind=PER_TRACK_DEFAULTS[track]['kind'],
-                version_name=_next_version_name(track),
+                version_name=desired_name,
                 model_file_path=weights_path,
                 description=f'Incremental retrain of {source.version_name}',
                 metrics=metrics,
@@ -734,6 +820,34 @@ def run_training_job(job: TrainingJob) -> None:
             )
             job.training_detections.set(consumed_detections)
 
+        # Capture run outputs (confusion matrix, curves, metrics) as
+        # ModelArtifact rows + a clean metrics map for every track, so all
+        # model cards are equally rich. The detector reads the Ultralytics
+        # stage2_finetune dir (results.csv + args.yaml + plots); the
+        # classifiers read the trainer's output dir (*_results.json +
+        # confusion_matrix.png). Parsed metrics replace the model card's
+        # metrics; the job keeps its original (nested/raw) metrics for history.
+        from apps.analysis.artifacts import ingest_run_dir
+
+        if track == 'detector':
+            run_dir = Path(weights_path).parent.parent  # .../stage2_finetune
+        else:
+            run_dir = Path(weights_path).parent  # classifier output dir
+        ingested, run_metrics, run_params = ingest_run_dir(new_mv, run_dir)
+        update_fields: list[str] = []
+        if run_metrics:
+            new_mv.metrics = run_metrics
+            update_fields.append('metrics')
+        if run_params:
+            new_mv.parameters = {**(new_mv.parameters or {}), **run_params}
+            update_fields.append('parameters')
+        if update_fields:
+            new_mv.save(update_fields=update_fields)
+        logger.info(
+            f'TrainingJob {job.pk}: ingested {ingested} artifact(s) for '
+            f'ModelVersion {new_mv.pk}'
+        )
+
         logger.info(f'TrainingJob {job.pk} completed → ModelVersion {new_mv.pk}')
 
     except RunCancelled:
@@ -751,8 +865,16 @@ def run_training_job(job: TrainingJob) -> None:
         job.save(update_fields=['status', 'error_message', 'completed_at'])
         raise
     finally:
+        if uploaded_dir is not None:
+            shutil.rmtree(uploaded_dir, ignore_errors=True)
         if dataset_dir is not None:
             shutil.rmtree(dataset_dir, ignore_errors=True)
+            # retrain_yolo slices the source dataset into a sibling
+            # `<name>_tiled` dir (training_yolo.py); remove it too or the
+            # tiled images/labels (the larger pile) orphan under MEDIA_ROOT.
+            shutil.rmtree(
+                dataset_dir.parent / f'{dataset_dir.name}_tiled', ignore_errors=True
+            )
             # If the job failed before any weights were written, the sibling
             # weights/ dir and its parent training/<job_pk>/ are now empty
             # and just clutter MEDIA_ROOT. rmdir only succeeds when empty,

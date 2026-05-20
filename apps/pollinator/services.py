@@ -231,6 +231,7 @@ def _build_pipeline(run: InferenceRun):
     yolo_conf = float((config.get('yolo') or {}).get('confidence', 0.25))
     binary_thr = float((config.get('binary_classifier') or {}).get('confidence', 0.5))
     group_thr = float((config.get('group_classifier') or {}).get('confidence', 0.0))
+    iou_thr = float(config.get('iou_threshold', 0.3))
 
     yolo_tile_cfg = (yolo_mv.parameters or {}).get('tile_config') or {}
     yolo_slice_size = int(yolo_tile_cfg.get('tile_size', 640))
@@ -246,6 +247,7 @@ def _build_pipeline(run: InferenceRun):
         yolo_overlap=yolo_overlap,
         binary_threshold=binary_thr,
         group_threshold=group_thr,
+        iou_threshold=iou_thr,
     )
 
 

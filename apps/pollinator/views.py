@@ -1,6 +1,7 @@
 import csv
 import io
 import logging
+import re
 import tempfile
 import zipfile
 from collections import Counter
@@ -111,6 +112,13 @@ def _build_image_row(image, counts: dict[str, int], session: str) -> dict:
     }
 
 
+def _run_filename_base(run) -> str:
+    """Filesystem-safe base name for a run's exports, from the run name.
+    Falls back to run-<pk> if the name is empty or all punctuation."""
+    base = re.sub(r'[^\w.-]+', '_', run.name or '').strip('_')
+    return base or f'run-{run.pk}'
+
+
 class PollinatorRunExportCSVView(APIView):
     """GET /api/pollinator/runs/<run_id>/export.csv
 
@@ -175,7 +183,7 @@ class PollinatorRunExportCSVView(APIView):
                 )
                 yield writer.writerow([row[k] for k in _CSV_FIELDS])
 
-        filename = f'run-{run.pk}-images.csv'
+        filename = f'{_run_filename_base(run)}_images.csv'
         response = StreamingHttpResponse(rows(), content_type='text/csv')
         response['Content-Disposition'] = f'attachment; filename="{filename}"'
         return response
@@ -202,9 +210,9 @@ class PollinatorRunExportCSVView(APIView):
             # Detection specific
             'detection_id',
             'yolo_confidence',
-            'insectnet_confidence',
+            'group_classifier_confidence',
             'yolo_class',
-            'insectnet_class',
+            'group_classifier_class',
             'final_class',
         ]
 
@@ -243,7 +251,7 @@ class PollinatorRunExportCSVView(APIView):
                     ]
                 )
 
-        filename = f'run-{run.pk}-detections.csv'
+        filename = f'{_run_filename_base(run)}_detections.csv'
         response = StreamingHttpResponse(rows(), content_type='text/csv')
         response['Content-Disposition'] = f'attachment; filename="{filename}"'
         return response
@@ -586,6 +594,55 @@ class PollinatorTrainingCreateView(generics.CreateAPIView):
         )
 
 
+class PollinatorDetectorDatasetUploadView(APIView):
+    """POST /api/pollinator/training/detector-dataset/
+
+    Multipart body: file=<zip>, from_model_version_id=<id>.
+
+    Validates and stages a user-supplied YOLO dataset zip
+    ({images/, labels/, data.yaml}) against the target model's class list,
+    remapping the uploader's class indices onto that ordering. On success
+    returns a token the training submit passes back as
+    config.uploaded_detector_token; nothing is staged on failure.
+    """
+
+    def post(self, request: Request, *args, **kwargs) -> Response:
+        from .detector_upload import DetectorUploadError, validate_and_stage
+
+        upload = request.FILES.get('file')
+        if upload is None:
+            return Response(
+                {'ok': False, 'errors': ['no file provided (multipart field "file")']},
+                status=status.HTTP_400_BAD_REQUEST,
+            )
+        from_id = request.data.get('from_model_version_id')
+        try:
+            source = ModelVersion.objects.get(pk=int(from_id))
+        except (ModelVersion.DoesNotExist, TypeError, ValueError):
+            return Response(
+                {'ok': False, 'errors': [f'from_model_version_id={from_id!r} does not exist']},
+                status=status.HTTP_400_BAD_REQUEST,
+            )
+        if source.module != Module.POLLINATORS or source.kind != 'detector':
+            return Response(
+                {'ok': False, 'errors': ['source model must be a pollinator detector']},
+                status=status.HTTP_400_BAD_REQUEST,
+            )
+
+        target_classes = (source.parameters or {}).get('class_filter') or POLLINATOR_CLASSES
+        try:
+            report = validate_and_stage(upload, target_classes)
+        except DetectorUploadError as exc:
+            return Response(
+                {'ok': False, 'errors': [str(exc)]},
+                status=status.HTTP_400_BAD_REQUEST,
+            )
+        return Response(
+            report,
+            status=status.HTTP_200_OK if report['ok'] else status.HTTP_400_BAD_REQUEST,
+        )
+
+
 # Cap on per-sample listings returned by the pool endpoint. The drawer is for
 # spot-checking representative crops, not exhaustive review (the review UI is
 # the right place for that). Class filter on the client lets a reviewer see
@@ -635,11 +692,31 @@ class PollinatorTrainingPoolView(APIView):
                 status=status.HTTP_400_BAD_REQUEST,
             )
 
-        consumed = len(_consumed_detection_ids(track))
-        active_trained_at = _active_trained_at(track)
+        # Scope the pool to the model the run will fine-tune from. Defaults to
+        # the active version, but the form can pass an explicit
+        # from_model_version_id so the displayed pool matches the chosen base.
+        active_model = _active_model(track)
+        lineage_source = active_model
+        from_id = request.query_params.get('from_model_version_id')
+        if from_id:
+            try:
+                lineage_source = ModelVersion.objects.get(
+                    pk=int(from_id),
+                    module=Module.POLLINATORS,
+                    kind=PER_TRACK_DEFAULTS[track]['kind'],
+                )
+            except (ModelVersion.DoesNotExist, ValueError, TypeError):
+                return Response(
+                    {'error': f'invalid from_model_version_id: {from_id!r}'},
+                    status=status.HTTP_400_BAD_REQUEST,
+                )
+        consumed = len(_consumed_detection_ids(lineage_source))
+        # "new since active" stays relative to the active model regardless of
+        # the chosen base, so the badge keeps a stable meaning.
+        active_trained_at = active_model.trained_at if active_model else None
 
         if track == 'detector':
-            eligible = _collect_detector_pool(POLLINATOR_CLASSES)
+            eligible = _collect_detector_pool(POLLINATOR_CLASSES, lineage_source)
             by_class = Counter(
                 (d.reviewer_label or d.predicted_class) for d in eligible
             )
@@ -685,7 +762,7 @@ class PollinatorTrainingPoolView(APIView):
             )
 
         if track == 'binary':
-            accepted, rejected = _collect_binary_pool()
+            accepted, rejected = _collect_binary_pool(lineage_source)
             new_count = sum(
                 1
                 for d in (*accepted, *rejected)
@@ -714,7 +791,7 @@ class PollinatorTrainingPoolView(APIView):
             )
 
         # group
-        eligible = _collect_group_pool(POLLINATOR_CLASSES)
+        eligible = _collect_group_pool(POLLINATOR_CLASSES, lineage_source)
         by_class = Counter((d.reviewer_label or d.predicted_class) for d in eligible)
         new_count = sum(
             1
@@ -742,15 +819,13 @@ class PollinatorTrainingPoolView(APIView):
         )
 
 
-def _active_trained_at(track: str):
-    """trained_at of the currently active ModelVersion for this track's kind,
-    or None if no active version exists. Used by the pool endpoint to bucket
-    reviewed-since-active detections separately from the broader pool."""
+def _active_model(track: str):
+    """The currently active ModelVersion for this track's kind, or None.
+    Used by the pool endpoint as the lineage source for consumption scoping
+    and to bucket reviewed-since-active detections."""
     kind = PER_TRACK_DEFAULTS[track]['kind']
     return (
         ModelVersion.objects.filter(
             module=Module.POLLINATORS, kind=kind, is_active=True
-        )
-        .values_list('trained_at', flat=True)
-        .first()
+        ).first()
     )

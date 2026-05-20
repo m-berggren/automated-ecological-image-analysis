@@ -71,6 +71,26 @@ class ModelVersionSerializer(serializers.ModelSerializer):
         read_only_fields = ('id', 'created_at')
 
 
+class ModelVersionUpdateSerializer(serializers.ModelSerializer):
+    """Write serializer for renaming a model version (PATCH). Only the
+    user-editable label fields are writable; metrics/weights are immutable."""
+
+    class Meta:
+        model = ModelVersion
+        fields = ('version_name', 'description')
+
+    def validate_version_name(self, value: str) -> str:
+        value = (value or '').strip()
+        if not value:
+            raise serializers.ValidationError('version_name cannot be empty')
+        qs = ModelVersion.objects.filter(version_name=value)
+        if self.instance is not None:
+            qs = qs.exclude(pk=self.instance.pk)
+        if qs.exists():
+            raise serializers.ValidationError(f'version_name "{value}" already exists')
+        return value
+
+
 class InferenceRunCreateSerializer(serializers.ModelSerializer):
     """Write serializer for POST /api/analysis/runs/.
 
@@ -165,6 +185,7 @@ class InferenceRunDetailSerializer(serializers.ModelSerializer):
             'detections_by_source',
             'activity_log',
             'error_message',
+            'review_settings',
             'created_at',
             'started_at',
             'completed_at',
@@ -182,6 +203,8 @@ class BaseDetectionReadSerializer(serializers.ModelSerializer):
     reviewer_status = serializers.SerializerMethodField()
     source_image_filename = serializers.SerializerMethodField()
     source_image_url = serializers.SerializerMethodField()
+    source_image_id = serializers.IntegerField(source='image_id', read_only=True)
+    exclude_from_training = serializers.SerializerMethodField()
     crop_url = serializers.SerializerMethodField()
 
     class Meta:
@@ -196,6 +219,8 @@ class BaseDetectionReadSerializer(serializers.ModelSerializer):
             'excluded_from_export',
             'source_image_filename',
             'source_image_url',
+            'source_image_id',
+            'exclude_from_training',
             'crop_url',
         )
 
@@ -207,6 +232,9 @@ class BaseDetectionReadSerializer(serializers.ModelSerializer):
         if obj.status == DetectionStatus.UNSURE:
             return 'unsure'
         return 'unreviewed'
+
+    def get_exclude_from_training(self, obj: Detection) -> bool:
+        return bool(obj.image and obj.image.exclude_from_training)
 
     def get_source_image_filename(self, obj: Detection) -> str:
         if obj.image and obj.image.file:

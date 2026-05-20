@@ -411,6 +411,23 @@ def train_binary(
     (out_dir / f'{model_type}_binary_results.json').write_text(
         json.dumps(results, indent=2)
     )
+
+    # Confusion matrix PNG (best-effort) so the model card matches YOLO. Use
+    # the test split when present, else fall back to the final val metrics.
+    from .plots import save_confusion_matrix
+
+    cm_src = test if test else v
+    if cm_src and all(k in cm_src for k in ('tn', 'fp', 'fn', 'tp')):
+        # rows = true [background, insect], cols = predicted [background, insect]
+        matrix = [[cm_src['tn'], cm_src['fp']], [cm_src['fn'], cm_src['tp']]]
+        split_name = 'test set' if test else 'val set'
+        save_confusion_matrix(
+            matrix,
+            ['background', 'insect'],
+            out_dir / 'confusion_matrix.png',
+            title=f'{model_type} binary — Confusion Matrix ({split_name})',
+        )
+
     logger.info(f'Checkpoint: {ckpt_path}')
     return results
 

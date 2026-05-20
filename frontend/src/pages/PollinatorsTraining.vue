@@ -36,10 +36,10 @@
                 <div class="flex items-baseline gap-2 flex-wrap">
                   <span class="font-medium text-sm">{{ track.label }}</span>
                   <span
-                    v-if="activeVersion(track)"
+                    v-if="displayedVersion(track)"
                     class="text-xs px-2 py-0.5 rounded-full bg-green-300 text-green-900 font-medium"
                   >
-                    {{ activeVersion(track)!.version_name }}
+                    {{ displayedVersion(track)!.version_name }}
                   </span>
                   <span
                     v-if="track.active_job"
@@ -49,10 +49,10 @@
                   </span>
                 </div>
                 <p class="text-xs text-muted-foreground mt-0.5">{{ track.description }}</p>
-                <div v-if="activeVersion(track)" class="text-xs text-muted-foreground mt-1">
+                <div v-if="displayedVersion(track)" class="text-xs text-muted-foreground mt-1">
                   {{ track.metric_label }}
                   <span class="font-mono ml-1 text-foreground">
-                    {{ formatMetric(activeMainMetric(track)) }}
+                    {{ formatMetric(displayedMainMetric(track)) }}
                   </span>
                   · {{ track.data_pool.total_samples.toLocaleString() }} samples available
                   <span v-if="track.data_pool.new_since_active > 0" class="text-primary">
@@ -71,6 +71,20 @@
           >
             2. Choose training data
           </div>
+          <!-- Base model selector: which version to fine-tune from. Defaults
+               to the active version; changing it re-scopes the pool to that
+               model's lineage. -->
+          <div class="mb-3 flex items-center gap-2">
+            <label class="text-xs text-muted-foreground">Base model</label>
+            <select
+              v-model.number="selectedSourceId"
+              class="px-2 py-1 rounded border border-green-300 bg-green-100 text-green-900 text-sm font-medium focus:outline-none focus:ring-2 focus:ring-green-400"
+            >
+              <option v-for="v in selectedTrack.versions" :key="v.id" :value="v.id">
+                {{ v.version_name }}{{ v.id === selectedTrack.active_version_id ? ' (active)' : '' }}
+              </option>
+            </select>
+          </div>
           <!-- Pool summary card -->
           <div class="rounded-lg border border-border bg-muted/20 p-4 space-y-3">
             <div class="flex items-start gap-3">
@@ -79,31 +93,22 @@
                 type="checkbox"
                 class="mt-1 accent-primary disabled:opacity-50"
                 :checked="useTrainingPool"
-                :disabled="!canUseTrainingPool"
                 @change="useTrainingPool = !useTrainingPool"
               />
               <div class="flex-1 min-w-0">
-                <label
-                  for="use-training-pool"
-                  class="text-sm font-medium block"
-                  :class="!canUseTrainingPool && 'text-muted-foreground'"
-                >
+                <label for="use-training-pool" class="text-sm font-medium block">
                   {{ totalPoolSamples.toLocaleString() }} samples in pool
                 </label>
                 <div class="text-xs text-muted-foreground">
                   {{ selectedTrack.data_pool.total_samples.toLocaleString() }} from review ·
-                  {{ uploadedFiles.length }} uploaded
-                  {{ uploadedFiles.length === 1 ? 'file' : 'files' }}
-                </div>
-                <!-- Always rendered so the card height stays constant across
-                     track selections; invisible when YOLO isn't selected. -->
-                <div
-                  class="text-xs text-amber-700 mt-1"
-                  :class="{ invisible: canUseTrainingPool }"
-                  :aria-hidden="canUseTrainingPool"
-                >
-                  Not usable for YOLO — it trains on full reviewed images, not uploaded crops or the
-                  aggregated pool.
+                  <template v-if="isDetector">
+                    {{ (detectorUpload.report?.image_count ?? 0).toLocaleString() }} from uploaded
+                    dataset
+                  </template>
+                  <template v-else>
+                    {{ uploadedFiles.length }} uploaded
+                    {{ uploadedFiles.length === 1 ? 'file' : 'files' }}
+                  </template>
                 </div>
               </div>
               <button
@@ -113,7 +118,9 @@
                 Browse pool →
               </button>
             </div>
-            <div class="flex flex-wrap gap-3 text-xs text-muted-foreground">
+            <!-- min-h reserves the class-breakdown line so the card keeps the
+                 same height when the pool is empty (no class rows to render). -->
+            <div class="flex flex-wrap items-center gap-3 text-xs text-muted-foreground min-h-5">
               <span
                 v-for="row in classRows(selectedTrack)"
                 :key="row.label"
@@ -133,40 +140,104 @@
             </div>
           </div>
 
+          <!-- Detector: upload a full YOLO dataset zip (validated server-side
+               and remapped to this model's classes). Classifiers keep the
+               crop/image pool dropzone below. -->
+          <template v-if="isDetector">
+            <!-- mt matches the classifier dropzone's mt-3 + Files/Folder tab
+                 row, so the drop box lands at the same height and doesn't jump
+                 when switching between detector and classifier tracks. -->
+            <UploadDropZone
+              class="mt-12"
+              v-model:active-tab="detectorUploadTab"
+              :tabs="detectorUploadTabs"
+              :has-files="detectorUpload.status === 'ok'"
+              @select="onDetectorZipSelect"
+            >
+              <template #body>
+                <UploadCloud class="w-8 h-8 mx-auto text-muted-foreground" />
+                <div class="text-sm font-medium mt-2">
+                  <template v-if="detectorUpload.status === 'uploading'">Validating…</template>
+                  <template v-else-if="detectorUpload.status === 'ok'">
+                    Dataset accepted — drop a new .zip to replace
+                  </template>
+                  <template v-else>Drop a YOLO dataset .zip, or click to browse</template>
+                </div>
+                <div class="text-xs text-muted-foreground mt-1">
+                  Requires <code>images/</code>, <code>labels/</code>, and
+                  <code>data.yaml</code>. Classes are remapped to this model.
+                </div>
+              </template>
+            </UploadDropZone>
+
+            <!-- Validation report: green summary on success, red errors on
+                 failure. Distributed across train/val/test per the splits. -->
+            <div
+              v-if="detectorUpload.status === 'ok' && detectorUpload.report"
+              class="mt-2 rounded-md border border-green-200 bg-green-50 p-3 text-xs text-green-900"
+            >
+              <div class="flex items-center justify-between">
+                <span class="font-medium">
+                  {{ detectorUpload.report.image_count.toLocaleString() }} images
+                  ({{ detectorUpload.report.background_count.toLocaleString() }} background)
+                </span>
+                <button class="text-muted-foreground hover:text-red-600" @click.stop="clearDetectorUpload">
+                  Clear
+                </button>
+              </div>
+              <div class="mt-1 flex flex-wrap gap-x-3 gap-y-0.5">
+                <span v-for="(count, cls) in detectorUpload.report.class_histogram" :key="cls">
+                  {{ count.toLocaleString() }} {{ cls }}
+                </span>
+              </div>
+            </div>
+            <div
+              v-else-if="detectorUpload.status === 'error'"
+              class="mt-2 rounded-md border border-red-200 bg-red-50 p-3 text-xs text-red-900"
+            >
+              <div class="font-medium mb-1">Dataset rejected:</div>
+              <ul class="list-disc pl-4 space-y-0.5">
+                <li v-for="(err, i) in detectorUpload.errors" :key="i">{{ err }}</li>
+              </ul>
+            </div>
+          </template>
+
           <!-- Add data drop zone. Tabs swap between file/folder modes;
                the box highlights green (theme primary) when files exist. -->
-          <UploadDropZone
-            class="mt-3"
-            v-model:active-tab="trainingUploadTab"
-            :tabs="trainingUploadTabs"
-            :has-files="uploadedFiles.length > 0"
-            @select="onTrainingUploadSelect"
-          >
-            <template #body>
-              <UploadCloud class="w-8 h-8 mx-auto text-muted-foreground" />
-              <div class="text-sm font-medium mt-2">
-                <template v-if="uploadedFiles.length">
-                  {{ uploadedFiles.length }} file{{ uploadedFiles.length === 1 ? '' : 's' }} added —
-                  drop more to extend
-                </template>
-                <template v-else> Drop a folder or images here, or click to browse </template>
-              </div>
-              <div class="text-xs text-muted-foreground mt-1">
-                Adds to the training pool. Accepts .jpg, .png, .zip, or a folder of images.
-              </div>
-            </template>
-          </UploadDropZone>
+          <template v-else>
+            <UploadDropZone
+              class="mt-3"
+              v-model:active-tab="trainingUploadTab"
+              :tabs="trainingUploadTabs"
+              :has-files="uploadedFiles.length > 0"
+              @select="onTrainingUploadSelect"
+            >
+              <template #body>
+                <UploadCloud class="w-8 h-8 mx-auto text-muted-foreground" />
+                <div class="text-sm font-medium mt-2">
+                  <template v-if="uploadedFiles.length">
+                    {{ uploadedFiles.length }} file{{ uploadedFiles.length === 1 ? '' : 's' }} added —
+                    drop more to extend
+                  </template>
+                  <template v-else> Drop a folder or images here, or click to browse </template>
+                </div>
+                <div class="text-xs text-muted-foreground mt-1">
+                  Adds to the training pool. Accepts .jpg, .png, .zip, or a folder of images.
+                </div>
+              </template>
+            </UploadDropZone>
 
-          <!-- View / clear link row. Shown only when files exist. Clicking
-               "View files" opens a modal so the form layout doesn't shift. -->
-          <div v-if="uploadedFiles.length" class="mt-2 text-xs flex items-center justify-end gap-3">
-            <button class="text-primary hover:underline" @click.stop="filesModalOpen = true">
-              View files →
-            </button>
-            <button class="text-muted-foreground hover:text-red-600" @click.stop="clearUploads">
-              Clear
-            </button>
-          </div>
+            <!-- View / clear link row. Shown only when files exist. Clicking
+                 "View files" opens a modal so the form layout doesn't shift. -->
+            <div v-if="uploadedFiles.length" class="mt-2 text-xs flex items-center justify-end gap-3">
+              <button class="text-primary hover:underline" @click.stop="filesModalOpen = true">
+                View files →
+              </button>
+              <button class="text-muted-foreground hover:text-red-600" @click.stop="clearUploads">
+                Clear
+              </button>
+            </div>
+          </template>
 
           <!-- Class filter (detector and group classifier only) -->
           <div v-if="trackHasClassFilter" class="mt-4 space-y-2 min-h-14">
@@ -273,6 +344,22 @@
                 <input v-model="settings.stratified" type="checkbox" />
                 Stratified split
               </label>
+            </div>
+
+            <div class="space-y-1.5">
+              <div class="flex items-center gap-1.5 text-xs font-medium text-foreground">
+                <span>Model name</span>
+                <InfoPopover>
+                  Optional. Names the resulting model version. Auto-named (e.g. detector-v3) if
+                  left blank.
+                </InfoPopover>
+              </div>
+              <input
+                v-model="modelName"
+                type="text"
+                placeholder="auto"
+                class="px-2 py-1 rounded border border-border bg-background text-sm text-foreground"
+              />
             </div>
 
             <div v-if="trackHasImgSize" class="space-y-1.5">
@@ -475,7 +562,8 @@
               included
             </span>
             <button
-              class="ml-auto text-muted-foreground hover:text-foreground"
+              class="ml-auto -mr-2 p-2 rounded text-lg leading-none text-muted-foreground hover:text-foreground hover:bg-muted"
+              aria-label="Close"
               @click="reviewDrawerOpen = false"
             >
               ✕
@@ -538,7 +626,7 @@
                 </thead>
                 <tbody>
                   <tr
-                    v-for="row in detectorTableRows"
+                    v-for="row in pagedDetectorRows"
                     :key="row.id"
                     class="border-b border-border/40 hover:bg-muted/40"
                     :class="excludedSampleIds.has(String(row.id)) ? 'opacity-40' : ''"
@@ -582,7 +670,7 @@
               </div>
               <div v-else class="grid grid-cols-5 gap-2">
                 <label
-                  v-for="thumb in drawerThumbnails"
+                  v-for="thumb in pagedThumbnails"
                   :key="thumb.id"
                   class="aspect-square rounded border flex items-center justify-center text-2xl relative overflow-hidden cursor-pointer transition-opacity"
                   :class="
@@ -627,6 +715,35 @@
               </p>
             </template>
           </div>
+          <!-- Pager: 100 per page over the loaded pool samples. -->
+          <footer
+            v-if="drawerTotalPages > 1"
+            class="px-5 py-2 border-t border-border flex items-center justify-between text-xs"
+          >
+            <span class="text-muted-foreground">
+              {{ (drawerPage - 1) * DRAWER_PAGE_SIZE + 1 }}–{{
+                Math.min(drawerPage * DRAWER_PAGE_SIZE, drawerVisibleCount)
+              }}
+              of {{ drawerVisibleCount }}
+            </span>
+            <span class="flex items-center gap-3">
+              <button
+                class="text-primary hover:underline disabled:opacity-40 disabled:no-underline disabled:cursor-not-allowed"
+                :disabled="drawerPage <= 1"
+                @click="drawerPage--"
+              >
+                ← Prev
+              </button>
+              <span class="text-muted-foreground">Page {{ drawerPage }} / {{ drawerTotalPages }}</span>
+              <button
+                class="text-primary hover:underline disabled:opacity-40 disabled:no-underline disabled:cursor-not-allowed"
+                :disabled="drawerPage >= drawerTotalPages"
+                @click="drawerPage++"
+              >
+                Next →
+              </button>
+            </span>
+          </footer>
         </aside>
       </div>
     </Transition>
@@ -651,7 +768,8 @@
               </span>
             </h3>
             <button
-              class="ml-auto text-muted-foreground hover:text-foreground"
+              class="ml-auto -mr-2 p-2 rounded text-lg leading-none text-muted-foreground hover:text-foreground hover:bg-muted"
+              aria-label="Close"
               @click="filesModalOpen = false"
             >
               ✕
@@ -788,6 +906,9 @@ const loadError = ref('')
 const tracks = ref<Track[]>([])
 const history = ref<HistoryEntry[]>([])
 const selectedTrackId = ref<string | null>(null)
+// The model version to fine-tune from. Defaults to the selected track's
+// active version; user-changeable via the Base model selector.
+const selectedSourceId = ref<number | null>(null)
 const formMessage = ref('')
 const expandedHistory = ref<Set<number>>(new Set())
 const uploadedFiles = ref<Array<{ name: string; size: number }>>([])
@@ -817,6 +938,66 @@ function onTrainingUploadSelect(files: File[]) {
   for (const f of files) addFile(f)
 }
 
+interface DetectorUploadReport {
+  ok: boolean
+  token: string | null
+  image_count: number
+  background_count: number
+  class_histogram: Record<string, number>
+  errors: string[]
+}
+
+const detectorUploadTab = ref('zip')
+const detectorUploadTabs: UploadTab[] = [{ key: 'zip', label: 'Zip', mode: 'files', accept: '.zip' }]
+const detectorUpload = ref<{
+  status: 'idle' | 'uploading' | 'ok' | 'error'
+  token: string | null
+  report: DetectorUploadReport | null
+  errors: string[]
+}>({ status: 'idle', token: null, report: null, errors: [] })
+
+function clearDetectorUpload() {
+  detectorUpload.value = { status: 'idle', token: null, report: null, errors: [] }
+}
+
+async function onDetectorZipSelect(files: File[]) {
+  const file = files.find((f) => f.name.toLowerCase().endsWith('.zip'))
+  if (!file) {
+    detectorUpload.value = { status: 'error', token: null, report: null, errors: ['Please select a .zip file.'] }
+    return
+  }
+  const t = selectedTrack.value
+  if (!t || selectedSourceId.value == null) {
+    detectorUpload.value = {
+      status: 'error',
+      token: null,
+      report: null,
+      errors: ['Select a base model before uploading.'],
+    }
+    return
+  }
+  detectorUpload.value = { status: 'uploading', token: null, report: null, errors: [] }
+  const form = new FormData()
+  form.append('file', file)
+  form.append('from_model_version_id', String(selectedSourceId.value))
+  try {
+    const res = await api('/api/pollinator/training/detector-dataset/', { method: 'POST', body: form })
+    const data = await res.json()
+    if (res.ok && data.ok) {
+      detectorUpload.value = { status: 'ok', token: data.token, report: data, errors: [] }
+    } else {
+      detectorUpload.value = {
+        status: 'error',
+        token: null,
+        report: null,
+        errors: data.errors ?? [`HTTP ${res.status}`],
+      }
+    }
+  } catch (e) {
+    detectorUpload.value = { status: 'error', token: null, report: null, errors: [String(e)] }
+  }
+}
+
 const reviewDrawerOpen = ref(false)
 const drawerFilter = ref<string>('all')
 
@@ -838,10 +1019,9 @@ const POLLINATOR_PREDICTED_CLASSES = ['bumblebee', 'fly', 'butterfly', 'other']
 const IMG_SIZE_OPTIONS = [640, 960, 1280, 1536, 2048]
 
 const imgSize = ref(640)
+const modelName = ref('')
 const classFilter = reactive(new Set<string>(POLLINATOR_PREDICTED_CLASSES))
 // User-facing toggle for the aggregated training pool (reviewed + uploads).
-// Disabled and forced off for the YOLO detector, which trains on full
-// reviewed images rather than the mixed pool.
 const useTrainingPool = ref(true)
 
 function toggleClass(cls: string) {
@@ -1095,10 +1275,43 @@ const trackHasClassFilter = computed(
 const trackHasImgSize = computed(() => selectedTrack.value?.id === 'detector')
 // YOLO can't consume the aggregated pool (it includes uploaded crops without
 // bbox labels). Force the checkbox off and disabled for the detector track.
-const canUseTrainingPool = computed(() => selectedTrack.value?.id !== 'detector')
-watch(canUseTrainingPool, (allowed) => {
-  if (!allowed) useTrainingPool.value = false
+const isDetector = computed(() => selectedTrack.value?.id === 'detector')
+// On track change, default the base model to that track's active version.
+// A staged upload is tied to a specific source model, so drop it too.
+watch(selectedTrackId, () => {
+  clearDetectorUpload()
+  const t = selectedTrack.value
+  selectedSourceId.value = t?.active_version_id ?? t?.versions[0]?.id ?? null
 })
+
+// Changing the base model re-scopes the pool to that model's lineage and
+// invalidates any uploaded dataset (validated against the prior source).
+watch(selectedSourceId, (id) => {
+  clearDetectorUpload()
+  if (id != null) loadPoolForSelected()
+})
+
+async function loadPoolForSelected() {
+  const t = selectedTrack.value
+  if (!t || selectedSourceId.value == null || previewMode.value) return
+  const apiTrack = UI_TO_API_TRACK[t.id]
+  if (!apiTrack) return
+  try {
+    const res = await api(
+      `/api/pollinator/training/pool/?track=${apiTrack}&from_model_version_id=${selectedSourceId.value}`,
+    )
+    if (!res.ok) return
+    const pool: BackendPoolResponse = await res.json()
+    t.data_pool = {
+      total_samples: pool.available,
+      new_since_active: pool.new_since_active,
+      by_class: pool.by_class || {},
+      samples: pool.samples,
+    }
+  } catch {
+    // ignore — keep the previously loaded pool
+  }
+}
 
 const splitTotal = computed(() => settings.train_split + settings.val_split + settings.test_split)
 
@@ -1115,8 +1328,8 @@ const canSubmit = computed(() => {
   if (!selectedTrack.value) return false
   if (anyJobActive.value) return false
   if (splitTotal.value !== 100) return false
-  // Incremental retraining requires a source model to continue from.
-  if (selectedTrack.value.active_version_id == null) return false
+  // Incremental retraining requires a base model to continue from.
+  if (selectedSourceId.value == null) return false
   return true
 })
 
@@ -1131,27 +1344,38 @@ const submitBlockReason = computed<string>(() => {
   if (splitTotal.value !== 100) {
     return `Splits sum to ${splitTotal.value}% (must equal 100).`
   }
-  if (selectedTrack.value.active_version_id == null) {
-    return `${selectedTrack.value.label} has no active version to retrain from.`
+  if (selectedSourceId.value == null) {
+    return `${selectedTrack.value.label} has no model version to retrain from.`
   }
   return ''
 })
 
 const totalPoolSamples = computed(() => {
   if (!selectedTrack.value) return 0
-  return selectedTrack.value.data_pool.total_samples + uploadedFiles.value.length
+  const reviewed = selectedTrack.value.data_pool.total_samples
+  if (isDetector.value) return reviewed + (detectorUpload.value.report?.image_count ?? 0)
+  return reviewed + uploadedFiles.value.length
 })
 
 function activeVersion(t: Track): Version | null {
   return t.versions.find((v) => v.is_active) ?? null
 }
-function activeMainMetric(t: Track): number | undefined {
-  const v = activeVersion(t)
+// The version the step-1 card reflects: the base model chosen in step 2 for
+// the selected track, otherwise that track's active version.
+function displayedVersion(t: Track): Version | null {
+  if (t.id === selectedTrackId.value && selectedSourceId.value != null) {
+    const chosen = t.versions.find((v) => v.id === selectedSourceId.value)
+    if (chosen) return chosen
+  }
+  return activeVersion(t)
+}
+function displayedMainMetric(t: Track): number | undefined {
+  const v = displayedVersion(t)
   if (!v) return undefined
   return v.metrics[t.metric_label] ?? Object.values(v.metrics)[0]
 }
-function formatMetric(value: number | undefined): string {
-  if (value === undefined) return '—'
+function formatMetric(value: unknown): string {
+  if (typeof value !== 'number' || Number.isNaN(value)) return '—'
   return value.toFixed(2)
 }
 function classRows(t: Track) {
@@ -1418,6 +1642,7 @@ function formatFileSize(bytes: number): string {
 function openReviewDrawer() {
   if (!selectedTrack.value) return
   drawerFilter.value = 'all'
+  drawerPage.value = 1
   reviewDrawerOpen.value = true
 }
 
@@ -1466,6 +1691,24 @@ const drawerIncludedCount = computed(() => {
 const drawerVisibleCount = computed(() =>
   drawerIsDetector.value ? detectorTableRows.value.length : drawerThumbnails.value.length,
 )
+
+const DRAWER_PAGE_SIZE = 100
+const drawerPage = ref(1)
+const drawerTotalPages = computed(() =>
+  Math.max(1, Math.ceil(drawerVisibleCount.value / DRAWER_PAGE_SIZE)),
+)
+const pagedDetectorRows = computed<PoolSample[]>(() => {
+  const start = (drawerPage.value - 1) * DRAWER_PAGE_SIZE
+  return detectorTableRows.value.slice(start, start + DRAWER_PAGE_SIZE)
+})
+const pagedThumbnails = computed<DrawerThumbnail[]>(() => {
+  const start = (drawerPage.value - 1) * DRAWER_PAGE_SIZE
+  return drawerThumbnails.value.slice(start, start + DRAWER_PAGE_SIZE)
+})
+// Reset to page 1 whenever the visible set changes (filter switch, reopen).
+watch(drawerFilter, () => {
+  drawerPage.value = 1
+})
 
 const drawerClasses = computed(() => {
   if (!selectedTrack.value) return [{ value: 'all', label: 'All' }]
@@ -1548,8 +1791,8 @@ async function startTraining() {
     formMessage.value = `Unknown track: ${t.id}`
     return
   }
-  if (t.active_version_id == null) {
-    formMessage.value = `${t.label} has no active version to retrain from.`
+  if (selectedSourceId.value == null) {
+    formMessage.value = `${t.label} has no model version to retrain from.`
     return
   }
 
@@ -1561,7 +1804,7 @@ async function startTraining() {
         name: `${t.id} retrain (${new Date().toISOString().slice(0, 10)})`,
         config: {
           track: apiTrack,
-          from_model_version_id: t.active_version_id,
+          from_model_version_id: selectedSourceId.value,
           epochs: settings.epochs,
           train_split: settings.train_split,
           val_split: settings.val_split,
@@ -1569,6 +1812,10 @@ async function startTraining() {
           stratified: settings.stratified,
           ...(trackHasClassFilter.value ? { class_filter: Array.from(classFilter) } : {}),
           ...(trackHasImgSize.value ? { img_size: imgSize.value } : {}),
+          ...(isDetector.value && detectorUpload.value.token
+            ? { uploaded_detector_token: detectorUpload.value.token }
+            : {}),
+          ...(modelName.value.trim() ? { version_name: modelName.value.trim() } : {}),
           ...(t.data_pool.samples && excludedSampleIds.size > 0
             ? { excluded_sample_ids: Array.from(excludedSampleIds) }
             : {}),

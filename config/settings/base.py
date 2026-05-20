@@ -20,7 +20,7 @@ sys.path.insert(0, str(BASE_DIR / 'ml-pipelines'))
 # Configurable values — override via env vars or per-environment settings
 # ---------------------------------------------------------------------------
 
-JWT_ACCESS_LIFETIME_MINUTES = int(os.environ.get('JWT_ACCESS_LIFETIME_MINUTES', 30))
+JWT_ACCESS_LIFETIME_MINUTES = int(os.environ.get('JWT_ACCESS_LIFETIME_MINUTES', 720))
 JWT_REFRESH_LIFETIME_DAYS = int(os.environ.get('JWT_REFRESH_LIFETIME_DAYS', 7))
 JWT_ROTATE_REFRESH = os.environ.get('JWT_ROTATE_REFRESH', 'true').lower() == 'true'
 
