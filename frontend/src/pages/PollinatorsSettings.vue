@@ -42,38 +42,13 @@
         </div>
       </section>
 
-      <!-- Export auto-select -->
-      <section class="space-y-3">
-        <header>
-          <h2 class="text-base font-semibold">Auto-select for export</h2>
-          <p class="text-sm text-muted-foreground">
-            When on, confirmed detections that pass the YOLO and Group thresholds get a blue ring on
-            the export page to mark them as auto-picked. Their export inclusion still matches
-            whatever the reviewer has explicitly toggled; this is a visual cue, not a commit.
-          </p>
-          <p class="text-sm text-muted-foreground mt-1">
-            The threshold values are set on the Review page (under the source image) — the same
-            sliders that filter the visible grid also drive this auto-select indicator.
-          </p>
-        </header>
-
-        <label class="inline-flex items-center gap-2 text-sm cursor-pointer">
-          <input
-            type="checkbox"
-            :checked="settings.exportAutoSelect"
-            @change="settings.setExportAutoSelect(($event.target as HTMLInputElement).checked)"
-          />
-          <span>Enable auto-select indicator on export</span>
-        </label>
-      </section>
-
       <!-- Reset -->
       <section class="pt-4 border-t border-border">
         <button
           class="px-3 py-1.5 rounded-md text-sm font-medium border border-border hover:bg-muted"
-          @click="settings.reset()"
+          @click="settings.resetLayout()"
         >
-          Reset to defaults
+          Reset layout to default
         </button>
       </section>
     </div>

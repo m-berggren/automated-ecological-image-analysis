@@ -62,14 +62,19 @@
             </span>
           </header>
 
-          <table class="w-full text-sm">
+          <!-- table-fixed so column widths come from the header, not cell
+               content: the metric column no longer shifts when the artifacts
+               panel expands, and every track's table lines up identically. -->
+          <table class="w-full text-sm table-fixed">
             <thead class="text-xs text-muted-foreground bg-muted/30">
               <tr>
-                <th class="text-left font-medium px-5 py-2 w-10">Default</th>
+                <th class="text-left font-medium px-5 py-2 w-16">Default</th>
                 <th class="text-left font-medium px-3 py-2">Name</th>
-                <th class="text-left font-medium px-3 py-2">{{ track.metric_label }}</th>
-                <th class="text-left font-medium px-3 py-2">Trained</th>
-                <th class="px-3 py-2 w-10"></th>
+                <th class="text-right font-medium px-3 py-2 w-24">{{ track.metric_label }}</th>
+                <th class="text-right font-medium px-3 py-2 w-20">Samples</th>
+                <th class="text-right font-medium px-3 py-2 w-24">Duration</th>
+                <th class="text-left font-medium px-3 py-2 w-28">Trained</th>
+                <th class="px-3 py-2 w-12"></th>
               </tr>
             </thead>
             <tbody>
@@ -89,18 +94,56 @@
                     />
                   </td>
                   <td class="px-3 py-3 font-medium">
-                    {{ v.version_name }}
-                    <span
-                      v-if="v.is_active"
-                      class="ml-2 text-xs px-2 py-0.5 rounded-full bg-green-300 text-green-900 font-medium"
-                    >
-                      active
-                    </span>
+                    <template v-if="renamingId === v.id">
+                      <input
+                        v-model="renameValue"
+                        class="border border-border rounded px-2 py-1 text-sm w-48"
+                        :disabled="renameSaving"
+                        @keyup.enter="saveRename(v)"
+                        @keyup.esc="cancelRename"
+                        @click.stop
+                      />
+                      <button
+                        class="ml-2 text-xs text-primary hover:underline"
+                        @click.stop="saveRename(v)"
+                      >
+                        Save
+                      </button>
+                      <button
+                        class="ml-2 text-xs text-muted-foreground hover:underline"
+                        @click.stop="cancelRename"
+                      >
+                        Cancel
+                      </button>
+                    </template>
+                    <template v-else>
+                      <span>{{ v.version_name }}</span>
+                      <button
+                        v-if="canDeleteModels"
+                        class="ml-2 text-muted-foreground hover:text-primary align-middle"
+                        :title="`Rename ${v.version_name}`"
+                        @click.stop="startRename(v)"
+                      >
+                        <Pencil class="w-3.5 h-3.5 inline" />
+                      </button>
+                      <span
+                        v-if="v.is_active"
+                        class="ml-2 text-xs px-2 py-0.5 rounded-full bg-green-300 text-green-900 font-medium"
+                      >
+                        active
+                      </span>
+                    </template>
                   </td>
-                  <td class="px-3 py-3 font-mono text-xs">
+                  <td class="px-3 py-3 text-right font-mono text-xs">
                     {{ formatMetric(mainMetric(v, track.metric_label)) }}
                   </td>
-                  <td class="px-3 py-3 text-xs text-muted-foreground">
+                  <td class="px-3 py-3 text-right font-mono text-xs text-muted-foreground">
+                    {{ v.sample_count ? v.sample_count.toLocaleString() : '—' }}
+                  </td>
+                  <td class="px-3 py-3 text-right font-mono text-xs text-muted-foreground">
+                    {{ formatDuration(v.training_duration_seconds) }}
+                  </td>
+                  <td class="px-3 py-3 text-xs text-muted-foreground truncate">
                     {{ formatRelative(v.trained_at) }}
                   </td>
                   <td class="px-3 py-3 text-right text-muted-foreground">
@@ -124,9 +167,9 @@
                     </div>
                   </td>
                 </tr>
-                <tr v-if="expandedIds.has(v.id)" class="border-t border-border bg-muted/10">
-                  <td></td>
-                  <td colspan="4" class="px-3 py-4">
+                <tr v-if="expandedIds.has(v.id)" class="border-t border-border bg-muted/40">
+                  <td class="bg-muted/40"></td>
+                  <td colspan="6" class="px-3 py-4">
                     <div class="grid grid-cols-2 gap-x-8 gap-y-3 max-w-3xl">
                       <div>
                         <div
@@ -157,7 +200,7 @@
                     </div>
                     <div v-if="v.artifacts.length > 0" class="mt-4 pt-3 border-t border-border">
                       <button
-                        class="flex items-center gap-1.5 text-[11px] font-semibold uppercase tracking-wider text-muted-foreground hover:text-foreground"
+                        class="flex w-full items-center gap-1.5 text-left text-[11px] font-semibold uppercase tracking-wider text-muted-foreground hover:text-foreground"
                         @click="toggleArtifacts(v.id)"
                       >
                         <span>{{ expandedArtifactIds.has(v.id) ? '▾' : '▸' }}</span>
@@ -289,7 +332,20 @@
               :tabs="modelUploadTabs"
               :has-files="uploadHasFiles"
               @select="onModelUploadSelect"
-            />
+            >
+              <!-- Info icon to the right of the tabs, only for folder mode. -->
+              <template #tabs-after>
+                <InfoPopover v-if="uploadMode === 'folder'">
+                  <div class="font-medium mb-1">Expected folder layout</div>
+                  <pre class="whitespace-pre text-[11px] leading-snug overflow-x-auto">{{
+                    uploadStructure
+                  }}</pre>
+                  <div class="mt-1.5 text-muted-foreground">
+                    Recognised files are ingested; anything else is ignored.
+                  </div>
+                </InfoPopover>
+              </template>
+            </UploadDropZone>
             <p
               v-if="uploadMode === 'file' && uploadFile"
               class="mt-2 text-[11px] text-muted-foreground font-mono"
@@ -310,7 +366,7 @@
                   {{ folderPreview.weightsLabel }}
                 </span>
                 <span v-else class="text-red-600">
-                  not found (need weights/best.pt or weights/last.pt)
+                  not found (need best.pt/.pth or last.pt/.pth, ideally under weights/)
                 </span>
               </div>
               <div v-if="folderPreview.recognised.length">
@@ -357,8 +413,9 @@
 import { computed, onMounted, ref } from 'vue'
 import { useRoute } from 'vue-router'
 import PageHeader from '@/components/PageHeader.vue'
+import InfoPopover from '@/components/InfoPopover.vue'
 import UploadDropZone, { type UploadTab } from '@/components/UploadDropZone.vue'
-import { Trash2 } from 'lucide-vue-next'
+import { Trash2, Pencil } from 'lucide-vue-next'
 import { api } from '@/api'
 import { confirm, alert } from '@/lib/confirm'
 import { useAuthStore } from '@/stores/auth'
@@ -488,10 +545,47 @@ const modelUploadTabs: UploadTab[] = [
     key: 'folder',
     label: 'Training run folder',
     mode: 'folder',
-    placeholder: 'Drop an Ultralytics run folder or click to browse',
-    helper: 'Server takes weights/best.pt and ingests recognised additional files.',
+    placeholder: 'Drop a training run folder or click to browse',
+    helper: 'See the ⓘ next to "Source" for the exact folder layout.',
   },
 ]
+
+// Expected upload layout per kind, shown in the tabs info popover. The
+// pipelines emit different files (see below), so the tree switches on kind.
+// YOLO is the Ultralytics run dir; the classifier trainers write only the
+// checkpoint + a results.json (no plots), with arch-specific filenames.
+const UPLOAD_STRUCTURE: Record<string, string> = {
+  detector: [
+    'run/                       (Ultralytics output)',
+    '├─ weights/',
+    '│  └─ best.pt              ← required (or last.pt)',
+    '├─ results.csv             ← metrics (P/R/mAP)',
+    '├─ results.png             ← training curves',
+    '├─ confusion_matrix.png',
+    '├─ PR_curve.png / F1_curve.png / …',
+    '├─ args.yaml               ← hyperparameters',
+    '└─ val_batch*.jpg          ← sample predictions',
+  ].join('\n'),
+  binary_classifier: [
+    'run/',
+    '├─ <arch>_binary_best.pth      ← required weights',
+    '└─ <arch>_binary_results.json  ← metrics',
+    '',
+    '<arch> = efficientnet | insectnet.',
+    'The trainer emits no plots.',
+  ].join('\n'),
+  group_classifier: [
+    'run/',
+    '├─ group_<arch>_best.pth       ← required weights',
+    '└─ group_<arch>_results.json   ← metrics',
+    '',
+    '<arch> = efficientnet | insectnet.',
+    'The trainer emits no plots.',
+  ].join('\n'),
+}
+const uploadStructure = computed(
+  () => UPLOAD_STRUCTURE[uploadKind.value] ?? UPLOAD_STRUCTURE.detector,
+)
 
 const uploadHasFiles = computed(() =>
   uploadMode.value === 'file' ? !!uploadFile.value : uploadFolderFiles.value.length > 0,
@@ -549,6 +643,18 @@ interface FolderPreview {
   skipped: number
 }
 
+// Rank candidate weight files: best > last, and a weights/ subfolder is
+// preferred but not required. Matched by suffix so the classifier filenames
+// (efficientnet_binary_best.pth, group_insectnet_best.pth) count too, as well
+// as Ultralytics' weights/best.pt. Accepts .pt and .pth. 99 = not a weight.
+function weightRank(parent: string, tail: string): number {
+  const lower = tail.toLowerCase()
+  const isBest = lower.endsWith('best.pt') || lower.endsWith('best.pth')
+  const isLast = lower.endsWith('last.pt') || lower.endsWith('last.pth')
+  if (!isBest && !isLast) return 99
+  return (parent === 'weights' ? 0 : 2) + (isBest ? 0 : 1)
+}
+
 const folderPreview = computed<FolderPreview>(() => {
   let weights: File | null = null
   let weightsRank = 99
@@ -557,16 +663,15 @@ const folderPreview = computed<FolderPreview>(() => {
   for (const f of uploadFolderFiles.value) {
     const rel = (f as File & { webkitRelativePath?: string }).webkitRelativePath || f.name
     const tail = basename(rel)
-    // weights/best.pt outranks weights/last.pt; the segment match is on the
-    // immediate parent so a stray best.pt elsewhere in the tree is ignored.
     const segs = rel.split('/')
     const parent = segs.length >= 2 ? segs[segs.length - 2] : ''
-    if (parent === 'weights' && tail === 'best.pt' && weightsRank > 0) {
-      weights = f
-      weightsRank = 0
-    } else if (parent === 'weights' && tail === 'last.pt' && weightsRank > 1) {
-      weights = f
-      weightsRank = 1
+    const rank = weightRank(parent, tail)
+    if (rank < 99) {
+      // A weight file. Keep the best-ranked one; don't count others as skipped.
+      if (rank < weightsRank) {
+        weights = f
+        weightsRank = rank
+      }
     } else if (isRecognisedArtifact(tail)) {
       recognised.push(tail)
     } else {
@@ -623,7 +728,8 @@ async function submitUpload() {
       return
     }
     if (!folderPreview.value.weightsLabel) {
-      uploadError.value = 'No weights/best.pt or weights/last.pt found in the selected folder.'
+      uploadError.value =
+        'No weights file found. Expected best.pt/.pth or last.pt/.pth (ideally under weights/).'
       return
     }
     // Browsers (Firefox at least) strip '/' from FormData filenames as a
@@ -740,8 +846,8 @@ function mainMetric(v: Version, metricLabel: string): number | undefined {
   if (v.metrics[metricLabel] !== undefined) return v.metrics[metricLabel]
   return Object.values(v.metrics)[0]
 }
-function formatMetric(value: number | undefined): string {
-  if (value === undefined) return '—'
+function formatMetric(value: unknown): string {
+  if (typeof value !== 'number' || Number.isNaN(value)) return '—'
   return value.toFixed(2)
 }
 function formatRelative(iso: string): string {
@@ -750,6 +856,59 @@ function formatRelative(iso: string): string {
   if (diff < 3600) return `${Math.round(diff / 60)}m ago`
   if (diff < 86400) return `${Math.round(diff / 3600)}h ago`
   return `${Math.round(diff / 86400)}d ago`
+}
+
+function formatDuration(seconds: number): string {
+  if (!seconds || seconds <= 0) return '—'
+  const m = Math.floor(seconds / 60)
+  const s = Math.round(seconds % 60)
+  if (m === 0) return `${s}s`
+  if (m < 60) return s ? `${m}m ${s}s` : `${m}m`
+  return `${Math.floor(m / 60)}h ${m % 60}m`
+}
+
+const renamingId = ref<number | null>(null)
+const renameValue = ref('')
+const renameSaving = ref(false)
+
+function startRename(v: Version) {
+  renamingId.value = v.id
+  renameValue.value = v.version_name
+}
+
+function cancelRename() {
+  renamingId.value = null
+  renameValue.value = ''
+}
+
+async function saveRename(v: Version) {
+  const name = renameValue.value.trim()
+  if (!name || name === v.version_name) {
+    cancelRename()
+    return
+  }
+  if (previewMode.value) {
+    v.version_name = name
+    cancelRename()
+    return
+  }
+  renameSaving.value = true
+  try {
+    const res = await api(`/api/analysis/models/${v.id}/`, {
+      method: 'PATCH',
+      body: JSON.stringify({ version_name: name }),
+    })
+    if (!res.ok) {
+      const data = await res.json().catch(() => ({}))
+      throw new Error(data.version_name?.[0] || data.detail || `HTTP ${res.status}`)
+    }
+    v.version_name = name
+    cancelRename()
+  } catch (e) {
+    await alert({ title: 'Rename failed', message: e instanceof Error ? e.message : String(e) })
+  } finally {
+    renameSaving.value = false
+  }
 }
 
 async function setDefault(track: Track, v: Version) {
@@ -821,6 +980,10 @@ function formatParam(value: unknown): string {
     if (value < 0.01 && value > 0) return value.toExponential(1)
     return String(value)
   }
+  if (Array.isArray(value)) return value.join(', ')
+  // Nested objects (e.g. tile_config) would stringify to "[object Object]";
+  // render compact JSON so the values are actually readable.
+  if (value !== null && typeof value === 'object') return JSON.stringify(value)
   return String(value)
 }
 </script>

@@ -7,7 +7,9 @@
     <ImageThumbnailRail
       :items="railItems"
       :active-key="activeFilename"
+      deletable
       @update:active-key="selectByFilename"
+      @delete="(fn) => emit('delete-image', fn)"
     />
 
     <!-- Collapse handle when the crops column is hidden. -->
@@ -30,18 +32,40 @@
           v-if="activeImage"
           class="flex-1 flex flex-col rounded-xl border border-border bg-surface overflow-hidden shadow-sm min-h-0"
         >
-          <header
-            class="shrink-0 px-4 py-2 border-b border-border flex items-baseline gap-3 text-sm"
-          >
+          <header class="shrink-0 px-4 py-2 border-b border-border flex items-center gap-3 text-sm">
             <h2 class="font-mono">{{ activeImage.filename }}</h2>
             <span class="text-xs text-muted-foreground">
               {{ activeImage.detections.length }} crop{{
                 activeImage.detections.length === 1 ? '' : 's'
               }}
             </span>
-            <span v-if="isZoomed" class="ml-auto text-[11px] text-muted-foreground font-mono">
+            <span v-if="isZoomed" class="text-[11px] text-muted-foreground font-mono">
               {{ Math.round(zoom.scale * 100) }}%
             </span>
+            <!-- Per-image training-exclude toggle. Set when the image has
+                 more real insects than boxes, so YOLO shouldn't train on it. -->
+            <div class="ml-auto inline-flex items-center gap-1 shrink-0">
+              <label
+                class="inline-flex items-center gap-1.5 text-xs cursor-pointer"
+                :class="
+                  activeImageExcludeTraining ? 'text-red-600 font-medium' : 'text-muted-foreground'
+                "
+              >
+                <input
+                  type="checkbox"
+                  class="w-3.5 h-3.5 accent-red-600"
+                  :checked="activeImageExcludeTraining"
+                  @change="emit('toggle-training-exclude', activeImage.filename)"
+                />
+                <span>Exclude from YOLO training</span>
+              </label>
+              <InfoPopover>
+                Mark this image as unfit for YOLO detector training. Use it when the photo has more
+                real insects than annotated boxes (e.g. 5 flies, 1 box) — training on it would teach
+                the detector that the un-boxed insects are background. The training-set builder
+                skips flagged images. Does not affect review or export.
+              </InfoPopover>
+            </div>
           </header>
           <div
             class="flex-1 min-h-0 relative bg-background"
@@ -83,6 +107,7 @@
                   vector-effect="non-scaling-stroke"
                   class="cursor-pointer"
                   @mousedown.stop="onBboxMouseDown(d.id, $event)"
+                  @click="!$event.altKey && emit('update:selectedId', d.id)"
                   @contextmenu.prevent
                 />
                 <rect
@@ -226,6 +251,7 @@ import { computed, onBeforeUnmount, ref, watch } from 'vue'
 import { ChevronsLeft, ChevronsRight, ZoomOut } from 'lucide-vue-next'
 import type { Detection, PollinatorClass } from '@/types/pollinator'
 import Tooltip from '@/components/Tooltip.vue'
+import InfoPopover from '@/components/InfoPopover.vue'
 import ImageThumbnailRail, { type RailItem } from '@/components/pollinator/ImageThumbnailRail.vue'
 
 const props = defineProps<{
@@ -239,6 +265,12 @@ const emit = defineEmits<{
   // Fires on drag-select mouseup with the detection ids whose bbox center
   // falls inside the dragged rectangle. Empty array clears the bulk.
   (e: 'drag-select', ids: number[]): void
+  // Fires when the user clicks a rail tile's delete button. Carries the
+  // image filename; the parent rejects that image's unreviewed crops.
+  (e: 'delete-image', filename: string): void
+  // Fires when the active image's "exclude from YOLO training" toggle
+  // flips. Carries the image filename; the parent persists + propagates.
+  (e: 'toggle-training-exclude', filename: string): void
 }>()
 
 interface ImageGroup {
@@ -313,6 +345,12 @@ const activeImage = computed<ImageGroup | null>(() => {
   if (!activeFilename.value) return null
   return images.value.find((i) => i.filename === activeFilename.value) ?? null
 })
+
+// All detections of an image carry the same per-image flag; read it off
+// the first one.
+const activeImageExcludeTraining = computed(
+  () => activeImage.value?.detections[0]?.exclude_from_training ?? false,
+)
 
 function selectImage(img: ImageGroup) {
   manualFilename.value = img.filename
@@ -496,8 +534,32 @@ function eventToViewBox(e: MouseEvent): { x: number; y: number } | null {
   return { x: local.x, y: local.y }
 }
 
+// Plain wheel flips through the source images in the rail; Alt+wheel zooms
+// the current image. deltaY accumulates so trackpads (which fire many tiny
+// events) advance one image per gesture rather than racing through dozens.
+let wheelAccum = 0
+const WHEEL_STEP = 60
+
+function stepImage(dir: 1 | -1) {
+  const list = images.value
+  if (!list.length) return
+  const idx = list.findIndex((i) => i.filename === activeFilename.value)
+  const next = (idx < 0 ? 0 : idx) + dir
+  if (next < 0 || next >= list.length) return
+  selectImage(list[next])
+}
+
 function onImageWheel(e: WheelEvent) {
-  if (!e.altKey) return
+  if (!e.altKey) {
+    // Step through rail images.
+    if (!images.value.length) return
+    e.preventDefault()
+    wheelAccum += e.deltaY
+    if (Math.abs(wheelAccum) < WHEEL_STEP) return
+    stepImage(wheelAccum > 0 ? 1 : -1)
+    wheelAccum = 0
+    return
+  }
   if (!activeImage.value?.naturalW) return
   e.preventDefault()
   const factor = e.deltaY < 0 ? 1.15 : 1 / 1.15

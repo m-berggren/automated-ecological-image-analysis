@@ -57,11 +57,7 @@
            Below @3xl only filter + buttons remain. 'Other' is excluded
            from the export entirely; it's a training-only label. -->
       <div class="hidden @3xl:flex items-center gap-3 whitespace-nowrap">
-        <span
-          v-for="row in classCounts"
-          :key="row.key"
-          class="inline-flex items-center gap-1.5"
-        >
+        <span v-for="row in classCounts" :key="row.key" class="inline-flex items-center gap-1.5">
           <span class="w-2 h-2 rounded-full" :style="{ backgroundColor: row.color }" />
           <span class="font-mono">{{ row.count }}</span>
           <span class="text-muted-foreground">{{ row.abbr }}</span>
@@ -260,12 +256,14 @@ import PollinatorsStepper from '@/components/PollinatorsStepper.vue'
 import ROIOverlay from '@/components/ROIOverlay.vue'
 import CsvExportDialog, { type CsvExportMode } from '@/components/CsvExportDialog.vue'
 import { api } from '@/api'
-import type { BBox, Detection, PollinatorClass } from '@/types/pollinator'
+import {
+  effectiveReviewSettings,
+  type BBox,
+  type Detection,
+  type PollinatorClass,
+} from '@/types/pollinator'
 import { useRunDetections } from '@/composables/useRunDetections'
-import { usePollinatorSettingsStore } from '@/stores/pollinatorSettings'
 import ImageThumbnailRail, { type RailItem } from '@/components/pollinator/ImageThumbnailRail.vue'
-
-const settings = usePollinatorSettingsStore()
 
 const CLASS_COLORS: Record<PollinatorClass, string> = {
   fly: '#6b9bd2',
@@ -396,19 +394,16 @@ const totalExcluded = computed(
 )
 
 // "Auto-accepted" mirrors the Review-page blue cue: a detection where
-// both YOLO and the group classifier (InsectNet) cleared the user's
-// thresholds from PollinatorsSettings. The cue is suppressed entirely
-// when the user has turned exportAutoSelect off, matching Review.
+// both YOLO and the group classifier cleared the run's thresholds. The
+// toggle and thresholds are per-run (run.review_settings), defaulting to
+// the run's config confidences via effectiveReviewSettings. Suppressed
+// entirely when the run's auto-select is off.
 function isAutoAccepted(d: Detection): boolean {
-  if (!settings.exportAutoSelect) return false
+  const rs = effectiveReviewSettings(run.value)
+  if (!rs.autoSelect) return false
   const y = d.yolo_confidence
   const g = d.insectnet_confidence
-  return (
-    y != null &&
-    g != null &&
-    y >= settings.exportThresholds.yolo &&
-    g >= settings.exportThresholds.group
-  )
+  return y != null && g != null && y >= rs.yolo && g >= rs.group
 }
 
 function hasExcluded(card: ImageCard): boolean {
@@ -717,10 +712,16 @@ async function downloadExport(kind: DownloadKind, mode?: 'per_image' | 'per_dete
       return
     }
     const blob = await res.blob()
+    // Name downloads after the run, not its id. CSV suffix tracks the mode:
+    // per_image → _images, per_detection → _detections.
+    const base = (run.value.name || `run-${run.value.id}`)
+      .replace(/[^\w.-]+/g, '_')
+      .replace(/^_+|_+$/g, '')
+    const csvSuffix = mode === 'per_image' ? 'images' : 'detections'
     const filename = {
-      csv: `run-${run.value.id}-images.csv`,
-      crops: `run-${run.value.id}-crops.zip`,
-      annotated: `run-${run.value.id}-annotated.zip`,
+      csv: `${base}_${csvSuffix}.csv`,
+      crops: `${base}_crops.zip`,
+      annotated: `${base}_annotated.zip`,
     }[kind]
     const url = URL.createObjectURL(blob)
     const a = document.createElement('a')

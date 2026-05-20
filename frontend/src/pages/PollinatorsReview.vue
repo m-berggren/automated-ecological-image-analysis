@@ -64,6 +64,8 @@
       :bulk-ids="bulkIds"
       @update:selected-id="selectedId = $event"
       @drag-select="onImageFirstDragSelect"
+      @delete-image="onDeleteImage"
+      @toggle-training-exclude="onToggleTrainingExclude"
     >
       <template #below>
         <!-- Four side-by-side containers under the image. Fixed height so
@@ -99,9 +101,14 @@
           >
             <template v-if="!bulkMode && selected">
               <div
-                class="text-[10px] xl:text-[11px] font-semibold uppercase tracking-wider text-muted-foreground"
+                class="flex items-center gap-1 text-[10px] xl:text-[11px] font-semibold uppercase tracking-wider text-muted-foreground"
               >
-                Predictions
+                <span>Predictions</span>
+                <InfoPopover>
+                  The model calls for the focused crop: the YOLO detector and the 4-group classifier
+                  (fly / bumblebee / butterfly / other), each with its confidence. These are model
+                  outputs, not your decision — confirm or correct them with the Label controls.
+                </InfoPopover>
               </div>
               <div class="space-y-0.5 text-xs font-mono">
                 <div class="flex items-center gap-2">
@@ -140,19 +147,19 @@
 
           <!-- Thresholds -->
           <div class="px-4 py-2 space-y-1 min-h-0 overflow-auto">
-            <Tooltip
-              text="Crops below either threshold are hidden from view. These same values also drive the auto-select indicator on the export page."
+            <div
+              class="flex items-center gap-1 text-[10px] xl:text-[11px] font-semibold uppercase tracking-wider text-muted-foreground"
             >
-              <div
-                class="text-[10px] xl:text-[11px] font-semibold uppercase tracking-wider text-muted-foreground cursor-help"
-              >
-                Thresholds
-              </div>
-            </Tooltip>
+              <span>Thresholds</span>
+              <InfoPopover>
+                Hide crops below either confidence from the review grid. The same values drive the
+                "Suggest exports" blue ring on the Export page. Crops with no score in a branch pass
+                that branch's filter (e.g. a preprocessing-only crop has no YOLO score). Stored per
+                run.
+              </InfoPopover>
+            </div>
             <div class="grid grid-cols-[auto_1fr_auto] items-center gap-x-2 gap-y-1 text-xs">
-              <Tooltip text="Minimum YOLO detector confidence. Crops without a YOLO score pass.">
-                <label for="img-yolo-min" class="text-muted-foreground cursor-help">YOLO ≥</label>
-              </Tooltip>
+              <label for="img-yolo-min" class="text-muted-foreground">YOLO ≥</label>
               <input
                 id="img-yolo-min"
                 type="range"
@@ -163,11 +170,7 @@
                 class="w-full accent-primary"
               />
               <span class="font-mono w-10 text-right">{{ yoloMinConf.toFixed(2) }}</span>
-              <Tooltip
-                text="Minimum 4-group classifier confidence (fly / bumblebee / butterfly / other). Crops without a group score pass."
-              >
-                <label for="img-group-min" class="text-muted-foreground cursor-help">Group ≥</label>
-              </Tooltip>
+              <label for="img-group-min" class="text-muted-foreground">Group ≥</label>
               <input
                 id="img-group-min"
                 type="range"
@@ -179,14 +182,58 @@
               />
               <span class="font-mono w-10 text-right">{{ groupMinConf.toFixed(2) }}</span>
             </div>
+
+            <!-- Run-scoped controls live with the thresholds they relate to. -->
+            <div class="flex items-center gap-1.5 pt-15 text-xs">
+              <button
+                role="switch"
+                :aria-checked="exportAutoSelect"
+                :disabled="!run"
+                class="inline-flex items-center gap-1.5 cursor-pointer focus:outline-none disabled:opacity-50 disabled:cursor-not-allowed"
+                @click="toggleAutoSelect"
+              >
+                <span
+                  class="relative inline-block w-8 h-4 rounded-full transition-colors shrink-0"
+                  :class="exportAutoSelect ? 'bg-primary' : 'bg-muted-foreground/30'"
+                >
+                  <span
+                    class="absolute top-0.5 left-0.5 w-3 h-3 rounded-full bg-white shadow transition-transform"
+                    :class="exportAutoSelect ? 'translate-x-4' : ''"
+                  />
+                </span>
+                <span class="font-medium">Suggest exports</span>
+              </button>
+              <InfoPopover>
+                When on, accepted crops that clear both thresholds get a blue ring on the Export
+                page marking them as auto-picked. It's a visual cue — they were already in the CSV
+                because they're accepted; this just highlights the high-confidence ones.
+              </InfoPopover>
+              <Tooltip
+                class="ml-auto"
+                text="Set both thresholds back to the confidence values this run was configured with on the upload page."
+              >
+                <button
+                  class="text-muted-foreground hover:text-foreground underline-offset-2 hover:underline disabled:opacity-50 disabled:cursor-not-allowed disabled:no-underline"
+                  :disabled="!run"
+                  @click="resetThresholdsToRunConfig"
+                >
+                  Use run's thresholds
+                </button>
+              </Tooltip>
+            </div>
           </div>
 
           <!-- Labels (right) -->
           <div class="px-4 py-2 flex flex-col gap-1 min-h-0 overflow-auto">
             <div
-              class="text-[10px] xl:text-[11px] font-semibold uppercase tracking-wider text-muted-foreground"
+              class="flex items-center gap-1 text-[10px] xl:text-[11px] font-semibold uppercase tracking-wider text-muted-foreground"
             >
-              Label
+              <span>Label</span>
+              <InfoPopover>
+                Your decision for the selected crop (or the whole bulk selection). Pick a class to
+                confirm/correct it, or Background to reject. Keyboard: 1-4 for classes, x to reject,
+                u for unsure, ⏎ for the suggested class.
+              </InfoPopover>
               <span
                 v-if="bulkMode"
                 class="ml-1 normal-case tracking-normal text-muted-foreground/80"
@@ -876,10 +923,17 @@ import { RouterLink, useRoute } from 'vue-router'
 import { ZoomIn } from 'lucide-vue-next'
 import PageHeader from '@/components/PageHeader.vue'
 import Tooltip from '@/components/Tooltip.vue'
+import InfoPopover from '@/components/InfoPopover.vue'
 import PollinatorsStepper from '@/components/PollinatorsStepper.vue'
 import ROIOverlay from '@/components/ROIOverlay.vue'
 import { api } from '@/api'
-import type { Detection, PollinatorClass, ReviewerStatus } from '@/types/pollinator'
+import {
+  effectiveReviewSettings,
+  type Detection,
+  type PollinatorClass,
+  type ReviewerStatus,
+  type ReviewSettings,
+} from '@/types/pollinator'
 import { useRunDetections } from '@/composables/useRunDetections'
 import { usePollinatorSettingsStore } from '@/stores/pollinatorSettings'
 import ReviewImageFirst from '@/components/pollinator/ReviewImageFirst.vue'
@@ -919,28 +973,78 @@ const selectedId = ref<number | null>(null)
 const statusFilter = ref<StatusFilter>('pending')
 type ClassFilter = PollinatorClass | 'background' | 'all'
 const classFilter = ref<ClassFilter>('all')
-// Per-branch confidence sliders. Bound to the pollinator-settings store
-// so the values are also what drives the export auto-select indicator —
-// one slider, two effects: filter the visible grid AND mark crops as
-// auto-picked on the export page. Detections with no score in a branch
-// pass that branch's filter so preprocessing-only crops aren't dropped
-// by the YOLO slider, etc.
+// Per-run reviewer settings (thresholds + auto-select). Stored in the DB
+// on the run, defaulting to the run's own config confidences via
+// effectiveReviewSettings — so a run's sliders start where it was
+// processed, and any change is remembered per-run. The thresholds drive
+// BOTH the visible filter here AND the export auto-select indicator.
+//
+// Writes are optimistic + debounced: dragging a slider updates the UI and
+// filtering immediately, but only one PATCH lands ~400ms after the drag
+// settles instead of one per step.
+let reviewSettingsTimer: ReturnType<typeof setTimeout> | null = null
+let pendingReviewSettings: ReviewSettings = {}
+let pendingReviewSettingsRunId: number | null = null
+
+// Send whatever's queued right now and clear the timer. Called both by the
+// debounce and on unmount, so a save can't be lost by navigating away
+// inside the debounce window.
+function flushReviewSettings() {
+  if (reviewSettingsTimer != null) {
+    clearTimeout(reviewSettingsTimer)
+    reviewSettingsTimer = null
+  }
+  if (pendingReviewSettingsRunId == null || Object.keys(pendingReviewSettings).length === 0) return
+  const id = pendingReviewSettingsRunId
+  const body = pendingReviewSettings
+  pendingReviewSettings = {}
+  pendingReviewSettingsRunId = null
+  void api(`/api/analysis/runs/${id}/review-settings/`, {
+    method: 'POST',
+    body: JSON.stringify(body),
+  })
+}
+
+function patchReviewSettings(partial: ReviewSettings) {
+  const r = run.value
+  if (!r) return
+  r.review_settings = { ...(r.review_settings ?? {}), ...partial }
+  pendingReviewSettings = { ...pendingReviewSettings, ...partial }
+  pendingReviewSettingsRunId = r.id
+  if (reviewSettingsTimer != null) clearTimeout(reviewSettingsTimer)
+  reviewSettingsTimer = setTimeout(flushReviewSettings, 400)
+}
+
 const yoloMinConf = computed<number>({
-  get: () => settings.exportThresholds.yolo,
-  set: (v) => settings.setExportThreshold('yolo', v),
+  get: () => effectiveReviewSettings(run.value).yolo,
+  set: (v) => patchReviewSettings({ yolo_threshold: v }),
 })
 // The wire field is `insectnet_confidence`, but the value it carries is
-// the group classifier's top-class probability. Variable name follows the
-// store key for clarity.
+// the group classifier's top-class probability.
 const groupMinConf = computed<number>({
-  get: () => settings.exportThresholds.group,
-  set: (v) => settings.setExportThreshold('group', v),
+  get: () => effectiveReviewSettings(run.value).group,
+  set: (v) => patchReviewSettings({ group_threshold: v }),
 })
+const exportAutoSelect = computed(() => effectiveReviewSettings(run.value).autoSelect)
+function toggleAutoSelect() {
+  patchReviewSettings({ auto_select: !effectiveReviewSettings(run.value).autoSelect })
+}
 
 function passesSliders(d: Detection): boolean {
   const yoloOk = d.yolo_confidence == null || d.yolo_confidence >= yoloMinConf.value
   const groupOk = d.insectnet_confidence == null || d.insectnet_confidence >= groupMinConf.value
   return yoloOk && groupOk
+}
+
+// Reset both sliders to the confidence values THIS run was created with on
+// the upload page (YOLO ← yolo.confidence, Group ← group_classifier
+// .confidence), persisting them as the run's review thresholds.
+function resetThresholdsToRunConfig() {
+  const cfg = run.value?.config
+  patchReviewSettings({
+    yolo_threshold: cfg?.yolo?.confidence ?? 0.5,
+    group_threshold: cfg?.group_classifier?.confidence ?? 0.5,
+  })
 }
 const bulkIds = ref<Set<number>>(new Set())
 const bulkCorrectClass = ref<'' | PollinatorClass>('')
@@ -1229,6 +1333,42 @@ function onImageFirstDragSelect(ids: number[]) {
   if (selectedId.value == null || !bulkIds.value.has(selectedId.value)) {
     selectedId.value = ids[0]
   }
+}
+
+// Rail "delete": reject every still-unreviewed crop in the image as
+// background. Already-decided crops (confirmed/corrected/rejected/unsure)
+// are left untouched, and the source file/image is NOT deleted. Undoable
+// as one Ctrl+Z (pushUndo captures the prior state of every crop touched).
+function onDeleteImage(filename: string) {
+  const ids = detections.value
+    .filter((d) => d.source_image_filename === filename && d.reviewer_status === 'unreviewed')
+    .map((d) => d.id)
+  if (!ids.length) return
+  // If the active selection is one we're about to reject, move it to the
+  // first crop that isn't being deleted (computed before the mutation,
+  // while the list still contains everything).
+  if (selectedId.value != null && ids.includes(selectedId.value)) {
+    const deleted = new Set(ids)
+    const nextOutside = filteredDetections.value.find((d) => !deleted.has(d.id))
+    selectedId.value = nextOutside ? nextOutside.id : null
+  }
+  pushUndo(ids)
+  void submitBulk(ids, 'rejected', null)
+}
+
+// Toggle the per-image "exclude from YOLO training" flag. Optimistically
+// flips it on every detection of that image (they all carry the same
+// per-image value), then persists against the image id.
+function onToggleTrainingExclude(filename: string) {
+  const imgDets = detections.value.filter((d) => d.source_image_filename === filename)
+  const imageId = imgDets[0]?.source_image_id
+  if (imageId == null) return
+  const next = !imgDets[0].exclude_from_training
+  for (const d of imgDets) d.exclude_from_training = next
+  void api(`/api/analysis/images/${imageId}/exclude-training/`, {
+    method: 'POST',
+    body: JSON.stringify({ excluded: next }),
+  })
 }
 
 watch(selectedId, async (id) => {
@@ -1801,6 +1941,63 @@ function clearFailedSave(id: number) {
   failedSaves.value = new Map(failedSaves.value)
 }
 
+// --- Undo -----------------------------------------------------------------
+// Each classify gesture (a single key/click, or one bulk apply) snapshots
+// the prior state of every detection it touches as ONE entry, so a single
+// Ctrl+Z reverts the whole gesture — including a bulk that hit dozens of
+// crops. Capacity-capped so the stack can't grow unbounded on long runs.
+interface UndoItem {
+  id: number
+  status: ReviewerStatus
+  label: PollinatorClass | null
+}
+const undoStack = ref<{ items: UndoItem[] }[]>([])
+const UNDO_LIMIT = 50
+
+function pushUndo(ids: number[]) {
+  const idSet = new Set(ids)
+  const items: UndoItem[] = []
+  for (const d of detections.value) {
+    if (idSet.has(d.id)) {
+      items.push({ id: d.id, status: d.reviewer_status, label: d.reviewer_label })
+    }
+  }
+  if (!items.length) return
+  undoStack.value.push({ items })
+  if (undoStack.value.length > UNDO_LIMIT) undoStack.value.shift()
+}
+
+async function undoLast() {
+  const entry = undoStack.value.pop()
+  if (!entry) return
+  const byId = new Map(entry.items.map((i) => [i.id, i]))
+  // Restore optimistically in the UI.
+  for (const d of detections.value) {
+    const it = byId.get(d.id)
+    if (!it) continue
+    d.reviewer_status = it.status
+    d.reviewer_label = it.label
+    clearFailedSave(d.id)
+  }
+  // Re-select the single reverted crop so the change is visible; leave
+  // selection alone for a bulk revert.
+  if (entry.items.length === 1) selectedId.value = entry.items[0].id
+  // Persist, grouping identical (status, label) into one bulk request.
+  const groups = new Map<
+    string,
+    { status: ReviewerStatus; label: PollinatorClass | null; ids: number[] }
+  >()
+  for (const it of entry.items) {
+    const key = `${it.status}|${it.label ?? ''}`
+    if (!groups.has(key)) groups.set(key, { status: it.status, label: it.label, ids: [] })
+    groups.get(key)!.ids.push(it.id)
+  }
+  for (const g of groups.values()) {
+    if (g.ids.length === 1) await patchDetection(g.ids[0], g.status, g.label)
+    else await postBulkReview(g.ids, g.status, g.label)
+  }
+}
+
 async function applyAction(
   status: ReviewerStatus,
   label: PollinatorClass | null,
@@ -1808,6 +2005,7 @@ async function applyAction(
 ) {
   if (!selected.value) return
   const d = selected.value
+  pushUndo([d.id])
   // If a previous save for this detection already failed, keep its original
   // prev so Dismiss reverts all the way back, not to the last optimistic state.
   const existing = failedSaves.value.get(d.id)
@@ -1911,6 +2109,7 @@ async function submitBulk(ids: number[], status: ReviewerStatus, label: Pollinat
 
 async function applyToBulk(status: ReviewerStatus, label: PollinatorClass | null) {
   const ids = [...bulkIds.value]
+  pushUndo(ids)
   // If the bulk includes the primary selection, advance selectedId off
   // it before the commit. siblingOverlays keeps the selected row's bbox
   // visible even after it's reviewed (intentional, for browsing the
@@ -1986,6 +2185,8 @@ async function bulkConfirm() {
     buckets.get(lbl)!.push(d.id)
   }
   bulkConfirmSkipped.value = skipped
+  // One undo entry for the whole confirm gesture, across every bucket.
+  pushUndo([...buckets.values()].flat())
   // Same advance logic as applyToBulk — see comment there.
   const sel = selected.value
   const advanceTo = sel && bulkIds.value.has(sel.id) ? nextVisibleId(sel.id) : null
@@ -2023,11 +2224,42 @@ function markUnsure(advanceAfter = false) {
 }
 
 function nextVisibleId(currentId: number): number | null {
+  // Image-first navigates purely by spatial order (filteredDetections,
+  // sorted filename → x1 asc → y1 desc → id). It never touches
+  // flatVisible, whose status/class bucketing interleaves images and
+  // would skip whole images on the cross-image step.
+  if (settings.reviewLayout === 'image-first') {
+    const fl = filteredDetections.value
+    const fIdx = fl.findIndex((d) => d.id === currentId)
+    if (fIdx < 0) return null
+    const fn = fl[fIdx].source_image_filename
+    // 1. Finish the current image: forward (left-to-right) first…
+    for (let i = fIdx + 1; i < fl.length; i++) {
+      if (fl[i].source_image_filename === fn) return fl[i].id
+    }
+    // …then wrap backward to mop up any earlier crops skipped in this
+    // image (e.g. the reviewer clicked the right-most one first).
+    for (let i = fIdx - 1; i >= 0; i--) {
+      if (fl[i].source_image_filename === fn) return fl[i].id
+    }
+    // 2. Image cleared: jump to the first (left-most) crop of the next
+    //    image. Since crops are contiguous per filename and x-ascending,
+    //    the first differing filename ahead is that image's left-most.
+    for (let i = fIdx + 1; i < fl.length; i++) {
+      if (fl[i].source_image_filename !== fn) return fl[i].id
+    }
+    // 3. Nothing ahead (finished the last image): fall back to the
+    //    nearest crop in the previous image so selection doesn't dead-end.
+    for (let i = fIdx - 1; i >= 0; i--) {
+      if (fl[i].source_image_filename !== fn) return fl[i].id
+    }
+    return null
+  }
+
+  // Crop-first: unchanged — grouped flatVisible order, forward then back.
   const list = flatVisible.value
   const idx = list.findIndex((d) => d.id === currentId)
   if (idx < 0) return null
-  // Forward if possible; otherwise fall back to the previous tile so a
-  // reject on the last visible item doesn't snap selection to list[0].
   if (idx + 1 < list.length) return list[idx + 1].id
   if (idx > 0) return list[idx - 1].id
   return null
@@ -2055,7 +2287,7 @@ const anchorId = ref<number | null>(null)
 const stableBulkIds = ref<Set<number>>(new Set())
 
 function setShiftRange(fromIdx: number, toIdx: number) {
-  const list = flatVisible.value
+  const list = navList.value
   const [lo, hi] = fromIdx <= toIdx ? [fromIdx, toIdx] : [toIdx, fromIdx]
   const next = new Set(stableBulkIds.value)
   for (let i = lo; i <= hi; i++) next.add(list[i].id)
@@ -2109,8 +2341,18 @@ function navigateImage(direction: 1 | -1) {
   stableBulkIds.value = new Set(bulkIds.value)
 }
 
+// The list left/right arrow nav and shift-range selection walk. Image-first
+// uses spatial order (filteredDetections) so arrows match the crops sidebar
+// and the bbox order on the image; crop-first uses the grouped grid order
+// (flatVisible) so arrows match the rendered tile grid. Both navigate() and
+// setShiftRange() MUST read the same list since navigate computes indices
+// it hands to setShiftRange.
+const navList = computed(() =>
+  settings.reviewLayout === 'image-first' ? filteredDetections.value : flatVisible.value,
+)
+
 function navigate(delta: number, extend: boolean) {
-  const list = flatVisible.value
+  const list = navList.value
   const idx = list.findIndex((d) => d.id === selectedId.value)
   if (idx < 0) return
   const newIdx = Math.max(0, Math.min(list.length - 1, idx + delta))
@@ -2146,14 +2388,23 @@ function onTileClick(d: Detection, e: MouseEvent | KeyboardEvent) {
 }
 
 function onKeydown(e: KeyboardEvent) {
-  if (!selected.value) return
-  if (zoomDialog.value?.open) return
+  // Inputs keep their own typing + native undo.
   if (
     e.target instanceof HTMLElement &&
     ['INPUT', 'SELECT', 'TEXTAREA'].includes(e.target.tagName)
   ) {
     return
   }
+  // Ctrl/Cmd+Z reverts the last classify gesture. Handled before the
+  // `selected` guard because a keyboard action auto-advances off the
+  // crop it changed, so nothing may be selected when the user undoes.
+  if ((e.ctrlKey || e.metaKey) && !e.shiftKey && (e.key === 'z' || e.key === 'Z')) {
+    e.preventDefault()
+    void undoLast()
+    return
+  }
+  if (!selected.value) return
+  if (zoomDialog.value?.open) return
   // Escape clears any bulk selection without losing the currently-focused tile.
   if (e.key === 'Escape' && bulkIds.value.size > 0) {
     clearBulk()
@@ -2233,6 +2484,14 @@ function onKeydown(e: KeyboardEvent) {
       navigate(-1, e.shiftKey)
       e.preventDefault()
       break
+    case 'Delete':
+      // Image-first only: reject the active image's unreviewed crops,
+      // same as the rail's trash button. Undoable via Ctrl+Z.
+      if (settings.reviewLayout === 'image-first' && selected.value) {
+        onDeleteImage(selected.value.source_image_filename)
+        e.preventDefault()
+      }
+      break
   }
 }
 
@@ -2246,5 +2505,8 @@ onUnmounted(() => {
   window.removeEventListener('mouseup', onResizerUp)
   document.body.style.cursor = ''
   document.body.style.userSelect = ''
+  // Persist any threshold/toggle change still sitting in the debounce
+  // window so navigating away can't drop it.
+  flushReviewSettings()
 })
 </script>

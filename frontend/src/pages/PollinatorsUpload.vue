@@ -57,7 +57,7 @@
               </option>
             </select>
           </label>
-          <label class="space-y-1 block">
+          <label class="space-y-1 block w-24">
             <span class="flex items-center gap-1.5 text-xs text-muted-foreground">
               <span>Confidence</span>
               <InfoPopover>
@@ -71,7 +71,7 @@
               min="0"
               max="1"
               step="0.05"
-              class="w-full px-2 py-1.5 rounded border border-border bg-background text-sm font-mono"
+              class="w-full px-2 py-1.5 rounded border border-border bg-background text-sm font-mono text-center"
             />
           </label>
         </div>
@@ -282,17 +282,18 @@
             <input v-model="config.preprocessing.skip_flash" type="checkbox" />
             <span>Skip flash frames</span>
             <InfoPopover>
-              Drop motion candidates from frames where the EXIF flash flag fired. The flash washes
-              out colour and creates spurious motion edges relative to the previous (un-flashed)
-              frame.
+              Skip frames where the EXIF flash flag fired. The flash washes out colour and creates
+              spurious motion edges. Skipped frames produce zero detections from both YOLO and the
+              motion branch.
             </InfoPopover>
           </label>
           <label class="flex items-center gap-2 text-sm">
             <input v-model="config.preprocessing.skip_foggy" type="checkbox" />
             <span>Skip foggy frames</span>
             <InfoPopover>
-              Drop motion candidates from frames whose Laplacian variance is below the foggy
-              threshold (low edge contrast = likely fog or extreme blur).
+              Skip frames whose Laplacian variance is below the foggy threshold (low edge contrast =
+              likely fog or extreme blur). Skipped frames produce zero detections from both YOLO and
+              the motion branch.
             </InfoPopover>
           </label>
           <label class="flex items-center gap-2 text-sm">
@@ -346,6 +347,14 @@
           </template>
         </div>
         <div class="flex items-center gap-2">
+          <button
+            v-if="submitting"
+            :disabled="cancelling"
+            class="px-3 py-1.5 rounded-md text-sm font-medium border border-red-300 text-red-700 hover:bg-red-50 disabled:opacity-50 disabled:cursor-not-allowed"
+            @click="cancelUpload"
+          >
+            {{ cancelling ? 'Cancelling…' : 'Cancel' }}
+          </button>
           <button
             :disabled="!canStart"
             :title="startDisabledReason"
@@ -687,6 +696,32 @@ async function abortDraft(): Promise<void> {
     await api(`/api/analysis/runs/${id}/abort/`, { method: 'POST' })
   } catch (e) {
     console.warn('Failed to abort draft run', e)
+  }
+}
+
+// In-page cancel: prompts, then tears down the draft (aborts the in-
+// flight upload, calls the abort endpoint to drop uploaded files + DB
+// trace). Re-enables the form so the user can adjust and retry.
+const cancelling = ref(false)
+async function cancelUpload(): Promise<void> {
+  if (!submitting.value || cancelling.value) return
+  const ok = await confirm({
+    title: 'Cancel the upload?',
+    message: 'The run and any images already uploaded will be discarded.',
+    confirmLabel: 'Cancel upload',
+    cancelLabel: 'Keep uploading',
+    variant: 'danger',
+  })
+  if (!ok) return
+  cancelling.value = true
+  try {
+    await abortDraft()
+  } finally {
+    cancelling.value = false
+    // startDetection's finally clears submitting, but the upload loop is
+    // already aborted via the signal — clear here too in case the loop
+    // hadn't started yet (e.g. user cancelled during the ROI modal).
+    submitting.value = false
   }
 }
 

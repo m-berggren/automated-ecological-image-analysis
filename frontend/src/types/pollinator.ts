@@ -30,9 +30,21 @@ export interface Detection {
   predicted_class: PollinatorClass | null
   source_image_filename: string
   source_image_url: string | null
+  source_image_id: number | null
   crop_url: string | null
   bbox: BBox | null
   excluded_from_export: boolean
+  // Per-image flag (same value on every detection sharing an image):
+  // when true the image is excluded from YOLO detector training.
+  exclude_from_training: boolean
+}
+
+// Per-run reviewer/export preferences. Any missing key falls back to the
+// run's config confidence values via effectiveReviewSettings().
+export interface ReviewSettings {
+  auto_select?: boolean
+  yolo_threshold?: number
+  group_threshold?: number
 }
 
 export interface Run {
@@ -48,10 +60,30 @@ export interface Run {
       roi_bbox?: [number, number, number, number] | null
     }
   }
+  review_settings?: ReviewSettings
 }
 
 export interface DetectionsPage {
   count: number
   next: string | null
   results: Detection[]
+}
+
+// Resolves a run's effective review thresholds + auto-select toggle.
+// Thresholds default to the confidence values the run was processed with
+// (YOLO ← config.yolo.confidence, Group ← config.group_classifier
+// .confidence) so review starts in the run's own regime; a per-run
+// override in review_settings wins when present. Final fallback is 0.5.
+export function effectiveReviewSettings(run: Run | null | undefined): {
+  autoSelect: boolean
+  yolo: number
+  group: number
+} {
+  const rs = run?.review_settings ?? {}
+  const cfg = run?.config
+  return {
+    autoSelect: rs.auto_select ?? false,
+    yolo: rs.yolo_threshold ?? cfg?.yolo?.confidence ?? 0.5,
+    group: rs.group_threshold ?? cfg?.group_classifier?.confidence ?? 0.5,
+  }
 }
