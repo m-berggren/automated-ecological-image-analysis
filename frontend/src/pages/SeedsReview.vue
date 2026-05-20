@@ -79,7 +79,7 @@
                 :points="polyPoints(detection)"
                 fill="transparent"
                 :stroke="selectedReferenceId === detection.id ? '#22c55e' : '#60a5fa'"
-                stroke-width="3"
+                :stroke-width="selectedReferenceId === detection.id ? 4 : 2"
                 style="pointer-events: all; cursor: pointer"
                 :class="selectedReferenceId === detection.id ? 'ring-highlight' : ''"
                 @click="selectReference(detection.id)"
@@ -87,7 +87,6 @@
             </svg>
 
             <img
-              ref="imageRef"
               :src="currentImage.image_url"
               :alt="currentImage.filename"
               class="w-full h-auto block select-none"
@@ -125,110 +124,110 @@
           <button
             type="button"
             class="px-4 py-2 rounded-md bg-primary text-primary-foreground hover:bg-primary/90 disabled:opacity-50 disabled:cursor-not-allowed"
-            :disabled="!selectedReference"
-            @click="proceedToCalculation"
+            :disabled="!allImagesHaveReference"
+            @click="proceed"
           >
             Continue
           </button>
         </div>
       </div>
     </footer>
+    <Transition name="toast">
+      <div
+        v-if="toast"
+        class="fixed bottom-6 left-1/2 -translate-x-1/2 z-50 px-5 py-3 rounded-xl shadow-lg text-sm font-medium"
+        :class="toast.type === 'success' ? 'bg-green-600 text-white' : 'bg-red-600 text-white'"
+      >
+        {{ toast.message }}
+      </div>
+    </Transition>
   </div>
 </template>
 
 <script setup lang="ts">
-import { computed, onMounted, ref, nextTick, watch } from 'vue'
+// Replace your script setup with this
+
+import { computed, onMounted, ref } from 'vue'
 import { useRoute, useRouter } from 'vue-router'
 import PageHeader from '@/components/PageHeader.vue'
 import SeedsStepper from '@/components/SeedsStepper.vue'
-
 import { api } from '@/api'
 
-//Types
 interface Detection {
   id: number
   confidence: number
   class: string
-
-  bbox: {
-    x1: number
-    y1: number
-    x2: number
-    y2: number
-    w: number
-    h: number
-  }
+  polygon?: number[]
+  bbox: { x1: number; y1: number; x2: number; y2: number }
 }
 
 interface ReviewImage {
   id: number
   filename: string
   image_url: string
-
   width: number
   height: number
-
   detections: Detection[]
 }
 
 interface ReviewBundle {
-  run: {
-    id: number
-    name: string
-    status: string
-  }
-
+  run: { id: number; name: string; status: string }
   images: ReviewImage[]
-
-  detections: Detection[]
+  reference_seeds: Record<string, number> // image_id -> detection_id
 }
 
-//Routing
 const route = useRoute()
 const router = useRouter()
 
-//State
 const loading = ref(true)
 const loadError = ref('')
-
 const run = ref<ReviewBundle['run'] | null>(null)
-
 const images = ref<ReviewImage[]>([])
 const currentImageIndex = ref(0)
+
+// Per-image reference map: imageId (string) -> detectionId
+const referenceMap = ref<Record<string, number>>({})
+
+// Toast state
+const toast = ref<{ message: string; type: 'success' | 'error' } | null>(null)
+let toastTimer: ReturnType<typeof setTimeout> | null = null
 
 const currentImage = computed(() => images.value[currentImageIndex.value] ?? null)
 const currentDetections = computed(() => currentImage.value?.detections ?? [])
 
-const selectedReferenceId = ref<number | null>(null)
+const currentImageId = computed(() => currentImage.value?.id?.toString() ?? null)
 
-const imageRef = ref<HTMLImageElement | null>(null)
-const imageSize = ref({ width: 0, height: 0 })
+// The selected detection id for the currently visible image
+const selectedReferenceId = computed(() =>
+  currentImageId.value ? (referenceMap.value[currentImageId.value] ?? null) : null,
+)
 
-//Computation
-const previewMode = computed(() => {
-  const value = route.query.preview
+const selectedReference = computed(
+  () => currentDetections.value.find((d) => d.id === selectedReferenceId.value) ?? null,
+)
 
-  return typeof value === 'string' ? value : null
-})
+const allImagesHaveReference = computed(() =>
+  images.value.every((img) => referenceMap.value[img.id.toString()] != null),
+)
 
 const headerTitle = computed(() =>
   run.value ? `Seed Reference Review · ${run.value.name}` : 'Seed Reference Review',
 )
 
-const selectedReference = computed(() =>
-  currentDetections.value.find((detection) => detection.id === selectedReferenceId.value),
-)
+function showToast(message: string, type: 'success' | 'error' = 'success') {
+  if (toastTimer) clearTimeout(toastTimer)
+  toast.value = { message, type }
+  toastTimer = setTimeout(() => {
+    toast.value = null
+  }, 3000)
+}
 
-// Converts flat coordinate points to SVG points string
-// This is to prevent needing scaling for matching correct position of boundingboxes in frontend page.
 function polyPoints(detection: Detection): string {
   const poly = detection.polygon
   if (!poly || poly.length < 8) {
-    // Fallback to bbox corners if polygon missing
     const { x1, y1, x2, y2 } = detection.bbox
     return `${x1},${y1} ${x2},${y1} ${x2},${y2} ${x1},${y2}`
   }
-  // Pair up flat coords into "x,y" strings
   const points: string[] = []
   for (let i = 0; i < poly.length; i += 2) {
     points.push(`${poly[i]},${poly[i + 1]}`)
@@ -236,43 +235,57 @@ function polyPoints(detection: Detection): string {
   return points.join(' ')
 }
 
-//Actual lifecycle of the page
-onMounted(async () => {
-  if (previewMode.value) {
-    const bundle = await loadPreview()
+async function selectReference(detectionId: number) {
+  if (!currentImageId.value) return
+
+  // Optimistically update UI immediately
+  referenceMap.value = { ...referenceMap.value, [currentImageId.value]: detectionId }
+
+  const id = route.params.id
+  try {
+    const response = await api(`/api/seeds/runs/${id}/reference-seed/`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({
+        reference_detection_id: detectionId,
+        image_id: currentImage.value?.id,
+      }),
+    })
+
+    if (!response.ok) throw new Error(`HTTP ${response.status}`)
+
+    showToast('Reference seed saved for this image.')
+  } catch (error) {
+    // Revert on failure
+    const reverted = { ...referenceMap.value }
+    delete reverted[currentImageId.value]
+    referenceMap.value = reverted
+    showToast('Failed to save reference seed.', 'error')
+    console.error(error)
   }
-
-  await loadFromApi()
-})
-
-//Preview section using mock data for easier visualization of UI before its all connected. (remove later prob)
-async function loadPreview(): Promise<ReviewBundle | null> {
-  if (!import.meta.env.DEV) {
-    return null
-  }
-
-  const { default: mock } = await import('@/mocks/seed-reference-review.json')
-
-  return JSON.parse(JSON.stringify(mock))
 }
 
-//API loading
+function clearReference() {
+  if (!currentImageId.value) return
+  const updated = { ...referenceMap.value }
+  delete updated[currentImageId.value]
+  referenceMap.value = updated
+}
+
 async function loadFromApi() {
   const id = route.params.id
-
   try {
     const response = await api(`/api/seeds/runs/${id}/reference-review/`)
-
     if (!response.ok) {
       loadError.value = `HTTP ${response.status}`
-
       return
     }
 
     const data: ReviewBundle = await response.json()
-
     run.value = data.run
     images.value = data.images
+    // Restore any previously saved selections
+    referenceMap.value = data.reference_seeds ?? {}
   } catch (error) {
     loadError.value = error instanceof Error ? error.message : String(error)
   } finally {
@@ -280,91 +293,23 @@ async function loadFromApi() {
   }
 }
 
-//Seed reference selection section
-function selectReference(id: number) {
-  selectedReferenceId.value = id
+function proceed() {
+  router.push({ name: 'seed-count-review', params: { id: route.params.id } })
 }
 
-function clearReference() {
-  selectedReferenceId.value = null
-}
-
-async function updateImageSize() {
-  await nextTick()
-
-  const img = imageRef.value
-  if (!img) return
-
-  imageSize.value = {
-    width: img.clientWidth,
-    height: img.clientHeight,
-  }
-}
-
-watch(currentImageIndex, updateImageSize)
-watch(images, updateImageSize)
-
-//Styling of the selected boundingbox
-function boxStyle(detection: Detection) {
-  const img = imageRef.value
-  if (!img || !currentImage.value) return {}
-
-  const renderedWidth = img.clientWidth
-  const renderedHeight = img.clientHeight
-
-  const originalWidth = currentImage.value.width
-  const originalHeight = currentImage.value.height
-
-  const scaleX = renderedWidth / originalWidth
-  const scaleY = renderedHeight / originalHeight
-
-  return {
-    left: `${detection.bbox.x1 * scaleX}px`,
-    top: `${detection.bbox.y1 * scaleY}px`,
-    width: `${(detection.bbox.x2 - detection.bbox.x1) * scaleX}px`,
-    height: `${(detection.bbox.y2 - detection.bbox.y1) * scaleY}px`,
-  }
-}
-
-//Function to proceed to calculations with reference seed
-async function proceedToCalculation() {
-  if (!selectedReferenceId.value) {
-    return
-  }
-
-  const id = route.params.id
-
-  try {
-    const response = await api(`/api/seeds/runs/${id}/reference-seed/`, {
-      method: 'POST',
-
-      headers: {
-        'Content-Type': 'application/json',
-      },
-
-      body: JSON.stringify({
-        reference_detection_id: selectedReferenceId.value,
-
-        image_id: currentImage.value?.id,
-      }),
-    })
-
-    if (!response.ok) {
-      throw new Error(`HTTP ${response.status}`)
-    }
-  } catch (error) {
-    console.error(error)
-    alert('Failed to calculate active seeds.')
-    return // stop here if the API call failed
-  }
-
-  //Redirect to next review page after selecting a reference seed.
-  router.push({
-    name: 'seed-count-review',
-
-    params: {
-      id,
-    },
-  })
-}
+onMounted(loadFromApi)
 </script>
+
+<style scoped>
+.toast-enter-active,
+.toast-leave-active {
+  transition:
+    opacity 0.3s,
+    transform 0.3s;
+}
+.toast-enter-from,
+.toast-leave-to {
+  opacity: 0;
+  transform: translateX(-50%) translateY(8px);
+}
+</style>
