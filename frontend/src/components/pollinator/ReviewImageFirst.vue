@@ -1,9 +1,9 @@
 <template>
-  <div v-if="!images.length" class="flex-1 p-12 text-center text-sm text-muted-foreground">
-    No detections match the current filters.
-  </div>
-
-  <div v-else class="flex-1 flex min-h-0">
+  <!-- Keep the whole frame mounted even when the filter empties the list, so
+       the threshold slider in the #below slot stays reachable. Raising the
+       threshold past every crop just shows an empty hint in the image area
+       instead of collapsing the layout. -->
+  <div class="flex-1 flex min-h-0">
     <ImageThumbnailRail
       :items="railItems"
       :active-key="activeFilename"
@@ -100,9 +100,9 @@
                   :y="d.bbox?.y1"
                   :width="d.bbox?.w"
                   :height="d.bbox?.h"
-                  :fill="isHighlighted(d.id) ? '#ef4444' : 'transparent'"
+                  :fill="isHighlighted(d.id) ? highlightColor : 'transparent'"
                   :fill-opacity="isHighlighted(d.id) ? 0.18 : 0"
-                  :stroke="isHighlighted(d.id) ? '#ef4444' : '#52525b'"
+                  :stroke="isHighlighted(d.id) ? highlightColor : boxColor"
                   :stroke-width="d.id === selectedId ? 3 : 2"
                   vector-effect="non-scaling-stroke"
                   class="cursor-pointer"
@@ -152,6 +152,15 @@
               </button>
             </Tooltip>
           </div>
+        </div>
+        <div
+          v-else
+          class="flex-1 flex flex-col items-center justify-center rounded-xl border border-dashed border-border bg-surface text-center text-sm text-muted-foreground px-6"
+        >
+          <p>No crops above the current threshold.</p>
+          <p class="text-xs mt-1">
+            Lower the YOLO or Group threshold below to bring detections back.
+          </p>
         </div>
       </div>
 
@@ -253,12 +262,19 @@ import type { Detection, PollinatorClass } from '@/types/pollinator'
 import Tooltip from '@/components/Tooltip.vue'
 import InfoPopover from '@/components/InfoPopover.vue'
 import ImageThumbnailRail, { type RailItem } from '@/components/pollinator/ImageThumbnailRail.vue'
+import { usePollinatorSettingsStore } from '@/stores/pollinatorSettings'
 
 const props = defineProps<{
   detections: Detection[]
   selectedId: number | null
   bulkIds?: Set<number>
 }>()
+
+// User-level bbox colors (persisted, shared across runs). The pickers live in
+// the parent's Predictions panel; we read the store directly here.
+const settings = usePollinatorSettingsStore()
+const boxColor = computed(() => settings.annotationColor)
+const highlightColor = computed(() => settings.annotationHighlightColor)
 
 const emit = defineEmits<{
   (e: 'update:selectedId', id: number): void

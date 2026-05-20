@@ -93,24 +93,22 @@
                row format so the same info is reachable without scrolling.
                Empty-state message is centered to match the crop-preview
                container's layout when nothing is selected or in bulk mode. -->
-          <div
-            class="px-4 py-2 min-h-0 overflow-auto"
-            :class="
-              !bulkMode && selected ? 'space-y-1' : 'flex items-center justify-center text-center'
-            "
-          >
-            <template v-if="!bulkMode && selected">
-              <div
-                class="flex items-center gap-1 text-[10px] xl:text-[11px] font-semibold uppercase tracking-wider text-muted-foreground"
-              >
-                <span>Predictions</span>
-                <InfoPopover>
-                  The model calls for the focused crop: the YOLO detector and the 4-group classifier
-                  (fly / bumblebee / butterfly / other), each with its confidence. These are model
-                  outputs, not your decision — confirm or correct them with the Label controls.
-                </InfoPopover>
-              </div>
-              <div class="space-y-0.5 text-xs font-mono">
+          <div class="px-4 py-2 min-h-0 overflow-auto flex flex-col">
+            <div
+              class="flex items-center gap-1 text-[10px] xl:text-[11px] font-semibold uppercase tracking-wider text-muted-foreground"
+            >
+              <span>Predictions</span>
+              <InfoPopover>
+                The model calls for the focused crop: the YOLO detector and the 4-group classifier
+                (fly / bumblebee / butterfly / other), each with its confidence. These are model
+                outputs, not your decision — confirm or correct them with the Label controls.
+              </InfoPopover>
+            </div>
+            <div
+              class="flex-1 min-h-0 mt-1"
+              :class="!bulkMode && selected ? '' : 'flex items-center justify-center text-center'"
+            >
+              <div v-if="!bulkMode && selected" class="space-y-0.5 text-xs font-mono">
                 <div class="flex items-center gap-2">
                   <span class="text-muted-foreground w-16 text-[10px]">YOLO</span>
                   <span class="w-10 tabular-nums">
@@ -139,10 +137,46 @@
                   }}</span>
                 </div>
               </div>
-            </template>
-            <span v-else class="text-xs text-muted-foreground">
-              {{ bulkMode ? `${bulkIds.size} crops selected` : 'No crop selected' }}
-            </span>
+              <span v-else class="text-xs text-muted-foreground">
+                {{ bulkMode ? `${bulkIds.size} crops selected` : 'No crop selected' }}
+              </span>
+            </div>
+
+            <!-- Annotation bbox colors. User-level (localStorage), shared across
+                 runs; the review boxes read these from the same store. -->
+            <div class="border-t border-border pt-2 mt-2 flex items-center gap-1">
+              <span
+                class="text-[10px] xl:text-[11px] font-semibold uppercase tracking-wider text-muted-foreground"
+              >
+                Box colors
+              </span>
+              <InfoPopover>
+                Outline color for annotation boxes on the image. "Box" is the default outline;
+                "Selected" is the focused/highlighted box. Saved for your account across runs.
+              </InfoPopover>
+              <label class="ml-auto flex items-center gap-1 text-xs cursor-pointer">
+                <input
+                  type="color"
+                  :value="settings.annotationColor"
+                  class="w-5 h-5 rounded border border-border bg-transparent cursor-pointer p-0"
+                  @input="settings.setAnnotationColor(($event.target as HTMLInputElement).value)"
+                  @change="($event.target as HTMLInputElement).blur()"
+                />
+                <span class="text-muted-foreground">Box</span>
+              </label>
+              <label class="flex items-center gap-1 text-xs cursor-pointer">
+                <input
+                  type="color"
+                  :value="settings.annotationHighlightColor"
+                  class="w-5 h-5 rounded border border-border bg-transparent cursor-pointer p-0"
+                  @input="
+                    settings.setAnnotationHighlightColor(($event.target as HTMLInputElement).value)
+                  "
+                  @change="($event.target as HTMLInputElement).blur()"
+                />
+                <span class="text-muted-foreground">Selected</span>
+              </label>
+            </div>
           </div>
 
           <!-- Thresholds -->
