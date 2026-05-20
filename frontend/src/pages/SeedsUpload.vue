@@ -2,7 +2,7 @@
   <PageHeader title="Upload" subtitle="Add seed images to start a detection run" />
   <SeedsStepper current="upload" />
 
-  <div class="flex-1 p-8 space-y-6 max-w-3xl mx-auto w-full">
+  <div class="flex-1 overflow-y-auto h-full p-8 space-y-6 max-w-3xl mx-auto w-full">
     <!-- Run details -->
     <section class="rounded-xl border border-border bg-surface p-5 space-y-4">
       <div>
@@ -29,7 +29,7 @@
         <textarea
           v-model="runNotes"
           rows="3"
-          placeholder="e.g. Dry soil, PEH test v2, camera slightly tilted"
+          placeholder="e.g. PEH test v2, lots of debris, crowded seeds"
           class="w-full px-3 py-2 text-sm rounded-md border border-border bg-background focus:outline-none focus:ring-2 focus:ring-primary/30"
         />
       </div>
@@ -73,45 +73,6 @@
             >
               · {{ seed.species }}
             </span>
-          </button>
-        </div>
-      </div>
-
-      <!-- Add seed -->
-      <button
-        @click="showAddSeed = true"
-        class="w-full rounded-lg border-2 border-dashed border-border px-4 py-2 text-sm text-muted-foreground transition hover:border-primary hover:text-primary"
-      >
-        + Add new seed type
-      </button>
-
-      <!-- Add form -->
-      <div v-if="showAddSeed" class="rounded-lg border border-border bg-background p-3 space-y-3">
-        <input
-          v-model="newSeedId"
-          placeholder="Code name (e.g. PEH)"
-          class="w-full px-3 py-2 text-sm border border-border rounded-md"
-        />
-
-        <input
-          v-model="newSeedSpecies"
-          placeholder="Species name (optional)"
-          class="w-full px-3 py-2 text-sm border border-border rounded-md"
-        />
-
-        <div class="flex gap-2">
-          <button
-            @click="addSeed"
-            class="px-3 py-1.5 rounded-md text-sm bg-primary text-primary-foreground"
-          >
-            Add
-          </button>
-
-          <button
-            @click="cancelAddSeed"
-            class="px-3 py-1.5 rounded-md text-sm border border-border"
-          >
-            Cancel
           </button>
         </div>
       </div>
@@ -216,7 +177,13 @@
         <label class="text-primary cursor-pointer hover:underline">
           browse files
 
-          <input type="file" multiple accept="image/*" class="hidden" @change="onPick($event)" />
+          <input
+            type="file"
+            multiple
+            accept="image/png, image/jpeg, image/jpg"
+            class="hidden"
+            @change="onPick($event)"
+          />
         </label>
 
         /
@@ -352,10 +319,6 @@ const runNotes = ref('')
 
 const selectedSeed = ref<string | null>(null)
 
-const showAddSeed = ref(false)
-const newSeedId = ref('')
-const newSeedSpecies = ref('')
-
 const modelVersions = ref<ModelVersion[]>([])
 
 const seedTypes = ref<SeedType[]>([
@@ -382,8 +345,8 @@ const seedTypes = ref<SeedType[]>([
 ])
 
 const config = ref<PipelineConfig>({
-  confidence_threshold: 0.25,
-  slice_overlap_ratio: 0.25,
+  confidence_threshold: 0.3,
+  slice_overlap_ratio: 0.35,
 
   models: {
     PEH: { model_version_id: null },
@@ -435,42 +398,6 @@ function onRetry(id: string) {
   uploader.value?.retry(id)
 }
 
-function cancelAddSeed() {
-  showAddSeed.value = false
-  newSeedId.value = ''
-  newSeedSpecies.value = ''
-}
-
-function addSeed() {
-  error.value = ''
-
-  if (!newSeedId.value.trim()) {
-    return
-  }
-
-  const id = newSeedId.value.trim().toUpperCase()
-
-  if (seedTypes.value.some((seed) => seed.id === id)) {
-    error.value = `Seed type ${id} already exists.`
-
-    return
-  }
-
-  seedTypes.value.push({
-    id,
-
-    species: newSeedSpecies.value.trim(),
-
-    isCustom: true,
-  })
-
-  config.value.models[id] = {
-    model_version_id: null,
-  }
-
-  cancelAddSeed()
-}
-
 function removeSeed(id: string) {
   seedTypes.value = seedTypes.value.filter((seed) => seed.id !== id)
 
@@ -481,23 +408,23 @@ function removeSeed(id: string) {
   }
 }
 
-async function ensureUpload(): Promise<number | null> {
-  if (uploadId.value) {
-    return uploadId.value
-  }
+const runId = ref<number | null>(null)
 
-  if (creatingUpload.value) {
-    return null
-  }
+async function ensureUpload(): Promise<number | null> {
+  if (uploadId.value) return uploadId.value
+  if (creatingUpload.value) return null
 
   creatingUpload.value = true
-
   try {
-    const response = await api('/api/datasets/uploads/', {
+    const response = await api('/api/analysis/runs/draft/', {
       method: 'POST',
       body: JSON.stringify({
         module: 'seeds',
         name: runName.value,
+        config: {
+          ...config.value,
+          selected_seed: selectedSeed.value,
+        },
       }),
     })
 
@@ -507,15 +434,14 @@ async function ensureUpload(): Promise<number | null> {
     }
 
     const data = await response.json()
-
-    uploadId.value = data.id
+    uploadId.value = data.upload_id
+    runId.value = data.run_id // Save the paired run ID
 
     uploader.value = createUploader({
       module: 'seeds',
-      uploadId: data.id,
+      uploadId: data.upload_id,
     })
-
-    return data.id
+    return data.upload_id
   } catch (e) {
     error.value = e instanceof Error ? e.message : String(e)
     return null
@@ -588,29 +514,15 @@ async function startDetection() {
   starting.value = true
 
   try {
-    const response = await api('/api/analysis/runs/', {
+    const response = await api(`/api/analysis/runs/${runId.value}/start/`, {
       method: 'POST',
       body: JSON.stringify({
-        module: 'seeds',
-        upload: uploadId.value,
-        name: runName.value,
-        notes: runNotes.value,
-
-        config: {
-          ...config.value,
-          selected_seed: selectedSeed.value,
-        },
+        config: { ...config.value, selected_seed: selectedSeed.value },
       }),
     })
+    if (!response.ok) throw new Error(await response.text())
 
-    if (!response.ok) {
-      error.value = (await response.text()) || `HTTP ${response.status}`
-      return
-    }
-
-    const run = await response.json()
-
-    router.push(`/seeds/runs/${run.id}/detect`)
+    router.push(`/seeds/runs/${runId.value}/detect`)
   } catch (e) {
     error.value = e instanceof Error ? e.message : String(e)
   } finally {

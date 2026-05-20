@@ -15,6 +15,7 @@ from rest_framework.views import APIView
 
 from apps.datasets.models import UploadStatus
 from apps.pollinator.services import spawn_inference_pipeline
+from apps.seeds.services import spawn_seeds_pipeline
 
 from .engulfment import apply_engulfment_exclusions
 from .models import (
