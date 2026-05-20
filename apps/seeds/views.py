@@ -157,19 +157,31 @@ class SeedReferenceReviewView(APIView):
                 "id": run.id,
                 "name": run.name,
             },
+             "reference_seeds": run.reference_seeds or {},
             "images": response_images
         })
 
 
 class SeedReferenceView(APIView):
     def post(self, request, run_id):
-
         reference_id = request.data["reference_detection_id"]
         image_id = request.data["image_id"]
 
-        result = calculate_seed_status(
-            reference_detection_id=reference_id,
-            image_id=image_id
-        )
+        run = InferenceRun.objects.get(id=run_id)
 
-        return Response(result)
+        # Save reference selection for this image into the run
+        refs = run.reference_seeds or {}
+        refs[str(image_id)] = reference_id
+        run.reference_seeds = refs
+        run.save(update_fields=["reference_seeds"])
+
+        try:
+            result = calculate_seed_status(
+                reference_detection_id=reference_id,
+                image_id=image_id
+            )
+            return Response(result)
+        except Exception as e:
+            import traceback
+            traceback.print_exc()  # prints full traceback to Django terminal
+            return Response({'error': str(e)}, status=500)

@@ -352,19 +352,19 @@ async function proceedToCalculation() {
     if (!response.ok) {
       throw new Error(`HTTP ${response.status}`)
     }
-
-    //Redirect to next review page after selecting a reference seed.
-    router.push({
-      name: 'seed-count-review',
-
-      params: {
-        id,
-      },
-    })
   } catch (error) {
     console.error(error)
-
     alert('Failed to calculate active seeds.')
+    return // stop here if the API call failed
   }
+
+  //Redirect to next review page after selecting a reference seed.
+  router.push({
+    name: 'seed-count-review',
+
+    params: {
+      id,
+    },
+  })
 }
 </script>

@@ -14,27 +14,22 @@ def calculate_seed_status(reference_detection_id: int, image_id: int):
 
     reference_poly = reference.polygon
 
-    detected_polys = [d.polygon for d in detections]
+    detected_seeds = [
+        {'poly': d.polygon, 'id': d.id}
+        for d in detections
+    ]
 
     result = count_active_and_aborted_seeds(
         reference_seed=reference_poly,
-        detected_seeds=detected_polys,
+        detected_seeds=detected_seeds,
         threshold=0.30,
     )
 
-    ref_area = poly_area(reference_poly)
-    active_threshold = ref_area * 0.30
-
-    # save back into DB
-    detections.update(
-        seed_status="unknown"
-    )
-
-    # assign labels based on result
+    status_map = {c['detection_id']: c['status'] for c in result['classifications']}
     for d in detections:
-        area = poly_area(d.polygon)
-        d.seed_status = "active" if area >= active_threshold else "aborted"
+        d.seed_status = status_map.get(d.id, 'unknown')
         d.save()
 
     return result
+
 

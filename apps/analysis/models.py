@@ -281,6 +281,7 @@ class InferenceRun(models.Model):
         blank=True,
     )
 
+    reference_seeds = models.JSONField(default=dict, blank=True)
     # Progress fields. All maintained by the worker; defaults cover the
     # pre-run state.
     image_count = models.IntegerField(default=0)
