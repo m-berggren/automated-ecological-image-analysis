@@ -19,49 +19,59 @@ class SeedTrainingDataUploadView(APIView):
     def post(self, request) -> Response:
         species = request.data.get('species')
         files = request.FILES.getlist('files')
-        val_split = float(request.data.get('val_split', 0.2))  # 20% val by default
+        val_split = float(request.data.get('val_split', 0.2))
 
         if not species:
             return Response({'error': 'species is required.'}, status=400)
         if not files:
             return Response({'error': 'No files provided.'}, status=400)
 
-        species_dir = Path('../data/seed') / f'{species.lower()}_model'
-        train_dir = species_dir / 'train_sliced'
-        val_dir = species_dir / 'val' / 'images'
-        train_dir.mkdir(parents=True, exist_ok=True)
-        val_dir.mkdir(parents=True, exist_ok=True)
+        species_dir = _base_data() / f'{species.lower()}_model'
+        train_img_dir = species_dir / 'train_sliced'
+        train_lbl_dir = species_dir / 'train_sliced' / 'labels'
+        val_img_dir   = species_dir / 'val_sliced'
+        val_lbl_dir   = species_dir / 'val_sliced' / 'labels'
 
-        # Shuffle and split
-        file_list = list(files)
-        random.shuffle(file_list)
-        n_val = max(1, int(len(file_list) * val_split))
-        val_files = file_list[:n_val]
-        train_files = file_list[n_val:]
+        for d in [train_img_dir, train_lbl_dir, val_img_dir, val_lbl_dir]:
+            d.mkdir(parents=True, exist_ok=True)
 
-        saved_train = []
-        saved_val = []
+        # Separate images and labels
+        image_files = [f for f in files if not f.name.endswith('.txt')]
+        label_files  = {f.name.replace('.txt', ''): f for f in files if f.name.endswith('.txt')}
 
-        for f in train_files:
-            dest = train_dir / f.name
+        # Shuffle and split images
+        random.shuffle(image_files)
+        n_val = max(1, int(len(image_files) * val_split))
+        val_imgs   = image_files[:n_val]
+        train_imgs = image_files[n_val:]
+
+        def save_file(f, dest_dir):
+            dest = dest_dir / f.name
             with open(dest, 'wb') as out:
                 for chunk in f.chunks():
                     out.write(chunk)
-            saved_train.append(f.name)
 
-        for f in val_files:
-            dest = val_dir / f.name
-            with open(dest, 'wb') as out:
-                for chunk in f.chunks():
-                    out.write(chunk)
-            saved_val.append(f.name)
+        for f in train_imgs:
+            save_file(f, train_img_dir)
+            stem = f.name.rsplit('.', 1)[0]
+            if stem in label_files:
+                save_file(label_files[stem], train_lbl_dir)
+
+        for f in val_imgs:
+            save_file(f, val_img_dir)
+            stem = f.name.rsplit('.', 1)[0]
+            if stem in label_files:
+                save_file(label_files[stem], val_lbl_dir)
 
         return Response({
-            'train_count': len(saved_train),
-            'val_count': len(saved_val),
-            'total': len(file_list),
-        })
-
+            'train_images': len(train_imgs),
+            'val_images': len(val_imgs),
+            'labels_matched': sum(
+                1 for f in image_files
+                if f.name.rsplit('.', 1)[0] in label_files
+            ),
+            'total': len(image_files),
+    })
 
 class SeedTrainingJobCreateView(APIView):
     """POST /api/seeds/training/start/ to bootstrap dataset folder and queue a training job."""

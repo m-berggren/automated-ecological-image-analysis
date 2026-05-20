@@ -225,65 +225,155 @@
           </div>
 
           <!-- Drop zone -->
-
-          <div
-            class="mt-3 rounded-lg border-2 border-dashed border-border p-5 text-center cursor-pointer hover:bg-muted/20"
-            :class="{ 'border-primary bg-primary/5': dragOver }"
-            @dragover.prevent="dragOver = true"
-            @dragleave.prevent="dragOver = false"
-            @drop.prevent="onDrop"
-            @click="triggerFilePicker"
+          <UploadDropZone
+            class="mt-3"
+            v-model:active-tab="trainingUploadTab"
+            :tabs="trainingUploadTabs"
+            :has-files="uploadedFiles.length > 0"
+            @select="onTrainingUploadSelect"
           >
-            <div class="text-sm font-medium">Drop images or click to upload</div>
+            <template #body>
+              <UploadCloud class="w-8 h-8 mx-auto text-muted-foreground" />
+              <div class="text-sm font-medium mt-2">
+                <template v-if="uploadedFiles.length">
+                  {{ uploadedFiles.length }}
+                  file{{ uploadedFiles.length === 1 ? '' : 's' }}
+                  added — drop more to extend
+                </template>
 
-            <div class="text-xs text-muted-foreground mt-1">.jpg, .png, .zip supported</div>
+                <template v-else>
+                  Drop images and label files here, or click to browse
+                </template>
+              </div>
 
-            <input
-              ref="fileInputRef"
-              type="file"
-              multiple
-              accept=".jpg,.jpeg,.png,.zip"
-              class="hidden"
-              @change="onFilePicked"
-            />
-          </div>
+              <div class="text-xs text-muted-foreground mt-1">
+                Supports .jpg, .png, .txt, .zip, or a folder containing YOLO datasets
+              </div>
 
-          <!-- File list -->
+              <div class="text-xs text-muted-foreground mt-1">
+                Each image should have a matching
+                <span class="font-mono">.txt</span>
+                annotation file
+              </div>
+            </template>
+          </UploadDropZone>
+
+        <!-- File list -->
           <div v-if="uploadedFiles.length" class="mt-3">
             <div class="flex items-center justify-between px-3 py-2 rounded-lg border border-border bg-card text-xs">
-              <div class="flex items-center gap-2">
-                <span class="font-medium text-foreground">{{ uploadedFiles.length }} files selected</span>
-                <span class="text-muted-foreground">
-                  · {{ formatFileSize(totalUploadSize) }} total
+              <div class="flex items-center gap-3">
+                <span class="font-medium text-foreground">
+                  {{ imageFiles.length }} images
                 </span>
+                <span
+                  :class="labelFiles.length === imageFiles.length ? 'text-green-600' : 'text-amber-600'"
+                >
+                  {{ labelFiles.length }} labels
+                  <span v-if="labelFiles.length !== imageFiles.length">
+                    ⚠ Not all images have a matching label file (.txt)
+                  </span>
+                  <span v-else>✓</span>
+                </span>
+                <span class="text-muted-foreground">· {{ formatFileSize(totalUploadSize) }} total</span>
               </div>
-              <button
-                class="text-muted-foreground hover:text-red-500 transition-colors"
-                @click="clearFiles"
-              >
-                Clear all
-              </button>
-            </div>
+            <button
+              class="text-muted-foreground hover:text-red-500 transition-colors"
+              @click="clearFiles"
+            >
+              Clear all
+            </button>
           </div>
 
-            <!-- Show first 3 files + overflow count -->
-            <ul class="mt-2 space-y-1 text-xs">
-              <li
-                v-for="(file, idx) in uploadedFiles.slice(0, 3)"
-                :key="file.name + idx"
-                class="flex items-center gap-2 px-2 py-1 rounded border border-border bg-card"
+          <ul class="mt-2 space-y-1 text-xs">
+            <li
+              v-for="(file, idx) in uploadedFiles.slice(0, 3)"
+              :key="file.name + idx"
+              class="flex items-center gap-2 px-2 py-1 rounded border border-border bg-card"
+            >
+              <span
+                class="shrink-0 px-1.5 py-0.5 rounded text-[10px] font-medium"
+                :class="file.name.endsWith('.txt') ? 'bg-blue-100 text-blue-700' : 'bg-green-100 text-green-700'"
               >
-                <span class="font-mono flex-1 truncate">{{ file.name }}</span>
-                <span class="text-muted-foreground shrink-0">{{ formatFileSize(file.size) }}</span>
-                <button class="text-red-500 shrink-0" @click="removeUpload(idx)">✕</button>
-              </li>
-              <li
-                v-if="uploadedFiles.length > 3"
-                class="px-2 py-1 text-muted-foreground italic"
+                {{ file.name.endsWith('.txt') ? 'label' : 'image' }}
+              </span>
+              <span class="font-mono flex-1 truncate">{{ file.name }}</span>
+              <span class="text-muted-foreground shrink-0">{{ formatFileSize(file.size) }}</span>
+              <button class="text-red-500 shrink-0" @click="removeUpload(idx)">✕</button>
+            </li>
+            <li v-if="uploadedFiles.length > 3" class="px-2 py-1 text-muted-foreground italic">
+              + {{ uploadedFiles.length - 3 }} more files
+            </li>
+          </ul>
+        </div>
+        </div>
+
+        <!-- Step 3: Settings -->
+          <div
+            v-if="trainingMode === 'scratch' ? selectedSeed : selectedVersionId"
+            class="px-5 py-4 border-b border-border"
+          >
+            <div class="text-[11px] font-semibold uppercase tracking-wider text-muted-foreground mb-3">
+              3. Settings
+            </div>
+
+            <div class="grid grid-cols-2 lg:grid-cols-4 gap-3">
+              <label class="text-xs text-muted-foreground space-y-1">
+                <span>Epochs</span>
+                <input
+                  v-model.number="settings.epochs"
+                  type="number"
+                  min="1"
+                  max="300"
+                  class="w-full px-2 py-1 rounded border border-border bg-background text-sm font-mono text-foreground"
+                />
+              </label>
+
+              <label class="text-xs text-muted-foreground space-y-1">
+                <span>Train %</span>
+                <input
+                  v-model.number="settings.train_split"
+                  type="number"
+                  min="50"
+                  max="95"
+                  class="w-full px-2 py-1 rounded border border-border bg-background text-sm font-mono text-foreground"
+                />
+              </label>
+
+              <label class="text-xs text-muted-foreground space-y-1">
+                <span>Val %</span>
+                <input
+                  v-model.number="settings.val_split"
+                  type="number"
+                  min="0"
+                  max="40"
+                  class="w-full px-2 py-1 rounded border border-border bg-background text-sm font-mono text-foreground"
+                />
+              </label>
+
+              <label class="text-xs text-muted-foreground space-y-1">
+                <span>Test %</span>
+                <input
+                  v-model.number="settings.test_split"
+                  type="number"
+                  min="0"
+                  max="40"
+                  class="w-full px-2 py-1 rounded border border-border bg-background text-sm font-mono text-foreground"
+                />
+              </label>
+            </div>
+
+            <div class="mt-2 text-xs text-muted-foreground">
+              <span
+                v-if="settings.train_split + settings.val_split + settings.test_split !== 100"
+                class="text-amber-600"
               >
-                + {{ uploadedFiles.length - 3 }} more files
-              </li>
-            </ul>
+                ⚠ Splits should sum to 100%
+              </span>
+
+              <span v-else class="text-green-600">
+                ✓ Split looks good
+              </span>
+            </div>
           </div>
 
         <!-- Submit -->
@@ -428,9 +518,11 @@
 
 <script setup lang="ts">
 import { api } from '@/api'
-import { computed, onMounted, onUnmounted, ref, watch } from 'vue'
+import { computed, onMounted, onUnmounted, reactive, ref, watch } from 'vue'
 import { useRoute } from 'vue-router'
 import PageHeader from '@/components/PageHeader.vue'
+import UploadDropZone, { type UploadTab } from '@/components/UploadDropZone.vue'
+import { UploadCloud } from 'lucide-vue-next'
 
 const route = useRoute()
 const loading = ref(true)
@@ -440,8 +532,6 @@ const tracks = ref<any[]>([])
 const trainingHistory = ref<any[]>([])
 const trainingMode = ref<'scratch' | 'incremental'>('scratch')
 const uploadedFiles = ref<{ name: string; size: number }[]>([])
-const fileInputRef = ref<HTMLInputElement | null>(null)
-const dragOver = ref(false)
 const formMessage = ref('')
 const now = ref(Date.now())
 let ticker: ReturnType<typeof setInterval>
@@ -449,9 +539,56 @@ let ticker: ReturnType<typeof setInterval>
 const currentPage = ref(1)
 const pageSize = 4
 const totalPages = computed(() => Math.ceil(jobRows.value.length / pageSize))
+const trainingUploadTab = ref('files')
+const trainingUploadTabs: UploadTab[] = [
+  {
+    key: 'files',
+    label: 'Files',
+    mode: 'files',
+    accept: '.jpg,.jpeg,.png,.zip,.txt',
+  },
+  {
+    key: 'folder',
+    label: 'Folder',
+    mode: 'folder',
+  },
+]
+
+function onTrainingUploadSelect(files: File[]) {
+  for (const f of files) addFile(f)
+}
+
+function addFile(f: File) {
+  const name = f.name.toLowerCase()
+
+  // Accept images, labels, and zip datasets
+  if (!/\.(jpe?g|png|zip|txt)$/.test(name)) return
+
+  // Avoid duplicate files
+  const alreadyExists = actualFiles.value.some(
+    (existing) =>
+      existing.name === f.name &&
+      existing.size === f.size
+  )
+
+  if (alreadyExists) return
+
+  actualFiles.value.push(f)
+  uploadedFiles.value.push({
+    name: f.name,
+    size: f.size,
+  })
+}
 
 const paginatedJobRows = computed(() =>
   jobRows.value.slice((currentPage.value - 1) * pageSize, currentPage.value * pageSize)
+)
+
+const imageFiles = computed(() =>
+  actualFiles.value.filter((f) => !f.name.endsWith('.txt'))
+)
+const labelFiles = computed(() =>
+  actualFiles.value.filter((f) => f.name.endsWith('.txt'))
 )
 
 const hasActiveJob = computed(() =>
@@ -460,11 +597,18 @@ const hasActiveJob = computed(() =>
   )
 )
 
+const settings = reactive({
+  epochs: 90,
+  train_split: 80,
+  val_split: 10,
+  test_split:10,
+})
+
 const seedTypes = ref([
-  { id: 'PEH', species: 'Pisum sativum', isCustom: false },
-  { id: 'PHYCA', species: 'Phacelia tanacetifolia', isCustom: false },
-  { id: 'VAU', species: 'Vicia sativa', isCustom: false },
-  { id: 'CAT', species: 'Carthamus tinctorius', isCustom: false },
+  { id: 'PEH', species: 'Pedicularis hirsuta', isCustom: false },
+  { id: 'PHYCA', species: 'Phyllodoce caerulea', isCustom: false },
+  { id: 'VAU', species: 'Vaccinium uliginosum', isCustom: false },
+  { id: 'CAT', species: 'Cassiope tetragona', isCustom: false },
 ])
 
 const selectedSeed = ref<string | null>(null)
@@ -633,29 +777,7 @@ function startPolling(jobId: number) {
   }, 3000)
 }
 
-function triggerFilePicker() {
-  fileInputRef.value?.click()
-}
-
 const actualFiles = ref<File[]>([])
-
-function onFilePicked(e: Event) {
-  const files = (e.target as HTMLInputElement).files
-  if (!files) return
-  for (const f of Array.from(files)) {
-    uploadedFiles.value.push({ name: f.name, size: f.size })
-    actualFiles.value.push(f)
-  }
-}
-
-function onDrop(e: DragEvent) {
-  dragOver.value = false
-  if (!e.dataTransfer?.files) return
-  for (const f of Array.from(e.dataTransfer.files)) {
-    uploadedFiles.value.push({ name: f.name, size: f.size })
-    actualFiles.value.push(f)
-  }
-}
 
 function removeUpload(i: number) {
   uploadedFiles.value.splice(i, 1)
@@ -770,20 +892,21 @@ async function startTraining() {
   }
 
   const payload =
-    trainingMode.value === 'scratch'
-      ? {
-          species: selectedSeed.value!.toLowerCase(),
-          training_mode: 'scratch',
-          epochs: 90,
-        }
-      : {
-          species: allVersions.value
-            .find((v) => v.id === selectedVersionId.value)
-            ?.track_label.toLowerCase(),
-          training_mode: 'incremental',
-          epochs: 90,
-          source_model_id: selectedVersionId.value,
-        }
+  trainingMode.value === 'scratch'
+    ? {
+        species: selectedSeed.value!.toLowerCase(),
+        training_mode: 'scratch',
+        epochs: settings.epochs,
+        val_split: settings.val_split / 100,
+      }
+    : {
+        species: allVersions.value
+          .find((v) => v.id === selectedVersionId.value)
+          ?.track_label.toLowerCase(),
+        training_mode: 'incremental',
+        epochs: settings.epochs,
+        source_model_id: selectedVersionId.value,
+      }
 
   try {
     // 1. Upload training files (for scratch mode only)
@@ -791,6 +914,8 @@ async function startTraining() {
       formMessage.value = 'Uploading training data...'
       const formData = new FormData()
       formData.append('species', payload.species!)
+      formData.append('val_split', String(settings.val_split / 100))
+
       for (const file of actualFiles.value) {
         formData.append('files', file)
       }
