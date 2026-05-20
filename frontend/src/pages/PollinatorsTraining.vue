@@ -16,9 +16,15 @@
         <!-- Step 1: Pick model -->
         <div class="px-5 py-4 border-b border-border">
           <div
-            class="text-[11px] font-semibold uppercase tracking-wider text-muted-foreground mb-3"
+            class="text-[11px] font-semibold uppercase tracking-wider text-muted-foreground mb-3 flex items-center gap-1.5"
           >
             1. Pick a model to retrain
+            <InfoPopover>
+              This page only retrains existing models, continuing from an already trained base
+              version. Initial training of a brand-new model from scratch is GPU-intensive and is
+              done using one of the Jupyter Notebook files in ml-pipelines/notebooks/ on a GPU, not
+              here.
+            </InfoPopover>
           </div>
           <div class="space-y-2">
             <label
@@ -78,7 +84,7 @@
             <label class="text-xs text-muted-foreground">Base model</label>
             <select
               v-model.number="selectedSourceId"
-              class="px-2 py-1 rounded border border-green-300 bg-green-100 text-green-900 text-sm font-medium focus:outline-none focus:ring-2 focus:ring-green-400"
+              class="px-2 py-1 rounded border border-green-400 bg-green-300 text-green-900 text-sm font-medium focus:outline-none focus:ring-2 focus:ring-green-400"
             >
               <option v-for="v in selectedTrack.versions" :key="v.id" :value="v.id">
                 {{ v.version_name
@@ -113,10 +119,10 @@
                 </div>
               </div>
               <button
-                class="text-xs text-primary hover:underline shrink-0"
+                class="text-xm text-primary hover:underline shrink-0"
                 @click="openReviewDrawer"
               >
-                Browse pool →
+                Browse pool ->
               </button>
             </div>
             <!-- min-h reserves the class-breakdown line so the card keeps the

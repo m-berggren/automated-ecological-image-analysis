@@ -54,11 +54,15 @@
             class="px-5 py-4 bg-primary/[0.22] border-b border-border flex items-baseline gap-3"
           >
             <h2 class="font-bold text-lg tracking-tight">{{ track.label }}</h2>
+            <InfoPopover v-if="TRACK_INFO[track.id]">{{ TRACK_INFO[track.id] }}</InfoPopover>
             <span class="text-xs text-muted-foreground">
               {{ track.versions.length }} {{ track.versions.length === 1 ? 'version' : 'versions' }}
             </span>
-            <span class="text-xs text-muted-foreground ml-auto">
+            <span class="text-xs text-muted-foreground ml-auto inline-flex items-center gap-1">
               metric: {{ track.metric_label }}
+              <InfoPopover>{{
+                METRIC_INFO[track.metric_label] ?? 'Headline metric for this model.'
+              }}</InfoPopover>
             </span>
           </header>
 
@@ -265,147 +269,13 @@
       </div>
     </div>
 
-    <!-- Upload model modal -->
-    <div
-      v-if="uploadOpen"
-      class="fixed inset-0 z-50 flex items-center justify-center bg-black/40 p-4"
-      @click.self="uploadOpen = false"
-    >
-      <!-- max-h-[90vh] + flex column keeps the footer (Cancel/Upload) glued
-           to the bottom no matter how big the body grows. The body scrolls
-           internally instead of pushing the buttons off-screen on smaller
-           laptops. -->
-      <div
-        class="bg-card border border-border rounded-xl shadow-xl w-full max-w-md max-h-[90vh] flex flex-col"
-      >
-        <header class="px-5 py-2 border-b border-border flex items-center justify-between shrink-0">
-          <h3 class="font-semibold">Upload existing model</h3>
-          <button class="text-muted-foreground hover:text-foreground" @click="uploadOpen = false">
-            ✕
-          </button>
-        </header>
-        <div class="px-5 py-3 space-y-2 text-sm overflow-y-auto">
-          <label class="block">
-            <span class="text-xs font-medium text-muted-foreground">Kind</span>
-            <select
-              v-model="uploadKind"
-              class="mt-1 w-full px-2 py-1.5 rounded border border-border bg-background"
-            >
-              <option v-for="opt in UPLOAD_KIND_OPTIONS" :key="opt.value" :value="opt.value">
-                {{ opt.label }}
-              </option>
-            </select>
-          </label>
-          <label class="block">
-            <span class="text-xs font-medium text-muted-foreground">
-              Version name
-              <span class="text-red-600">*</span>
-            </span>
-            <input
-              v-model="uploadVersionName"
-              type="text"
-              placeholder="e.g. yolo-v1"
-              class="mt-1 w-full px-2 py-1.5 rounded border border-border bg-background font-mono"
-            />
-            <span class="text-[11px] text-muted-foreground">
-              Used as the filename and must be unique.
-            </span>
-          </label>
-          <label class="block">
-            <span class="text-xs font-medium text-muted-foreground">Description</span>
-            <textarea
-              v-model="uploadDescription"
-              rows="2"
-              placeholder="Optional notes on dataset, training, etc."
-              class="mt-1 w-full px-2 py-1.5 rounded border border-border bg-background"
-            />
-          </label>
-          <div>
-            <span class="text-xs font-medium text-muted-foreground">
-              Source
-              <span class="text-red-600">*</span>
-            </span>
-            <UploadDropZone
-              class="mt-1"
-              compact
-              v-model:active-tab="uploadMode"
-              :tabs="modelUploadTabs"
-              :has-files="uploadHasFiles"
-              @select="onModelUploadSelect"
-            >
-              <!-- Info icon to the right of the tabs, only for folder mode. -->
-              <template #tabs-after>
-                <InfoPopover v-if="uploadMode === 'folder'">
-                  <div class="font-medium mb-1">Expected folder layout</div>
-                  <pre class="whitespace-pre text-[11px] leading-snug overflow-x-auto">{{
-                    uploadStructure
-                  }}</pre>
-                  <div class="mt-1.5 text-muted-foreground">
-                    Recognised files are ingested; anything else is ignored.
-                  </div>
-                </InfoPopover>
-              </template>
-            </UploadDropZone>
-            <p
-              v-if="uploadMode === 'file' && uploadFile"
-              class="mt-2 text-[11px] text-muted-foreground font-mono"
-            >
-              {{ uploadFile.name }} · {{ formatFileSize(uploadFile.size) }}
-            </p>
-            <!-- Folder preview. Plain text rows rather than nested boxes:
-                 enough info to know we picked the right folder, without
-                 the visual noise that dominated the dialog. Artifact list
-                 caps at ~5 rows with internal scroll for big folders. -->
-            <div
-              v-if="uploadMode === 'folder' && uploadFolderFiles.length"
-              class="mt-2 text-[11px] space-y-1"
-            >
-              <div>
-                <span class="text-muted-foreground">Weights: </span>
-                <span v-if="folderPreview.weightsLabel" class="font-mono">
-                  {{ folderPreview.weightsLabel }}
-                </span>
-                <span v-else class="text-red-600">
-                  not found (need best.pt/.pth or last.pt/.pth, ideally under weights/)
-                </span>
-              </div>
-              <div v-if="folderPreview.recognised.length">
-                <span class="text-muted-foreground">
-                  Artifacts ({{ folderPreview.recognised.length }}):
-                </span>
-                <div class="mt-0.5 max-h-32 overflow-y-auto font-mono leading-snug pl-2">
-                  <div v-for="name in folderPreview.recognised" :key="name">{{ name }}</div>
-                </div>
-              </div>
-              <div v-else class="text-muted-foreground">Artifacts: none recognised.</div>
-              <div v-if="folderPreview.skipped > 0" class="text-muted-foreground">
-                {{ folderPreview.skipped }} other file(s) will be ignored.
-              </div>
-            </div>
-          </div>
-          <p v-if="uploadError" class="text-xs text-red-600">{{ uploadError }}</p>
-        </div>
-        <footer
-          class="px-5 py-3 border-t border-border flex items-center justify-end gap-2 shrink-0"
-        >
-          <button
-            class="px-3 py-1.5 rounded-md text-sm font-medium text-muted-foreground hover:bg-muted"
-            :disabled="uploadSubmitting"
-            @click="uploadOpen = false"
-          >
-            Cancel
-          </button>
-          <button
-            class="px-3 py-1.5 rounded-md text-sm font-medium bg-primary text-primary-foreground hover:bg-primary/90 disabled:opacity-50 disabled:cursor-not-allowed"
-            :disabled="uploadSubmitting"
-            @click="submitUpload"
-          >
-            <span v-if="uploadSubmitting">Uploading…</span>
-            <span v-else>Upload</span>
-          </button>
-        </footer>
-      </div>
-    </div>
+    <ModelUploadDialog
+      v-model:open="uploadOpen"
+      module="pollinators"
+      :kind-options="UPLOAD_KIND_OPTIONS"
+      :structures="UPLOAD_STRUCTURE"
+      @uploaded="onModelUploaded"
+    />
   </div>
 </template>
 
@@ -413,8 +283,8 @@
 import { computed, onMounted, ref } from 'vue'
 import { useRoute } from 'vue-router'
 import PageHeader from '@/components/PageHeader.vue'
+import ModelUploadDialog from '@/components/ModelUploadDialog.vue'
 import InfoPopover from '@/components/InfoPopover.vue'
-import UploadDropZone, { type UploadTab } from '@/components/UploadDropZone.vue'
 import { Trash2, Pencil } from 'lucide-vue-next'
 import { api } from '@/api'
 import { confirm, alert } from '@/lib/confirm'
@@ -425,6 +295,23 @@ import {
   type Track,
   type TrackVersion as Version,
 } from '@/lib/model-tracks'
+
+// Per-track help shown in the section-header info popover (keyed by track id).
+const TRACK_INFO: Record<string, string> = {
+  detector:
+    'YOLO object detector — finds insect bounding boxes anywhere in the frame. Runs on every image.',
+  binary_classifier:
+    'Insect-vs-background gate. Every motion crop runs through this first; non-insect crops are dropped before the group classifier.',
+  group_classifier:
+    'Assigns each surviving insect crop to one of: bumblebee, fly, butterfly, other.',
+}
+
+// Why each headline metric (keyed by metric_label), shown next to "metric:".
+const METRIC_INFO: Record<string, string> = {
+  mAP50:
+    'Mean average precision at IoU 0.5 — the standard detector quality score (precision/recall over boxes).',
+  f1: 'F1, not accuracy: the classes are imbalanced (mostly background / one dominant taxon), so accuracy is inflated by the majority class. F1 balances precision and recall on the classes that matter.',
+}
 
 interface VersionMock {
   id: number
@@ -518,174 +405,10 @@ function visibleParams(params: Record<string, unknown>): Array<[string, unknown]
   })
 }
 
-// --- Upload modal state ---
+// --- Upload modal ---
+// The dialog UI + folder/weights parsing + submit live in ModelUploadDialog;
+// here we just hold open-state, the kind options, and per-kind folder layouts.
 const uploadOpen = ref(false)
-const uploadKind = ref<string>('detector')
-const uploadVersionName = ref('')
-const uploadDescription = ref('')
-const uploadFile = ref<File | null>(null)
-const uploadSubmitting = ref(false)
-const uploadError = ref('')
-// 'file' = a single .pt/.pth weights file (legacy path).
-// 'folder' = a YOLO Ultralytics run folder; the backend picks weights/best.pt
-// (or last.pt) and ingests recognized siblings as ModelArtifact rows.
-const uploadMode = ref<'file' | 'folder'>('file')
-const uploadFolderFiles = ref<File[]>([])
-
-const modelUploadTabs: UploadTab[] = [
-  {
-    key: 'file',
-    label: 'Single weights file',
-    mode: 'single-file',
-    accept: '.pt,.pth,.bin',
-    placeholder: 'Drop a .pt / .pth file or click to browse',
-    helper: '.pt / .pth — metadata (img_size, arch, epoch) is auto-extracted if present.',
-  },
-  {
-    key: 'folder',
-    label: 'Training run folder',
-    mode: 'folder',
-    placeholder: 'Drop a training run folder or click to browse',
-    helper: 'See the ⓘ next to "Source" for the exact folder layout.',
-  },
-]
-
-// Expected upload layout per kind, shown in the tabs info popover. The
-// pipelines emit different files (see below), so the tree switches on kind.
-// YOLO is the Ultralytics run dir; the classifier trainers write only the
-// checkpoint + a results.json (no plots), with arch-specific filenames.
-const UPLOAD_STRUCTURE: Record<string, string> = {
-  detector: [
-    'run/                       (Ultralytics output)',
-    '├─ weights/',
-    '│  └─ best.pt              ← required (or last.pt)',
-    '├─ results.csv             ← metrics (P/R/mAP)',
-    '├─ results.png             ← training curves',
-    '├─ confusion_matrix.png',
-    '├─ PR_curve.png / F1_curve.png / …',
-    '├─ args.yaml               ← hyperparameters',
-    '└─ val_batch*.jpg          ← sample predictions',
-  ].join('\n'),
-  binary_classifier: [
-    'run/',
-    '├─ <arch>_binary_best.pth      ← required weights',
-    '└─ <arch>_binary_results.json  ← metrics',
-    '',
-    '<arch> = efficientnet | insectnet.',
-    'The trainer emits no plots.',
-  ].join('\n'),
-  group_classifier: [
-    'run/',
-    '├─ group_<arch>_best.pth       ← required weights',
-    '└─ group_<arch>_results.json   ← metrics',
-    '',
-    '<arch> = efficientnet | insectnet.',
-    'The trainer emits no plots.',
-  ].join('\n'),
-}
-const uploadStructure = computed(
-  () => UPLOAD_STRUCTURE[uploadKind.value] ?? UPLOAD_STRUCTURE.detector,
-)
-
-const uploadHasFiles = computed(() =>
-  uploadMode.value === 'file' ? !!uploadFile.value : uploadFolderFiles.value.length > 0,
-)
-
-function formatFileSize(bytes: number): string {
-  if (bytes < 1024) return `${bytes} B`
-  if (bytes < 1024 * 1024) return `${(bytes / 1024).toFixed(0)} KB`
-  return `${(bytes / 1024 / 1024).toFixed(1)} MB`
-}
-
-function onModelUploadSelect(files: File[], tabKey: string) {
-  if (tabKey === 'file') {
-    uploadFile.value = files[0] ?? null
-  } else if (tabKey === 'folder') {
-    uploadFolderFiles.value = files
-  }
-}
-
-// Names the backend recognises and ingests into ModelArtifact. Used by the
-// preview list so the user sees what will land in the DB before they submit.
-// Kept aligned with _ARTIFACT_NAME_MAP in apps/analysis/views.py — when one
-// changes, update the other.
-const KNOWN_ARTIFACT_NAMES = new Set([
-  'BoxF1_curve.png',
-  'BoxP_curve.png',
-  'BoxPR_curve.png',
-  'BoxR_curve.png',
-  'F1_curve.png',
-  'P_curve.png',
-  'PR_curve.png',
-  'R_curve.png',
-  'confusion_matrix.png',
-  'confusion_matrix_normalized.png',
-  'labels.jpg',
-  'labels_correlogram.jpg',
-  'results.csv',
-  'results.png',
-  'args.yaml',
-])
-const SAMPLE_PREFIXES = ['train_batch', 'val_batch']
-
-function basename(path: string): string {
-  return path.includes('/') ? path.slice(path.lastIndexOf('/') + 1) : path
-}
-
-function isRecognisedArtifact(name: string): boolean {
-  if (KNOWN_ARTIFACT_NAMES.has(name)) return true
-  return SAMPLE_PREFIXES.some((p) => name.startsWith(p))
-}
-
-interface FolderPreview {
-  weightsLabel: string | null
-  recognised: string[]
-  skipped: number
-}
-
-// Rank candidate weight files: best > last, and a weights/ subfolder is
-// preferred but not required. Matched by suffix so the classifier filenames
-// (efficientnet_binary_best.pth, group_insectnet_best.pth) count too, as well
-// as Ultralytics' weights/best.pt. Accepts .pt and .pth. 99 = not a weight.
-function weightRank(parent: string, tail: string): number {
-  const lower = tail.toLowerCase()
-  const isBest = lower.endsWith('best.pt') || lower.endsWith('best.pth')
-  const isLast = lower.endsWith('last.pt') || lower.endsWith('last.pth')
-  if (!isBest && !isLast) return 99
-  return (parent === 'weights' ? 0 : 2) + (isBest ? 0 : 1)
-}
-
-const folderPreview = computed<FolderPreview>(() => {
-  let weights: File | null = null
-  let weightsRank = 99
-  const recognised: string[] = []
-  let skipped = 0
-  for (const f of uploadFolderFiles.value) {
-    const rel = (f as File & { webkitRelativePath?: string }).webkitRelativePath || f.name
-    const tail = basename(rel)
-    const segs = rel.split('/')
-    const parent = segs.length >= 2 ? segs[segs.length - 2] : ''
-    const rank = weightRank(parent, tail)
-    if (rank < 99) {
-      // A weight file. Keep the best-ranked one; don't count others as skipped.
-      if (rank < weightsRank) {
-        weights = f
-        weightsRank = rank
-      }
-    } else if (isRecognisedArtifact(tail)) {
-      recognised.push(tail)
-    } else {
-      skipped++
-    }
-  }
-  return {
-    weightsLabel: weights
-      ? (weights as File & { webkitRelativePath?: string }).webkitRelativePath || weights.name
-      : null,
-    recognised: recognised.sort((a, b) => a.localeCompare(b)),
-    skipped,
-  }
-})
 
 const UPLOAD_KIND_OPTIONS = [
   { value: 'detector', label: 'YOLO detector' },
@@ -693,74 +416,37 @@ const UPLOAD_KIND_OPTIONS = [
   { value: 'group_classifier', label: 'Group Classifier' },
 ]
 
+// Expected upload layout per kind, shown in the dialog's info popover. The
+// classifier trainers write only the checkpoint + a results.json (no plots),
+// with arch-specific filenames; the detector kind falls back to the dialog's
+// built-in Ultralytics layout.
+const UPLOAD_STRUCTURE: Record<string, string> = {
+  binary_classifier: [
+    'run/',
+    '├─ <arch>_binary_best.pth',
+    '└─ <arch>_binary_results.json',
+    '',
+    '<arch> = efficientnet | insectnet.',
+    'The trainer emits no plots.',
+  ].join('\n'),
+  group_classifier: [
+    'run/',
+    '├─ group_<arch>_best.pth',
+    '└─ group_<arch>_results.json',
+    '',
+    '<arch> = efficientnet | insectnet.',
+    'The trainer emits no plots.',
+  ].join('\n'),
+}
+
 function openUpload() {
-  uploadKind.value = 'detector'
-  uploadVersionName.value = ''
-  uploadDescription.value = ''
-  uploadFile.value = null
-  uploadFolderFiles.value = []
-  uploadMode.value = 'file'
-  uploadError.value = ''
   uploadOpen.value = true
 }
 
-async function submitUpload() {
-  uploadError.value = ''
-  if (!uploadVersionName.value.trim()) {
-    uploadError.value = 'Version name is required.'
-    return
-  }
-  const form = new FormData()
-  form.append('module', 'pollinators')
-  form.append('kind', uploadKind.value)
-  form.append('version_name', uploadVersionName.value.trim())
-  form.append('description', uploadDescription.value.trim())
-
-  if (uploadMode.value === 'file') {
-    if (!uploadFile.value) {
-      uploadError.value = 'Pick a .pt or .pth file.'
-      return
-    }
-    form.append('weights_file', uploadFile.value)
-  } else {
-    if (!uploadFolderFiles.value.length) {
-      uploadError.value = 'Pick a training run folder.'
-      return
-    }
-    if (!folderPreview.value.weightsLabel) {
-      uploadError.value =
-        'No weights file found. Expected best.pt/.pth or last.pt/.pth (ideally under weights/).'
-      return
-    }
-    // Browsers (Firefox at least) strip '/' from FormData filenames as a
-    // path-traversal guard, so we can't smuggle the relative path through
-    // the filename slot. Send paths as a parallel JSON array in the same
-    // order as the file entries; the backend pairs by index.
-    const paths: string[] = []
-    for (const f of uploadFolderFiles.value) {
-      const rel = (f as File & { webkitRelativePath?: string }).webkitRelativePath || f.name
-      paths.push(rel)
-      form.append('artifacts', f)
-    }
-    form.append('artifact_paths', JSON.stringify(paths))
-  }
-
-  uploadSubmitting.value = true
-  try {
-    const res = await api('/api/analysis/models/', { method: 'POST', body: form })
-    if (!res.ok) {
-      const data = await res.json().catch(() => ({}))
-      throw new Error(data.detail || `HTTP ${res.status}`)
-    }
-    uploadOpen.value = false
-    // Reload to pick up the new version + any introspected parameters.
-    loading.value = true
-    await loadFromApi()
-  } catch (e) {
-    uploadError.value = e instanceof Error ? e.message : String(e)
-  } finally {
-    uploadSubmitting.value = false
-  }
+async function onModelUploaded() {
+  // Reload to pick up the new version + any introspected parameters.
+  loading.value = true
+  await loadFromApi()
 }
 
 const previewMode = computed<string | null>(() => {
