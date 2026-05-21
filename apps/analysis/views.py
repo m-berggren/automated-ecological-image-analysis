@@ -13,7 +13,7 @@ from rest_framework.request import Request
 from rest_framework.response import Response
 from rest_framework.views import APIView
 
-from apps.datasets.models import ImageAsset, UploadStatus
+from apps.datasets.models import ImageAsset, UploadStatus, Module
 from apps.pollinator.services import spawn_inference_pipeline
 from apps.seeds.services import spawn_seeds_pipeline
 
@@ -491,7 +491,13 @@ class InferenceRunStartView(APIView):
             run.upload.status = UploadStatus.READY
             run.upload.save(update_fields=['status'])
 
-        transaction.on_commit(lambda: spawn_inference_pipeline(run))
+        if run.module == Module.SEEDS:
+            from apps.seeds.services import spawn_seeds_pipeline
+            transaction.on_commit(lambda: spawn_seeds_pipeline(run))
+        else:
+            from apps.pollinator.services import spawn_inference_pipeline
+            transaction.on_commit(lambda: spawn_inference_pipeline(run))
+
         return Response(InferenceRunDetailSerializer(run).data)
 
 
@@ -575,7 +581,12 @@ class InferenceRunResumeView(APIView):
                 )
         run.status = JobStatus.PENDING
         run.save(update_fields=['status', 'config'])
-        transaction.on_commit(lambda: spawn_inference_pipeline(run))
+        if run.module == Module.SEEDS:
+            from apps.seeds.services import spawn_seeds_pipeline
+            transaction.on_commit(lambda: spawn_seeds_pipeline(run))
+        else:
+            from apps.pollinator.services import spawn_inference_pipeline
+            transaction.on_commit(lambda: spawn_inference_pipeline(run))
         return Response(InferenceRunDetailSerializer(run).data)
 
 
@@ -701,7 +712,12 @@ class InferenceRunListCreateView(generics.ListCreateAPIView):
             upload.status = UploadStatus.READY
             upload.save(update_fields=['status'])
         # Defer until commit so the worker thread sees the row.
-        transaction.on_commit(lambda: spawn_inference_pipeline(run))
+        if run.module == Module.SEEDS:
+            from apps.seeds.services import spawn_seeds_pipeline
+            transaction.on_commit(lambda: spawn_seeds_pipeline(run))
+        else:
+            from apps.pollinator.services import spawn_inference_pipeline
+            transaction.on_commit(lambda: spawn_inference_pipeline(run))
         return Response(
             InferenceRunDetailSerializer(run).data,
             status=status.HTTP_201_CREATED,
