@@ -282,6 +282,7 @@ class InferenceRun(models.Model):
         blank=True,
     )
 
+    reference_seeds = models.JSONField(default=dict, blank=True)
     # Progress fields. All maintained by the worker; defaults cover the
     # pre-run state.
     image_count = models.IntegerField(default=0)
@@ -332,6 +333,10 @@ class DetectionStatus(models.TextChoices):
     REJECTED = 'rejected', 'Rejected'
     UNSURE = 'unsure', 'Unsure'
 
+class SeedStatus(models.TextChoices):
+    ACTIVE = 'active', 'Active'
+    ABORTED = 'aborted', 'Aborted'
+    REFERENCE = 'reference', 'Reference'
 
 class Detection(models.Model):
     """A single bounding box predicted by an inference run.
@@ -363,6 +368,8 @@ class Detection(models.Model):
             'the ML pipeline in ml-pipelines/pollinator/workflows.'
         ),
     )
+    polygon = models.JSONField()
+
     confidence = models.FloatField()
     predicted_class = models.CharField(max_length=50)
     area = models.FloatField(
@@ -384,6 +391,21 @@ class Detection(models.Model):
         max_length=50,
         blank=True,
         help_text='Class assigned by a reviewer when correcting the prediction',
+    )
+
+    seed_status = models.CharField(
+        max_length=20,
+        choices=SeedStatus.choices,
+        null=True,
+        blank=True,
+    )
+
+    reference_detection = models.ForeignKey(
+        'self',
+        on_delete=models.SET_NULL,
+        null=True,
+        blank=True,
+        related_name='classified_seeds',
     )
 
     reviewed_by = models.ForeignKey(

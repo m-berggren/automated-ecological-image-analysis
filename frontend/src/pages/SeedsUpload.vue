@@ -13,7 +13,7 @@
       </div>
 
       <div class="space-y-2">
-        <label class="block text-xs text-muted-foreground">Run name</label>
+        <label class="block text-xs text-muted-foreground">Run Name</label>
 
         <input
           v-model="runName"
@@ -75,48 +75,73 @@
     <section class="rounded-xl border border-border bg-surface p-5 space-y-5">
       <div>
         <h2 class="text-sm font-semibold">Detection settings</h2>
-
-        <p class="text-xs text-muted-foreground mt-1">
-          Configure model selection and inference behavior.
-        </p>
       </div>
 
-      <!-- Model selector — single, filtered by selected seed -->
+      <!-- Model selector -->
       <div class="space-y-2">
-        <label class="block text-xs text-muted-foreground">
-          Model version
-          <span v-if="selectedSeed" class="ml-1 text-foreground font-medium"
-            >for {{ selectedSeed }}</span
-          >
-        </label>
-        <select
-          :value="selectedSeed ? config.models[selectedSeed]?.model_version_id : null"
-          @change="
-            (e) => {
-              if (selectedSeed) {
-                config.models[selectedSeed].model_version_id = Number(
-                  (e.target as HTMLSelectElement).value,
-                )
-              }
-            }
-          "
-          :disabled="!selectedSeed"
-          class="w-full px-3 py-2 rounded-md border border-border bg-background text-sm disabled:opacity-50 disabled:cursor-not-allowed"
-        >
-          <option :value="''" disabled>
-            {{ selectedSeed ? 'Select model version' : 'Select a seed type first' }}
-          </option>
+        <div class="text-[11px] font-semibold uppercase tracking-wider text-muted-foreground mb-3">
+          Choose model version
+        </div>
 
-          <option v-for="model in filteredModelVersions" :key="model.id" :value="model.id">
-            {{ model.version_name }}{{ model.is_active ? ' (active)' : '' }}
-          </option>
-        </select>
-        <p v-if="selectedSeed && !filteredModelVersions.length" class="text-xs text-amber-600">
-          No trained models found for {{ selectedSeed }}. Train one first on the
-          <RouterLink to="/seeds/training" class="underline hover:text-foreground"
-            >Training page</RouterLink
-          >.
-        </p>
+        <!-- Empty state -->
+        <div
+          v-if="!activeModelVersions.length"
+          class="rounded-lg border border-border bg-muted/20 p-4 text-sm"
+        >
+          <span class="text-muted-foreground"> No active models yet. </span>
+
+          <RouterLink to="/seeds/training" class="ml-1 text-primary hover:underline font-medium">
+            Go to the training page
+          </RouterLink>
+
+          <span class="text-muted-foreground"> to create one. </span>
+        </div>
+
+        <!-- Cards -->
+        <div v-else class="space-y-2">
+          <label
+            v-for="model in activeModelVersions"
+            :key="model.id"
+            class="flex items-start gap-3 p-3 rounded-lg border cursor-pointer transition-colors"
+            :class="
+              config.model_version_id === model.id
+                ? 'border-primary bg-primary/5'
+                : 'border-border hover:border-primary/40'
+            "
+          >
+            <input
+              type="radio"
+              name="model-version"
+              class="mt-0.5"
+              :checked="config.model_version_id === model.id"
+              @change="config.model_version_id = model.id"
+            />
+
+            <div class="flex-1 min-w-0">
+              <!-- Top row -->
+              <div class="flex items-baseline gap-2 flex-wrap">
+                <span class="font-medium text-sm">
+                  {{ model.version_name }}
+                </span>
+
+                <span class="text-xs text-muted-foreground italic">
+                  {{ model.kind }}
+                </span>
+
+                <span
+                  class="text-xs px-2 py-0.5 rounded-full bg-green-300 text-green-900 font-medium"
+                >
+                  Active
+                </span>
+              </div>
+
+              <!-- Subtitle -->
+              <div class="text-xs text-muted-foreground mt-1">
+                Seed detection model ready for inference
+              </div>
+            </div>
+          </label>
+        </div>
       </div>
 
       <!-- Advanced settings -->
@@ -199,14 +224,15 @@
       <header class="flex items-center justify-between px-5 py-3 border-b border-border">
         <div class="text-sm">
           <span class="font-medium">{{ doneCount }}</span>
-
           <span class="text-muted-foreground"> of </span>
-
           <span class="font-medium">
             {{ uploader.items.length }}
           </span>
-
           <span class="text-muted-foreground"> uploaded </span>
+
+          <span v-if="uploadingCount > 0" class="ml-3 text-primary animate-pulse font-medium">
+            Uploading & verifying species...
+          </span>
 
           <span v-if="failedCount" class="ml-3 text-red-600"> {{ failedCount }} failed </span>
         </div>
@@ -217,7 +243,6 @@
           @click="startDetection"
         >
           <span v-if="!starting"> Start detection </span>
-
           <span v-else> Starting… </span>
         </button>
       </header>
@@ -230,12 +255,15 @@
         >
           <XCircle class="w-4 h-4 shrink-0 text-red-600" />
 
-          <span class="truncate flex-1">
+          <span class="truncate flex-1" :title="item.file.name">
             {{ item.file.name }}
           </span>
 
-          <span class="text-xs text-red-600 truncate max-w-[260px]">
-            {{ item.error }}
+          <span
+            class="text-xs text-red-600 truncate max-w-[320px]"
+            :title="formatError(item.error)"
+          >
+            {{ formatError(item.error) }}
           </span>
 
           <button
@@ -257,7 +285,7 @@
 </template>
 
 <script setup lang="ts">
-import { computed, onMounted, ref, watch } from 'vue'
+import { computed, onMounted, ref } from 'vue'
 import { useRouter } from 'vue-router'
 import { RouterLink } from 'vue-router'
 
@@ -277,21 +305,10 @@ interface ModelVersion {
   is_active: boolean
 }
 
-interface SeedType {
-  id: string
-  species: string
-  isCustom: boolean
-}
-
-interface SeedModelConfig {
-  model_version_id: number | null
-}
-
 interface PipelineConfig {
   confidence_threshold: number
   slice_overlap_ratio: number
-
-  models: Record<string, SeedModelConfig>
+  model_version_id: number | null
 }
 
 type Uploader = ReturnType<typeof createUploader>
@@ -322,18 +339,16 @@ const config = ref<PipelineConfig>({
   models: {},
 })
 
-const filteredModelVersions = computed(() => {
+// Filter models to match the selected seed species
+const activeModelVersions = computed(() => {
   if (!selectedSeed.value) return []
-
-  return modelVersions.value.filter((m) => m.module === 'seeds' && m.kind === selectedSeed.value)
+  return modelVersions.value.filter(
+    (m) => m.module === 'seeds' && m.is_active && m.kind === selectedSeed.value,
+  )
 })
 
-watch(selectedSeed, (seed) => {
-  if (!seed) return
-
-  config.value.models[seed] ??= {
-    model_version_id: null,
-  }
+const uploadingCount = computed(() => {
+  return uploader.value?.items.filter((item: UploadItem) => item.status === 'uploading').length ?? 0
 })
 
 const doneCount = computed(() => {
@@ -355,11 +370,26 @@ onMounted(async () => {
     folderInput.value.setAttribute('webkitdirectory', '')
   }
   try {
+    if (import.meta.env.DEV && window.location.search.includes('preview=default')) {
+      const { default: mocks } = await import('@/mocks/seed-models.json')
+      const raw = (mocks as any).default
+      modelVersions.value = raw.tracks.flatMap((track: any) =>
+        track.versions.map((version: any) => ({
+          id: version.id,
+          module: 'seeds',
+          kind: track.id,
+          version_name: version.version_name,
+          is_active: version.is_active,
+        })),
+      )
+      return
+    }
+
     const res = await api('/api/analysis/models/?module=seeds')
     if (res.ok) {
       modelVersions.value = await res.json()
 
-      // Extract unique species (kind) from available models
+      // Extract unique species from available models
       const uniqueKinds = Array.from(
         new Set(modelVersions.value.map((m) => m.kind).filter(Boolean)),
       )
@@ -367,7 +397,7 @@ onMounted(async () => {
       // Build the UI buttons
       seedTypes.value = uniqueKinds.map((kind) => ({
         id: kind,
-        species: '', // You can add a mapping dictionary here later if you want full biological names
+        species: '',
         isCustom: false,
       }))
 
@@ -385,14 +415,18 @@ function onRetry(id: string) {
   uploader.value?.retry(id)
 }
 
-function removeSeed(id: string) {
-  seedTypes.value = seedTypes.value.filter((seed) => seed.id !== id)
-
-  delete config.value.models[id]
-
-  if (selectedSeed.value === id) {
-    selectedSeed.value = null
+function formatError(err?: string) {
+  if (!err) return 'Upload failed'
+  try {
+    const parsed = JSON.parse(err)
+    if (Array.isArray(parsed)) return parsed[0]
+    if (parsed.detail) return parsed.detail
+    if (parsed.non_field_errors) return parsed.non_field_errors[0]
+  } catch {
+    // Not JSON, continue to fallback
   }
+  // Remove brackets and quotes from raw DRF array strings
+  return err.replace(/^\["|"]$/g, '').replace(/\\"/g, '"')
 }
 
 const runId = ref<number | null>(null)
@@ -483,18 +517,8 @@ async function startDetection() {
     return
   }
 
-  if (!selectedSeed.value) {
-    error.value = 'Select a seed type.'
-    return
-  }
-
-  const modelId = selectedSeed.value
-    ? config.value.models[selectedSeed.value]?.model_version_id
-    : null
-
-  if (!modelId) {
-    error.value = `Select a model version for ${selectedSeed.value}.`
-
+  if (!config.value.model_version_id) {
+    error.value = 'Select a model version.'
     return
   }
 

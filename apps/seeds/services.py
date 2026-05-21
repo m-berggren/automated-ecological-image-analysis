@@ -1,9 +1,59 @@
+"""Seed species dataset bootstrap service."""
+from __future__ import annotations
+
+import logging
+from pathlib import Path
 import threading
 import logging
 from django.utils import timezone
 from apps.analysis.models import JobStatus, Detection, InferenceRun, ModelVersion
 
 logger = logging.getLogger(__name__)
+
+def _base_data() -> Path:
+    from django.conf import settings
+    return settings.BASE_DIR / 'data' / 'seed'
+
+def bootstrap_species_dataset(species: str) -> Path:
+    """Create the folder structure and YAML config for a new seed species.
+
+    Creates:
+        root/data/seed/<species>_model/
+        root/data/seed/<species>_model/train_sliced/
+        root/data/seed/<species>_model/val/images/
+        root/data/seed/<species>_model/<species>.yaml
+
+    Returns the path to the YAML file.
+    """
+    BASE_DATA = _base_data()
+    species = species.lower()
+    species_dir = BASE_DATA / f'{species}_model'
+
+    if species_dir.exists():
+        logger.info(f'Dataset folder for {species} already exists, skipping bootstrap')
+        return species_dir / f'{species}.yaml'
+
+    logger.info(f'Bootstrapping dataset folder for {species}')
+
+    (species_dir / 'train_sliced').mkdir(parents=True, exist_ok=True)
+    (species_dir / 'val' / 'images').mkdir(parents=True, exist_ok=True)
+
+    yaml_path = species_dir / f'{species}.yaml'
+    yaml_path.write_text(
+        f'path: {species_dir}\n'
+        f'train: train_sliced\n'
+        f'val: val/images\n'
+        f'\n'
+        f'names:\n'
+        f'  0: {species}\n'
+    )
+
+    logger.info(f'Dataset folder created at {species_dir}')
+    return yaml_path
+
+def species_dataset_exists(species: str) -> bool:
+    """Check if a species dataset folder already exists."""
+    return (_base_data() / f'{species.lower()}_model').exists()
 
 def process_seeds_run(run_id: int):
     try:
@@ -18,7 +68,7 @@ def process_seeds_run(run_id: int):
         selected_seed = run.config.get('selected_seed')
 
         # Extract the model ID
-        model_id = run.config.get('models', {}).get(selected_seed, {}).get('model_version_id')
+        model_id = run.config.get('model_version_id')
 
         if not model_id:
             raise ValueError(f"No model version selected for seed type: {selected_seed}")
@@ -88,6 +138,7 @@ def process_seeds_run(run_id: int):
                         image=image_asset,
                         inference_run=run,
                         bbox={'poly': flat_poly[:8]},
+                        polygon=flat_poly[:8],
                         confidence=float(pred.score.value),
                         predicted_class=selected_seed,
                         area=area

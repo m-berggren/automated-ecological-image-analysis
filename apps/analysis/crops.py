@@ -29,7 +29,7 @@ def write_detection_crop(detection: Detection) -> bool:
         return False
     bbox = detection.bbox or {}
     # Pipeline writes bbox as {x1, y1, x2, y2, w, h}; see
-    # ml-pipelines/pollinator/workflows/inference.py._merge_image_detections.
+    # ml_pipelines/pollinator/workflows/inference.py._merge_image_detections.
     try:
         x1 = float(bbox['x1'])
         y1 = float(bbox['y1'])
