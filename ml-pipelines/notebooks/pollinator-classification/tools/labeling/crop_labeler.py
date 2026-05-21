@@ -1,32 +1,41 @@
 """
-Pollinator Crop Labeling Tool  (full-width layout)
-=======================================================
-Top: full-width debug image with numbered bounding boxes
-Bottom: horizontal strip of 6 crops  (scroll row by row)
+crop_labeler.py — Assign class labels to candidate crops.
 
-Controls:
-  R  → toggle nav mode
-
-  IMAGE_NAV (default — no header badge)
-    Left / Right / A / D  → previous / next image
-    Up / Down             → scroll the crop strip
-    b 1 2 3 4 u           → batch-label all unlabeled in this image
-                            (same key twice = undo)
-    click crop            → select it; label keys then apply to that crop only
-
-  CROP_NAV  (header shows "CROP NAV" badge)
-    Left / Right          → move crop selection left / right
-    Up / Down             → move selection up / down by row
-    b 1 2 3 4 u           → label the SELECTED crop, then advance
-
-  Labels: bg / bumblebee / fly / butterfly / other / unsure
-  Tab / E  → Label-all mode toggle (extra fine-grained control)
-  C        → clear all labels in current image
-  P        → preview selected crop
-  Q        → quit and save
+Use this after running infer_cropbased.ipynb in preprocessing mode.
+It reads the crops/ folder and results.csv produced by that notebook,
+shows each source image with its detected bounding boxes, and lets you
+assign a class label to each crop. Labeled crops are saved to
+annotated_crops/{class}/ for use in classifier training.
 
 Usage:
-  python3 crop_labeler_v2.py --results path/to/results --output path/to/annotated_crops
+  python3 crop_labeler.py --results path/to/crop_results/run_name/camera_name
+  python3 crop_labeler.py --results path/to/results --output path/to/annotated_crops
+
+Layout:
+  Top    — full source image with numbered bounding boxes
+  Bottom — scrollable strip of the extracted crops for that image
+
+Controls:
+  IMAGE_NAV mode (default):
+    Left / Right / A / D  → previous / next image
+    Up / Down             → scroll the crop strip
+    b 1 2 3 4 u           → label ALL unlabeled crops in this image at once
+                            (press the same key again to undo)
+    click crop            → select a single crop; label key then applies to it only
+
+  CROP_NAV mode (press R to switch):
+    Left / Right          → move crop selection left / right
+    Up / Down             → move selection up / down by row
+    b 1 2 3 4 u           → label the SELECTED crop and advance to the next
+
+  Label keys:
+    b = background   1 = bumblebee   2 = fly   3 = butterfly   4 = other   u = unsure
+
+  Other:
+    R      → toggle IMAGE_NAV / CROP_NAV mode
+    C      → clear all labels in the current image
+    P      → preview selected crop fullscreen
+    Q      → quit and save
 """
 
 import os
@@ -99,17 +108,41 @@ def get_json_path(input_folder, output_dir):
 # ── CLI ───────────────────────────────────────────────────────────────────────
 parser = argparse.ArgumentParser()
 parser.add_argument('--results', type=Path, default=Path('results'))
-parser.add_argument('--output', type=Path, default=Path('labeled_crops'))
+parser.add_argument('--output', type=Path, default=Path('labeled_crops'),
+                    help='Destination dataset folder, e.g. data/training/annotated_crops/labeled_ls. '
+                         'Class subfolders and a progress/ folder are created inside it.')
 args = parser.parse_args()
 
+print()
+print('═' * 60)
+print('  Crop Labeler')
+print('═' * 60)
+print('  Assigns class labels to candidate crops extracted by')
+print('  infer_cropbased.ipynb (MODE=preprocess).')
+print()
+print(f'  Input  (--results): {args.results}')
+print(f'  Output (--output) : {args.output}')
+print()
+print('  Controls:')
+print('    b         background')
+print('    1         bumblebee')
+print('    2         fly')
+print('    3         butterfly')
+print('    4         other')
+print('    u         unsure')
+print('    a / ←    previous image')
+print('    d / →    next image')
+print('    R         toggle image-nav / crop-nav mode')
+print('    P         preview selected crop fullscreen')
+print('    C         clear all labels in current image')
+print('    Q         quit and save')
+print('═' * 60)
+print()
+
 RESULTS_DIR = args.results
-OUTPUT_DIR = (
-    args.output.with_name('labeled_crops')
-    if args.output.name == 'labeled'
-    else args.output
-)
-ANNOTATION_DIR = OUTPUT_DIR / 'progress'
-LABELED_DIR = OUTPUT_DIR / 'labeled'
+OUTPUT_DIR = args.output          # e.g. annotated_crops/labeled_ls
+ANNOTATION_DIR = OUTPUT_DIR / 'progress'   # progress JSONs live inside the dataset folder
+LABELED_DIR = OUTPUT_DIR          # class subfolders go directly inside OUTPUT_DIR
 ANNOTATION_DIR.mkdir(parents=True, exist_ok=True)
 
 for sub in ('bumblebee', 'fly', 'butterfly', 'other', 'background', 'unsure'):

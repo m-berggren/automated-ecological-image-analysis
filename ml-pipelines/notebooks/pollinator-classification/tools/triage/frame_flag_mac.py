@@ -1,25 +1,39 @@
 #!/usr/bin/env python3
 
-# Play image folders and flag interesting frames on Mac using OpenCV.
+# Browse camera image folders as a slideshow, mark frames that look like they
+# contain a pollinator, then copy the marked frames (plus surrounding context
+# frames) to a destination folder of your choice.
+#
+# What it does:
+#   1. Opens a Finder dialog to select the camera image root folder
+#      (skip this by passing IMAGE_ROOT on the command line).
+#   2. Plays each camera subfolder as a slideshow — press m to mark a frame.
+#   3. When you quit (Esc), if any frames were marked a second Finder dialog
+#      opens so you can choose where to save the copies.
+#   4. Copies every marked frame PLUS --context-frames frames before and after
+#      each one into {dest}/{camera_name}_{timestamp}/.
+#      Context frames are included so the preprocessing pipeline has prior
+#      frames to use as background reference.
+#   5. Saves all marked paths to flags_all.json (persists across sessions).
 #
 # Usage:
-#   python3 frame_flag_mac.py
-#   python3 frame_flag_mac.py IMAGE_ROOT
-#   python3 frame_flag_mac.py --list IMAGE_ROOT
-#   python3 frame_flag_mac.py --interval 0.05 --context-frames 2
-#   python3 frame_flag_mac.py --export-name my_export_name
-#
-# If IMAGE_ROOT is not provided, a macOS Finder folder picker will open.
+#   python3 frame_flag_mac.py                           # Finder picks image root
+#   python3 frame_flag_mac.py IMAGE_ROOT                # use this folder directly
+#   python3 frame_flag_mac.py --list IMAGE_ROOT         # list folders + counts, no slideshow
+#   python3 frame_flag_mac.py --context-frames 2        # copy 2 frames before/after each mark (default)
+#   python3 frame_flag_mac.py --export-dir /some/path   # set destination without Finder dialog
+#   python3 frame_flag_mac.py --export-name my_session  # name the output subfolder
+#   python3 frame_flag_mac.py --interval 0.05           # faster slideshow (50 ms/frame)
 #
 # Controls:
-#   m = mark current image
-#   u = unmark current image
-#   space / h = pause or resume slideshow
-#   a / d = previous or next image
+#   m           = mark current frame
+#   u           = unmark current frame
+#   space / h   = pause or resume slideshow
+#   a / d       = previous or next image
 #   left / right arrow = previous or next image
-#   n = next folder
-#   b = previous folder
-#   Esc = quit all
+#   n           = next camera folder
+#   b           = previous camera folder
+#   Esc         = quit (destination picker opens if anything was marked)
 #
 # Note:
 #   q is intentionally not used for quitting, because OpenCV on macOS can
@@ -633,6 +647,10 @@ def main():
     args = parse_args()
 
     if args.root is None:
+        print()
+        print('Frame Flag — select the folder containing your camera images.')
+        print('(A Finder dialog will open now.)')
+        print()
         chosen_root = choose_image_root_with_finder()
 
         if chosen_root is None:
@@ -665,12 +683,30 @@ def main():
         print(f'No image folders found under: {args.root}', file=sys.stderr)
         return 1
 
-    chosen_export_dir = choose_export_folder_with_finder()
-
-    if chosen_export_dir is None:
-        print(f'No export folder selected. Using default export folder: {args.export_dir}')
-    else:
-        args.export_dir = chosen_export_dir
+    print()
+    print('═' * 60)
+    print('  Frame Flag — macOS')
+    print('═' * 60)
+    print('  Browse camera images and mark frames that may contain')
+    print('  an insect. When you quit, marked frames (plus context')
+    print('  frames before and after each one) are copied to a')
+    print('  folder you choose — without touching the originals.')
+    print()
+    print(f'  Image root   : {args.root}')
+    print(f'  Folders found: {len(folders)}')
+    print(f'  Context frames: {args.context_frames} before and after each marked frame')
+    print()
+    print('  Controls:')
+    print(f'    {args.mark_key}         mark current frame')
+    print('    u         unmark current frame')
+    print('    space/h   play / pause')
+    print('    a / ←    previous frame')
+    print('    d / →    next frame')
+    print('    n         next camera folder')
+    print('    b         previous camera folder')
+    print('    Esc       quit  (export dialog opens if anything was marked)')
+    print('═' * 60)
+    print()
 
     flag_file = args.flag_file.resolve()
     flags = load_flags(flag_file)
@@ -713,6 +749,16 @@ def main():
     finally:
         cv2.destroyAllWindows()
         save_flags(flag_file, flags)
+
+    # Only ask for an export folder if something was actually marked this session.
+    # The Finder dialog appears here — after browsing — not before.
+    if session_marked and args.export_dir == Path.home() / 'Desktop' / 'pollinator_flagged_frames':
+        print(f'\n{len(session_marked)} frame(s) marked. Choose a folder to copy them to...')
+        chosen_export_dir = choose_export_folder_with_finder()
+        if chosen_export_dir is None:
+            print(f'No folder selected. Using default: {args.export_dir}')
+        else:
+            args.export_dir = chosen_export_dir
 
     export_dir = export_marked_images_with_context(
         folders,
