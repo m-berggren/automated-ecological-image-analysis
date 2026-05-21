@@ -203,13 +203,13 @@ class PollinatorInferencePipeline:
         yolo_model: str,
         binary_model: str,
         group_model: str,
+        yolo_confidence: float,
+        yolo_slice_size: int,
+        yolo_overlap: float,
+        binary_threshold: float,
+        group_threshold: float,
+        iou_threshold: float,
         config: Optional[dict] = None,
-        yolo_confidence: float = 0.25,
-        yolo_slice_size: int = 640,
-        yolo_overlap: float = 0.2,
-        binary_threshold: float = 0.5,
-        group_threshold: float = 0.0,
-        iou_threshold: float = 0.3,
         device: Optional[str] = None,
     ) -> None:
         self.cfg = {**DEFAULT_CONFIG, **(config or {})}
@@ -276,16 +276,16 @@ class PollinatorInferencePipeline:
 
         meta = get_exif_metadata(str(img_path), self.cfg)
 
-        # YOLO runs regardless of EXIF skip flags: skip_flash/skip_foggy
-        # are heuristics for the motion branch only.
-        yolo_dets = self._yolo_for_image(img_path, zone_full)
-
+        # skip_flash / skip_foggy skip the frame entirely: no YOLO and no
+        # motion branch. prev_frame is still refreshed so the next image's
+        # motion reference is the most recent real frame.
         if meta['skip']:
             self.prev_frame = img
-            insect_dets: list[dict] = []
-        else:
-            insect_dets = self._motion_for_image(img, zone_motion)
-            self.prev_frame = img
+            return []
+
+        yolo_dets = self._yolo_for_image(img_path, zone_full)
+        insect_dets = self._motion_for_image(img, zone_motion)
+        self.prev_frame = img
 
         return _merge_image_detections(
             img_path.name, yolo_dets, insect_dets, self.iou_threshold

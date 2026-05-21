@@ -297,6 +297,13 @@ class InferenceRun(models.Model):
     )
     error_message = models.TextField(blank=True)
 
+    # Per-run reviewer/export preferences, distinct from the frozen `config`.
+    # Shape: {auto_select: bool, yolo_threshold: float, group_threshold: float}.
+    # Any missing key falls back (on the frontend) to the run's config
+    # confidence values, so a fresh run's review sliders start at whatever
+    # it was processed with rather than a hard-coded default.
+    review_settings = models.JSONField(default=dict, blank=True)
+
     initiated_by = models.ForeignKey(
         settings.AUTH_USER_MODEL,
         on_delete=models.SET_NULL,
@@ -402,6 +409,17 @@ class Detection(models.Model):
             'True once a reviewer has explicitly toggled excluded_from_export '
             'from the Export page. Engulfment auto-exclude skips these rows '
             'so a manual include/exclude decision is sticky across re-runs.'
+        ),
+    )
+    exclude_from_training = models.BooleanField(
+        default=False,
+        help_text=(
+            'Reviewer flag: exclude this crop from binary/group classifier '
+            'training. Set by un-ticking the crop in the training pool drawer; '
+            'the crop stays visible (greyed) and can be re-included. Distinct '
+            'from excluded_from_export (which only affects CSV export) and from '
+            'ImageAsset.exclude_from_training (which governs YOLO detector '
+            'training at the image level).'
         ),
     )
 
