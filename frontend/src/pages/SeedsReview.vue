@@ -79,7 +79,7 @@
                 :points="polyPoints(detection)"
                 fill="transparent"
                 :stroke="selectedReferenceId === detection.id ? '#22c55e' : '#60a5fa'"
-                :stroke-width="selectedReferenceId === detection.id ? 4 : 2"
+                :stroke-width="selectedReferenceId === detection.id ? 12 : 2"
                 style="pointer-events: all; cursor: pointer"
                 :class="selectedReferenceId === detection.id ? 'ring-highlight' : ''"
                 @click="selectReference(detection.id)"
@@ -135,8 +135,12 @@
     <Transition name="toast">
       <div
         v-if="toast"
-        class="fixed bottom-6 left-1/2 -translate-x-1/2 z-50 px-5 py-3 rounded-xl shadow-lg text-sm font-medium"
-        :class="toast.type === 'success' ? 'bg-green-600 text-white' : 'bg-red-600 text-white'"
+        class="fixed bottom-6 left-1/2 -translate-x-1/2 z-50 px-5 py-3 rounded-xl shadow-lg text-sm font-medium text-white"
+        :style="
+          toast.type === 'success'
+            ? 'background-color: hsl(128, 45%, 24%)'
+            : 'background-color: hsl(0, 72%, 51%)'
+        "
       >
         {{ toast.message }}
       </div>
