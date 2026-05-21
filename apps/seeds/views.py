@@ -8,7 +8,7 @@ from rest_framework.response import Response
 from rest_framework.permissions import IsAuthenticated
 
 from apps.analysis.models import TrainingJob, JobStatus, InferenceRun
-from apps.datasets.models import Module
+from apps.datasets.models import Module, ImageAsset
 from apps.seeds.services import bootstrap_species_dataset
 from apps.seeds.training import spawn_training_job
 from apps.seeds.reference_seed_service import calculate_seed_status
@@ -116,13 +116,25 @@ class SeedReferenceReviewView(APIView):
     def get(self, request, run_id):
         run = InferenceRun.objects.get(id=run_id)
 
-        images_qs = run.images.all()
+        images_qs = run.upload.images.filter(purpose='inference')
 
         response_images = []
 
         for img in images_qs:
-            if img.width and img.height:
-                img_width, img_height = img.width, img.height
+
+            # Extract the annotated image ID to display the annotated image on the Review page
+            annotated_id = img.metadata.get('annotated_image_id') if img.metadata else None
+            if annotated_id:
+                try:
+                    display_img = ImageAsset.objects.get(id=annotated_id)
+                except ImageAsset.DoesNotExist:
+                    display_img = img  # Fallback to original if deleted
+            else:
+                display_img = img
+
+
+            if display_img.width and display_img.height:
+                img_width, img_height = display_img.width, display_img.height
             else:
                 with Image.open(img.file.path) as im:
                     img_width, img_height = im.size
@@ -132,7 +144,7 @@ class SeedReferenceReviewView(APIView):
 
             response_images.append({
                 "id": img.id,
-                "image_url": request.build_absolute_uri(img.file.url),
+                "image_url": request.build_absolute_uri(display_img.file.url),
                 "filename": os.path.basename(img.file.name),
                 "width": img_width,
                 "height": img_height,

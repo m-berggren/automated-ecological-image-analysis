@@ -1,3 +1,5 @@
+"""Main file used for local testing/research purposes of the seed module ML pipeline."""
+
 import json
 import os
 from PIL import Image

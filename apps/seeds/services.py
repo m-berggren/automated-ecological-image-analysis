@@ -2,11 +2,14 @@
 from __future__ import annotations
 
 import logging
+import os
 from pathlib import Path
 import threading
 import logging
+from django.core.files import File
 from django.utils import timezone
 from apps.analysis.models import JobStatus, Detection, InferenceRun, ModelVersion
+from apps.datasets.models import ImageAsset
 
 logger = logging.getLogger(__name__)
 
@@ -78,7 +81,10 @@ def process_seeds_run(run_id: int):
         model_path = model_version.model_file_path
 
         # Load the model
+        from django.core.files import File
+        from apps.datasets.models import ImageAsset
         from seed_src.utils.helpers import load_model
+        from seed_src.inference.inference import generate_prediction_visuals
         from sahi.predict import get_sliced_prediction
 
         model = load_model(model_path)
@@ -102,6 +108,27 @@ def process_seeds_run(run_id: int):
                 overlap_width_ratio=overlap,
                 postprocess_match_threshold=conf_thresh
             )
+
+            # Extract just the filename
+            base_filename = os.path.basename(image_asset.file.name)
+
+            # Generate the path to the annotated prediction image
+            annotated_img_path = generate_prediction_visuals(
+                result, img_path, base_filename, 'ml_pipelines/seed_src/prediction_images/'
+            )
+
+            # Save the annotated prediction image to Django's media storage
+            with open(annotated_img_path, 'rb') as f:
+                annotated_asset = ImageAsset.objects.create(
+                    module='seeds',
+                    purpose='inference_output',
+                    upload=run.upload
+                )
+                annotated_asset.file.save(f'annotated_{base_filename}', File(f))
+
+            # Link this to the original image for easy access in the UI
+            image_asset.metadata['annotated_image_id'] = annotated_asset.id
+            image_asset.save()
 
             # Save detections to DB
             for pred in result.object_prediction_list:
