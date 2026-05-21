@@ -2,24 +2,24 @@
   <div>
     <!-- Tabs (only when more than one mode is configured). Switching the
          active tab swaps which hidden input the box click triggers. -->
-    <div
-      v-if="tabs.length > 1"
-      class="inline-flex rounded border border-border overflow-hidden text-xs mb-2"
-    >
-      <button
-        v-for="t in tabs"
-        :key="t.key"
-        type="button"
-        :class="
-          activeKey === t.key
-            ? 'bg-primary text-primary-foreground'
-            : 'bg-background hover:bg-muted'
-        "
-        class="px-3 py-1.5"
-        @click="setActive(t.key)"
-      >
-        {{ t.label }}
-      </button>
+    <div v-if="tabs.length > 1" class="flex items-center gap-2 mb-2">
+      <div class="inline-flex rounded border border-border overflow-hidden text-xs">
+        <button
+          v-for="t in tabs"
+          :key="t.key"
+          type="button"
+          :class="
+            activeKey === t.key
+              ? 'bg-primary text-primary-foreground'
+              : 'bg-background hover:bg-muted'
+          "
+          class="px-3 py-1.5"
+          @click="setActive(t.key)"
+        >
+          {{ t.label }}
+        </button>
+      </div>
+      <slot name="tabs-after" :active-key="activeKey" />
     </div>
 
     <div
@@ -122,9 +122,7 @@ const activeKey = computed(() => internalActive.value)
 const active = computed<UploadTab | undefined>(() =>
   props.tabs.find((t) => t.key === activeKey.value),
 )
-const activePlaceholder = computed(
-  () => active.value?.placeholder ?? props.placeholder,
-)
+const activePlaceholder = computed(() => active.value?.placeholder ?? props.placeholder)
 const activeHelper = computed(() => active.value?.helper ?? props.helper)
 
 function setActive(key: string) {

@@ -96,43 +96,58 @@ def log_dataset_stats(dataset_root: Path, classes: list):
 
 
 # ── Eval helpers ───────────────────────────────────────────────────────────
-def per_class_metrics(box, classes: list) -> dict:
-    out = {}
-    for i, cls in enumerate(classes):
+def _per_class_rows(box, classes: list) -> dict:
+    """Map each class name to its metrics, or None if it had no val instances.
+
+    Ultralytics packs box.p / box.r / box.ap50 only with the classes that
+    appeared in the validation set, in the order given by box.ap_class_index
+    (which holds the real class ids). Indexing those arrays by the global
+    class position is wrong: a fly-only set has box.ap50[0]=fly, so position 0
+    would be mislabelled as classes[0] (bumblebee). Map through ap_class_index.
+    """
+    out: dict = {cls: None for cls in classes}
+    try:
+        ap_class_index = [int(c) for c in box.ap_class_index]
+    except (AttributeError, TypeError):
+        # Fallback: assume positional alignment (older ultralytics / no data).
+        ap_class_index = list(range(len(classes)))
+    for pos, class_id in enumerate(ap_class_index):
+        if not 0 <= class_id < len(classes):
+            continue
         try:
-            p = float(box.p[i])
-            r = float(box.r[i])
+            p = float(box.p[pos])
+            r = float(box.r[pos])
             f1 = 2 * p * r / max(1e-8, p + r)
-            ap = float(box.ap50[i])
-            out[cls] = {
-                'precision': p,
-                'recall': r,
-                'f1': f1,
-                'ap50': ap,
-            }
+            ap = float(box.ap50[pos])
         except (IndexError, AttributeError):
-            out[cls] = None
+            continue
+        out[classes[class_id]] = {'precision': p, 'recall': r, 'f1': f1, 'ap50': ap}
     return out
+
+
+def per_class_metrics(box, classes: list) -> dict:
+    return _per_class_rows(box, classes)
 
 
 def log_split_metrics(metrics, split_name: str, classes: list) -> dict:
     logger.info(f'\n--- {split_name.upper()} per-class results ---')
     box = metrics.box
-    for i, cls in enumerate(classes):
-        try:
-            p = float(box.p[i])
-            r = float(box.r[i])
-            f1 = 2 * p * r / max(1e-8, p + r)
-            ap = float(box.ap50[i])
-            logger.info(f'{cls:15}  P={p:.3f}  R={r:.3f}  F1={f1:.3f}  AP50={ap:.3f}')
-        except (IndexError, AttributeError):
+    rows = _per_class_rows(box, classes)
+    for cls in classes:
+        row = rows.get(cls)
+        if row is None:
             logger.info(f'{cls:15}  (no detections)')
+        else:
+            logger.info(
+                f'{cls:15}  P={row["precision"]:.3f}  R={row["recall"]:.3f}  '
+                f'F1={row["f1"]:.3f}  AP50={row["ap50"]:.3f}'
+            )
     logger.info(f'\n{split_name.upper()} mAP50:    {float(box.map50):.3f}')
     logger.info(f'{split_name.upper()} mAP50-95: {float(box.map):.3f}')
     return {
         'mAP50': float(box.map50),
         'mAP50_95': float(box.map),
-        'per_class': per_class_metrics(box, classes),
+        'per_class': rows,
     }
 
 

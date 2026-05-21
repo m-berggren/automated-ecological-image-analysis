@@ -29,7 +29,7 @@ def write_detection_crop(detection: Detection) -> bool:
         return False
     bbox = detection.bbox or {}
     # Pipeline writes bbox as {x1, y1, x2, y2, w, h}; see
-    # ml-pipelines/pollinator/workflows/{inference_yolo,merge}.py.
+    # ml-pipelines/pollinator/workflows/inference.py._merge_image_detections.
     try:
         x1 = float(bbox['x1'])
         y1 = float(bbox['y1'])
@@ -50,7 +50,28 @@ def write_detection_crop(detection: Detection) -> bool:
         logger.exception(f'Failed to render crop for detection {detection.pk}')
         return False
 
-    name = f'runs/{detection.inference_run_id}/crops/det_{detection.pk}.jpg'
+    # Stem-and-index naming mirrors what services.py writes during a fresh
+    # run: WSCT0001_01.jpg, WSCT0001_02.jpg, ... The index is the position
+    # of this detection among the image's detections ordered by id, so a
+    # full regenerate produces the same filenames every time.
+    image_stem = Path(detection.image.file.name).stem
+    siblings = list(
+        type(detection)
+        .objects.filter(image_id=detection.image_id)
+        .order_by('id')
+        .values_list('id', flat=True)
+    )
+    try:
+        ordinal = siblings.index(detection.pk) + 1
+    except ValueError:
+        ordinal = 1
+    module = detection.inference_run.module
+    name = (
+        f'runs/{module}/{detection.inference_run_id}/crops/'
+        f'{image_stem}_{ordinal:02d}.jpg'
+    )
+    if default_storage.exists(name):
+        default_storage.delete(name)
     saved = default_storage.save(name, ContentFile(buf.getvalue()))
     detection.crop.name = saved
     return True

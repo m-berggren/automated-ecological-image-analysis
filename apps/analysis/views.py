@@ -13,15 +13,21 @@ from rest_framework.request import Request
 from rest_framework.response import Response
 from rest_framework.views import APIView
 
-from apps.datasets.models import UploadStatus
+from apps.datasets.models import ImageAsset, UploadStatus
 from apps.pollinator.services import spawn_inference_pipeline
 
 from .engulfment import apply_engulfment_exclusions
+from .artifacts import (
+    classify_artifact,
+    metrics_from_results_csv,
+    metrics_from_results_json,
+    params_from_args_yaml,
+)
 from .models import (
     Detection,
     InferenceRun,
+    JobStatus,
     ModelArtifact,
-    ModelArtifactKind,
     ModelVersion,
     TrainingJob,
 )
@@ -32,6 +38,7 @@ from .serializers import (
     InferenceRunDetailSerializer,
     InferenceRunListSerializer,
     ModelVersionSerializer,
+    ModelVersionUpdateSerializer,
     TrainingJobDetailSerializer,
     TrainingJobListSerializer,
 )
@@ -49,105 +56,24 @@ def _parse_bool(value: str) -> bool | None:
     return None
 
 
-# Map Ultralytics YOLO training-run filenames (basename only) to the
-# corresponding ModelArtifactKind. Names that don't appear here are skipped
-# unless they match one of the *_batch* prefixes used for sample tiles.
-_ARTIFACT_NAME_MAP = {
-    'BoxF1_curve.png': ModelArtifactKind.F1_CURVE,
-    'BoxP_curve.png': ModelArtifactKind.PRECISION_CURVE,
-    'BoxPR_curve.png': ModelArtifactKind.PR_CURVE,
-    'BoxR_curve.png': ModelArtifactKind.RECALL_CURVE,
-    'F1_curve.png': ModelArtifactKind.F1_CURVE,
-    'P_curve.png': ModelArtifactKind.PRECISION_CURVE,
-    'PR_curve.png': ModelArtifactKind.PR_CURVE,
-    'R_curve.png': ModelArtifactKind.RECALL_CURVE,
-    'confusion_matrix.png': ModelArtifactKind.CONFUSION_MATRIX,
-    'confusion_matrix_normalized.png': ModelArtifactKind.CONFUSION_MATRIX,
-    'labels.jpg': ModelArtifactKind.LABELS,
-    'labels_correlogram.jpg': ModelArtifactKind.LABELS,
-    'results.csv': ModelArtifactKind.RESULTS_CSV,
-    'results.png': ModelArtifactKind.TRAINING_CURVE,
-}
-_SAMPLE_PREDICTION_PREFIXES = ('train_batch', 'val_batch')
-
-
-def _classify_artifact(basename: str) -> tuple[str | None, str]:
-    """Return (ModelArtifactKind value, caption) for a known artifact filename,
-    or (None, '') if the name isn't a recognized run-folder asset.
-    Caption disambiguates confusion-matrix variants and similar."""
-    if basename in _ARTIFACT_NAME_MAP:
-        caption = 'normalized' if basename == 'confusion_matrix_normalized.png' else ''
-        return _ARTIFACT_NAME_MAP[basename], caption
-    if any(basename.startswith(p) for p in _SAMPLE_PREDICTION_PREFIXES):
-        return ModelArtifactKind.SAMPLE_PREDICTIONS, basename
-    return None, ''
-
-
 def _parse_args_yaml(file_obj: UploadedFile) -> dict:
-    """Pull hyperparams out of Ultralytics args.yaml. Returns {} on any
-    failure so a corrupt yaml doesn't fail the whole upload."""
-    try:
-        import yaml
-
-        data = yaml.safe_load(file_obj.read())
-    except Exception:
-        logger.exception('Failed to parse args.yaml from upload')
-        return {}
-    if not isinstance(data, dict):
-        return {}
-    out: dict = {}
-    for key in (
-        'epochs',
-        'imgsz',
-        'batch',
-        'lr0',
-        'optimizer',
-        'model',
-        'data',
-        'patience',
-    ):
-        if key in data:
-            out[f'yolo_{key}'] = data[key]
-    return out
+    """Pull hyperparams out of an uploaded Ultralytics args.yaml. Thin adapter
+    over the shared parser in apps.analysis.artifacts so uploaded and
+    incrementally-trained models expose identical yolo_ fields."""
+    raw = file_obj.read()
+    if isinstance(raw, bytes):
+        raw = raw.decode('utf-8', errors='replace')
+    return params_from_args_yaml(raw)
 
 
 def _parse_results_csv(file_obj: UploadedFile) -> dict:
-    """Extract the final-epoch validation metrics from an Ultralytics
-    results.csv. Returns the canonical metric names used by the UI:
-    precision, recall, mAP50, mAP50-95. Empty on any failure."""
-    try:
-        import csv
-        import io
-
-        raw = file_obj.read()
-        if isinstance(raw, bytes):
-            raw = raw.decode('utf-8', errors='replace')
-        reader = csv.DictReader(io.StringIO(raw))
-        rows = [row for row in reader if any(v.strip() for v in row.values())]
-    except Exception:
-        logger.exception('Failed to parse results.csv from upload')
-        return {}
-    if not rows:
-        return {}
-    final = rows[-1]
-    # Ultralytics column names are like 'metrics/precision(B)' for detector
-    # runs and 'metrics/precision(M)' for segmentation. Strip the suffix.
-    out: dict = {}
-    aliases = {
-        'precision': ('metrics/precision(B)', 'metrics/precision'),
-        'recall': ('metrics/recall(B)', 'metrics/recall'),
-        'mAP50': ('metrics/mAP50(B)', 'metrics/mAP50'),
-        'mAP50-95': ('metrics/mAP50-95(B)', 'metrics/mAP50-95'),
-    }
-    for nice, candidates in aliases.items():
-        for col in candidates:
-            if col in final and final[col].strip():
-                try:
-                    out[nice] = float(final[col])
-                except ValueError:
-                    pass
-                break
-    return out
+    """Extract final-epoch validation metrics from an uploaded Ultralytics
+    results.csv (precision, recall, mAP50, mAP50-95). Thin adapter over the
+    shared parser in apps.analysis.artifacts."""
+    raw = file_obj.read()
+    if isinstance(raw, bytes):
+        raw = raw.decode('utf-8', errors='replace')
+    return metrics_from_results_csv(raw)
 
 
 def _extract_checkpoint_metadata(path: Path) -> dict:
@@ -284,9 +210,9 @@ class ModelVersionListCreateView(generics.ListAPIView):
             )
 
         # Resolve weights source. Single-file mode wins if both forms are
-        # present; folder mode looks for weights/best.pt then weights/last.pt
-        # anywhere in the tree (Ultralytics outputs nest these one level
-        # deep under the run name).
+        # present; folder mode ranks candidate weight files: best > last, a
+        # weights/ subfolder preferred but not required (classifier runs save
+        # best.pth at the run root), accepting both .pt and .pth.
         # Pair each artifact upload with its relative path so downstream code
         # can route by parent directory regardless of how the browser mangled
         # the multipart filename.
@@ -299,26 +225,33 @@ class ModelVersionListCreateView(generics.ListAPIView):
             weights_upload.name if weights_upload else None
         )
         if chosen_weights is None:
-            best, last = None, None
+            chosen_rank = 99
             for f, rel in artifact_entries:
                 tail = rel.rsplit('/', 1)[-1] if '/' in rel else rel
+                # Suffix match so classifier checkpoint names
+                # (efficientnet_binary_best.pth, group_insectnet_best.pth) and
+                # Ultralytics weights/best.pt all qualify.
+                low = tail.lower()
+                is_best = low.endswith('best.pt') or low.endswith('best.pth')
+                is_last = low.endswith('last.pt') or low.endswith('last.pth')
+                if not (is_best or is_last):
+                    continue
                 parent = rel.rsplit('/', 2)[-2] if rel.count('/') >= 1 else ''
-                if parent == 'weights' and tail == 'best.pt':
-                    best = f
-                elif parent == 'weights' and tail == 'last.pt':
-                    last = f
-            chosen_weights = best or last
+                rank = (0 if parent == 'weights' else 2) + (0 if is_best else 1)
+                if rank < chosen_rank:
+                    chosen_rank = rank
+                    chosen_weights = f
+                    chosen_weights_name = tail
             if chosen_weights is None:
                 return Response(
                     {
                         'detail': (
                             'No weights file found in the uploaded folder. '
-                            'Expected weights/best.pt or weights/last.pt.'
+                            'Expected best.pt/.pth or last.pt/.pth (ideally under weights/).'
                         )
                     },
                     status=status.HTTP_400_BAD_REQUEST,
                 )
-            chosen_weights_name = chosen_weights.name
 
         dest_dir = Path(settings.MEDIA_ROOT) / 'models' / module
         dest_dir.mkdir(parents=True, exist_ok=True)
@@ -348,6 +281,15 @@ class ModelVersionListCreateView(generics.ListAPIView):
                     f.seek(0)
                 except Exception:
                     pass
+            elif tail.endswith('results.json'):
+                raw = f.read()
+                if isinstance(raw, bytes):
+                    raw = raw.decode('utf-8', errors='replace')
+                metrics.update(metrics_from_results_json(raw))
+                try:
+                    f.seek(0)
+                except Exception:
+                    pass
 
         mv = ModelVersion.objects.create(
             module=module,
@@ -367,7 +309,7 @@ class ModelVersionListCreateView(generics.ListAPIView):
             tail = rel.rsplit('/', 1)[-1] if '/' in rel else rel
             if not tail or tail == 'args.yaml':
                 continue
-            kind_value, caption = _classify_artifact(tail)
+            kind_value, caption = classify_artifact(tail)
             if kind_value is None:
                 skipped += 1
                 continue
@@ -388,13 +330,326 @@ class ModelVersionListCreateView(generics.ListAPIView):
         )
 
 
+class InferenceRunDraftView(APIView):
+    """POST /api/analysis/runs/draft/
+
+    Body: {module, name?, config}. Atomically creates a paired
+    InferenceRun (status=pending) and Upload (status=draft) so the frontend
+    can transmit images directly into ``media/runs/<module>/<run_id>/images/``
+    via the existing /api/datasets/images/ endpoint.
+
+    Returns {run_id, upload_id} so the upload page knows where to attach
+    each file.
+    """
+
+    def post(self, request: Request) -> Response:
+        from apps.datasets.models import Module, Upload, UploadStatus
+
+        module = (request.data.get('module') or '').strip()
+        if module not in Module.values:
+            return Response(
+                {'detail': f'module must be one of {Module.values}'},
+                status=status.HTTP_400_BAD_REQUEST,
+            )
+        name = (request.data.get('name') or '').strip()
+        config = request.data.get('config') or {}
+        if not isinstance(config, dict):
+            return Response(
+                {'detail': 'config must be an object'},
+                status=status.HTTP_400_BAD_REQUEST,
+            )
+
+        with transaction.atomic():
+            upload = Upload.objects.create(
+                name=name,
+                module=module,
+                status=UploadStatus.DRAFT,
+                uploaded_by=request.user if request.user.is_authenticated else None,
+            )
+            run = InferenceRun.objects.create(
+                module=module,
+                name=name,
+                upload=upload,
+                config=config,
+                initiated_by=request.user if request.user.is_authenticated else None,
+            )
+        return Response(
+            {
+                'run_id': run.pk,
+                'upload_id': upload.pk,
+                'run': InferenceRunDetailSerializer(run).data,
+            },
+            status=status.HTTP_201_CREATED,
+        )
+
+
+def _busy_run_for_module(
+    module: str, exclude_pk: int | None = None
+) -> InferenceRun | None:
+    """Return the currently-running inference run for a module, if any.
+
+    PAUSED and PENDING don't count: a paused run isn't consuming the GPU,
+    and pending means the worker hasn't claimed it yet. Only RUNNING is
+    a hard mutual-exclusion signal.
+    """
+    qs = InferenceRun.objects.filter(module=module, status=JobStatus.RUNNING)
+    if exclude_pk is not None:
+        qs = qs.exclude(pk=exclude_pk)
+    return qs.first()
+
+
+class InferenceRunActiveView(APIView):
+    """GET /api/analysis/runs/active/?module=<module>
+
+    Returns the run currently RUNNING in the given module, or ``null``.
+    Used by the Detect page to surface a banner and disable Start/Resume
+    while another run is in flight, since only one run per module may
+    occupy the GPU at a time.
+    """
+
+    def get(self, request: Request) -> Response:
+        module = request.query_params.get('module', '').strip()
+        if not module:
+            return Response(
+                {'error': 'module query param required'},
+                status=status.HTTP_400_BAD_REQUEST,
+            )
+        active = _busy_run_for_module(module)
+        if active is None:
+            return Response({'active': None})
+        return Response({'active': InferenceRunDetailSerializer(active).data})
+
+
+class InferenceRunStartView(APIView):
+    """POST /api/analysis/runs/<id>/start/
+
+    Body: {start_at_image?, config?}. Spawns the worker for a draft run.
+    Both fields are merged into the run's frozen config. Refuses to start
+    a run that isn't ``pending``, that has no images attached, or when
+    another run is already RUNNING in the same module (one GPU, one
+    pipeline at a time).
+    """
+
+    def post(self, request: Request, pk: int) -> Response:
+        from apps.datasets.models import UploadStatus
+
+        try:
+            run = InferenceRun.objects.select_related('upload').get(pk=pk)
+        except InferenceRun.DoesNotExist:
+            return Response(
+                {'error': 'Run not found'}, status=status.HTTP_404_NOT_FOUND
+            )
+        if run.status != JobStatus.PENDING:
+            return Response(
+                {
+                    'error': (
+                        f'Cannot start a run in status={run.status}; only '
+                        f'pending runs can be started.'
+                    )
+                },
+                status=status.HTTP_409_CONFLICT,
+            )
+        busy = _busy_run_for_module(run.module, exclude_pk=run.pk)
+        if busy is not None:
+            return Response(
+                {
+                    'error': (
+                        f'Another {run.module} run is already running '
+                        f'(#{busy.pk} "{busy.name or ""}"). Pause or wait for it '
+                        f'to finish before starting this one.'
+                    ),
+                    'blocking_run_id': busy.pk,
+                },
+                status=status.HTTP_409_CONFLICT,
+            )
+        if run.upload is None or not run.upload.images.exists():
+            return Response(
+                {'error': 'Run has no uploaded images.'},
+                status=status.HTTP_409_CONFLICT,
+            )
+
+        merged_config = dict(run.config or {})
+        body_config = request.data.get('config')
+        if isinstance(body_config, dict):
+            merged_config.update(body_config)
+        if 'start_at_image' in request.data:
+            try:
+                merged_config['start_at_image'] = max(
+                    1, int(request.data['start_at_image'])
+                )
+            except (TypeError, ValueError):
+                return Response(
+                    {'error': 'start_at_image must be an integer >= 1'},
+                    status=status.HTTP_400_BAD_REQUEST,
+                )
+        run.config = merged_config
+        run.image_count = run.upload.images.count()
+        run.save(update_fields=['config', 'image_count'])
+
+        if run.upload.status == UploadStatus.DRAFT:
+            run.upload.status = UploadStatus.READY
+            run.upload.save(update_fields=['status'])
+
+        transaction.on_commit(lambda: spawn_inference_pipeline(run))
+        return Response(InferenceRunDetailSerializer(run).data)
+
+
+class InferenceRunPauseView(APIView):
+    """POST /api/analysis/runs/<id>/pause/
+
+    Flips status to PAUSED. The running worker's next between-image check
+    sees this and raises RunPaused, exiting cleanly. processed_image_count
+    is left intact so a subsequent resume picks up right after the last
+    persisted image.
+    """
+
+    def post(self, request: Request, pk: int) -> Response:
+        try:
+            run = InferenceRun.objects.get(pk=pk)
+        except InferenceRun.DoesNotExist:
+            return Response(
+                {'error': 'Run not found'}, status=status.HTTP_404_NOT_FOUND
+            )
+        if run.status != JobStatus.RUNNING:
+            return Response(
+                {
+                    'error': (
+                        f'Only running jobs can be paused; this one is {run.status}.'
+                    )
+                },
+                status=status.HTTP_409_CONFLICT,
+            )
+        run.status = JobStatus.PAUSED
+        run.save(update_fields=['status'])
+        return Response(InferenceRunDetailSerializer(run).data)
+
+
+class InferenceRunResumeView(APIView):
+    """POST /api/analysis/runs/<id>/resume/
+
+    Re-spawns the worker for a paused run. The pipeline reads
+    ``processed_image_count`` and resumes at the next image. Optional
+    ``start_at_image`` in the body bumps the floor higher (useful if the
+    operator wants to skip ahead past the original pause point).
+    """
+
+    def post(self, request: Request, pk: int) -> Response:
+        try:
+            run = InferenceRun.objects.get(pk=pk)
+        except InferenceRun.DoesNotExist:
+            return Response(
+                {'error': 'Run not found'}, status=status.HTTP_404_NOT_FOUND
+            )
+        if run.status != JobStatus.PAUSED:
+            return Response(
+                {
+                    'error': (
+                        f'Only paused jobs can be resumed; this one is {run.status}.'
+                    )
+                },
+                status=status.HTTP_409_CONFLICT,
+            )
+        busy = _busy_run_for_module(run.module, exclude_pk=run.pk)
+        if busy is not None:
+            return Response(
+                {
+                    'error': (
+                        f'Another {run.module} run is already running '
+                        f'(#{busy.pk} "{busy.name or ""}"). Pause or wait for it '
+                        f'to finish before resuming this one.'
+                    ),
+                    'blocking_run_id': busy.pk,
+                },
+                status=status.HTTP_409_CONFLICT,
+            )
+        if 'start_at_image' in request.data:
+            try:
+                merged = dict(run.config or {})
+                merged['start_at_image'] = max(1, int(request.data['start_at_image']))
+                run.config = merged
+            except (TypeError, ValueError):
+                return Response(
+                    {'error': 'start_at_image must be an integer >= 1'},
+                    status=status.HTTP_400_BAD_REQUEST,
+                )
+        run.status = JobStatus.PENDING
+        run.save(update_fields=['status', 'config'])
+        transaction.on_commit(lambda: spawn_inference_pipeline(run))
+        return Response(InferenceRunDetailSerializer(run).data)
+
+
+class InferenceRunAbortView(APIView):
+    """POST /api/analysis/runs/<id>/abort/
+
+    Tear down a draft run that the user walked away from before clicking
+    Start. Deletes the run, the paired Upload (cascading the uploaded
+    ImageAssets), and any on-disk files written under
+    ``media/runs/<module>/<run_id>/``.
+
+    Only valid on a run that hasn't begun: status == pending and
+    started_at is null. Refuses anything else so an in-flight worker
+    can't be rug-pulled. CSRF-exempt by being a token-authed POST; safe
+    to send via ``navigator.sendBeacon`` from a beforeunload handler.
+    """
+
+    def post(self, request: Request, pk: int) -> Response:
+        from apps.datasets.models import Upload
+
+        try:
+            run = InferenceRun.objects.select_related('upload').get(pk=pk)
+        except InferenceRun.DoesNotExist:
+            # Already gone — treat as success so a duplicate beacon doesn't
+            # surface as an error in the UI.
+            return Response(status=status.HTTP_204_NO_CONTENT)
+
+        if run.status != JobStatus.PENDING or run.started_at is not None:
+            return Response(
+                {
+                    'error': (
+                        f'Cannot abort: run is {run.status} (started_at='
+                        f'{run.started_at}). Use cancel/pause for in-flight runs.'
+                    )
+                },
+                status=status.HTTP_409_CONFLICT,
+            )
+
+        upload: Upload | None = run.upload
+        run_dir = Path(settings.MEDIA_ROOT) / 'runs' / run.module / str(run.pk)
+
+        # PROTECT on InferenceRun.upload means we delete the run first, then
+        # the upload (which cascades ImageAsset + their files via the
+        # FileField storage backend).
+        run.delete()
+        if upload is not None:
+            for img in upload.images.all():
+                if img.file:
+                    try:
+                        img.file.delete(save=False)
+                    except Exception:
+                        logger.exception(
+                            f'Failed to remove image file for ImageAsset {img.pk}'
+                        )
+            upload.delete()
+
+        if run_dir.exists():
+            import shutil
+
+            try:
+                shutil.rmtree(run_dir)
+            except OSError:
+                logger.exception(f'Failed to remove {run_dir}; continuing')
+
+        return Response(status=status.HTTP_204_NO_CONTENT)
+
+
 class InferenceRunListCreateView(generics.ListCreateAPIView):
     """GET  /api/analysis/runs/?module=<module>  list runs (newest first).
     POST /api/analysis/runs/                   create a new run (status=pending).
 
-    image_count is snapshotted from the upload at submission time so the
-    progress denominator stays stable if images are added to the upload
-    after the run is queued.
+    The legacy POST creates a run bound to an existing Upload (used by
+    'Re-run with same config'). New uploads should use /draft/ instead so
+    the Upload + Run are paired 1:1 and images land under
+    media/runs/<module>/<run_id>/images/.
     """
 
     pagination_class = None
@@ -457,13 +712,11 @@ class InferenceRunDetailView(generics.RetrieveDestroyAPIView):
     DELETE /api/analysis/runs/<id>/  remove the run and everything tied to it.
 
     DB cascade handles Detection and PollinatorDetection (via FK on_delete).
-    The on-disk run output dir (MEDIA_ROOT/runs/<id>/, holding crops,
-    yolo_crops, preprocessing, results.json) is removed explicitly because
-    Django's storage backend never auto-deletes ImageField files. Source
-    images are left alone — they live on the Upload and can be reused by
-    other runs.
+    The on-disk run dir (MEDIA_ROOT/runs/<module>/<id>/, holding the
+    source images and per-detection crops) is removed explicitly because
+    Django's storage backend never auto-deletes ImageField files.
 
-    Refuses to delete an in-flight run (pending/running) to keep the
+    Refuses to delete an in-flight run (pending/running/paused) to keep the
     worker from racing the delete; cancel it first.
     """
 
@@ -472,9 +725,7 @@ class InferenceRunDetailView(generics.RetrieveDestroyAPIView):
     lookup_field = 'pk'
 
     def perform_destroy(self, instance: InferenceRun) -> None:
-        from apps.analysis.models import JobStatus
-
-        if instance.status in (JobStatus.PENDING, JobStatus.RUNNING):
+        if instance.status in (JobStatus.PENDING, JobStatus.RUNNING, JobStatus.PAUSED):
             raise serializers.ValidationError(
                 {
                     'error': (
@@ -486,7 +737,9 @@ class InferenceRunDetailView(generics.RetrieveDestroyAPIView):
         # Delete the on-disk output directory if it exists. Wrap in try/
         # except so DB cleanup still runs even if the filesystem step
         # fails (e.g., perms, partial dir).
-        run_dir = Path(settings.MEDIA_ROOT) / 'runs' / str(instance.pk)
+        run_dir = (
+            Path(settings.MEDIA_ROOT) / 'runs' / instance.module / str(instance.pk)
+        )
         if run_dir.exists():
             import shutil
 
@@ -526,6 +779,106 @@ class DetectionExclusionView(APIView):
         d.export_exclusion_user_set = True
         d.save(update_fields=['excluded_from_export', 'export_exclusion_user_set'])
         return Response({'id': d.pk, 'excluded_from_export': excluded})
+
+
+class ImageExcludeTrainingView(APIView):
+    """POST /api/analysis/images/<pk>/exclude-training/
+
+    Body: {"excluded": true|false}. Toggles ImageAsset.exclude_from_training,
+    the reviewer flag marking an image as unfit for YOLO detector training
+    (more real insects than boxes). The training-set builder skips images
+    where this is True.
+    """
+
+    def post(self, request: Request, pk: int) -> Response:
+        try:
+            img = ImageAsset.objects.get(pk=pk)
+        except ImageAsset.DoesNotExist:
+            return Response(
+                {'error': 'Image not found'},
+                status=status.HTTP_404_NOT_FOUND,
+            )
+        excluded = request.data.get('excluded')
+        if not isinstance(excluded, bool):
+            return Response(
+                {'error': 'excluded must be a boolean'},
+                status=status.HTTP_400_BAD_REQUEST,
+            )
+        img.exclude_from_training = excluded
+        img.save(update_fields=['exclude_from_training'])
+        return Response({'id': img.pk, 'exclude_from_training': excluded})
+
+
+class DetectionExcludeTrainingView(APIView):
+    """POST /api/analysis/detections/<pk>/exclude-training/
+
+    Body: {"excluded": true|false}. Toggles Detection.exclude_from_training,
+    the reviewer flag marking a crop as unfit for binary/group classifier
+    training. Set by un-ticking the crop in the training pool drawer; the
+    classifier pool builders skip crops where this is True. Distinct from
+    excluded_from_export (CSV only) and ImageAsset.exclude_from_training
+    (image-level, detector training).
+    """
+
+    def post(self, request: Request, pk: int) -> Response:
+        try:
+            d = Detection.objects.get(pk=pk)
+        except Detection.DoesNotExist:
+            return Response(
+                {'error': 'Detection not found'},
+                status=status.HTTP_404_NOT_FOUND,
+            )
+        excluded = request.data.get('excluded')
+        if not isinstance(excluded, bool):
+            return Response(
+                {'error': 'excluded must be a boolean'},
+                status=status.HTTP_400_BAD_REQUEST,
+            )
+        d.exclude_from_training = excluded
+        d.save(update_fields=['exclude_from_training'])
+        return Response({'id': d.pk, 'exclude_from_training': excluded})
+
+
+class InferenceRunReviewSettingsView(APIView):
+    """POST /api/analysis/runs/<id>/review-settings/
+
+    Merges a partial dict into the run's review_settings JSON. Accepts any
+    subset of: auto_select (bool), yolo_threshold (0..1), group_threshold
+    (0..1). These are per-run reviewer/export preferences; when a key is
+    absent the frontend resolves the default from the run's config
+    confidence values, so review sliders start where the run was processed.
+    """
+
+    def post(self, request: Request, pk: int) -> Response:
+        try:
+            run = InferenceRun.objects.get(pk=pk)
+        except InferenceRun.DoesNotExist:
+            return Response(
+                {'error': 'Run not found'},
+                status=status.HTTP_404_NOT_FOUND,
+            )
+        data = request.data
+        merged = dict(run.review_settings or {})
+        if 'auto_select' in data:
+            v = data['auto_select']
+            if not isinstance(v, bool):
+                return Response(
+                    {'error': 'auto_select must be a boolean'},
+                    status=status.HTTP_400_BAD_REQUEST,
+                )
+            merged['auto_select'] = v
+        for key in ('yolo_threshold', 'group_threshold'):
+            if key in data:
+                v = data[key]
+                if isinstance(v, bool) or not isinstance(v, (int, float)):
+                    return Response(
+                        {'error': f'{key} must be a number'},
+                        status=status.HTTP_400_BAD_REQUEST,
+                    )
+                merged[key] = max(0.0, min(1.0, float(v)))
+        run.review_settings = merged
+        run.save(update_fields=['review_settings'])
+        return Response({'id': run.pk, 'review_settings': run.review_settings})
 
 
 class InferenceRunRecomputeExclusionsView(APIView):
@@ -608,9 +961,7 @@ class TrainingJobDetailView(generics.RetrieveAPIView):
 def _cancel_job_row(job, detail_serializer) -> Response:
     """Shared cancel handler for InferenceRun and TrainingJob. Flips status
     to CANCELLED only when the job is still in-flight; refuses otherwise."""
-    from apps.analysis.models import JobStatus
-
-    if job.status not in (JobStatus.PENDING, JobStatus.RUNNING):
+    if job.status not in (JobStatus.PENDING, JobStatus.RUNNING, JobStatus.PAUSED):
         return Response(
             {
                 'error': (
@@ -664,8 +1015,9 @@ class TrainingJobCancelView(APIView):
         return _cancel_job_row(job, TrainingJobDetailSerializer)
 
 
-class ModelVersionDetailView(generics.RetrieveDestroyAPIView):
+class ModelVersionDetailView(generics.RetrieveUpdateDestroyAPIView):
     """GET    /api/analysis/models/<pk>/   read one model version.
+    PATCH  /api/analysis/models/<pk>/   rename (version_name / description).
     DELETE /api/analysis/models/<pk>/   remove the version + its weights.
 
     Refuses to delete a model that any InferenceRun depends on (FK is
@@ -678,6 +1030,11 @@ class ModelVersionDetailView(generics.RetrieveDestroyAPIView):
     queryset = ModelVersion.objects.all()
     serializer_class = ModelVersionSerializer
     lookup_field = 'pk'
+
+    def get_serializer_class(self):
+        if self.request.method in ('PATCH', 'PUT'):
+            return ModelVersionUpdateSerializer
+        return ModelVersionSerializer
 
     # Mirrors the upload gate in ModelVersionListCreateView. Set both to
     # True to restore staff-only model management.

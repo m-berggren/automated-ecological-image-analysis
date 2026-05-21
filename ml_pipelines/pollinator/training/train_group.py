@@ -592,6 +592,28 @@ def train_group(
     (out_dir / f'group_{model_type}_results.json').write_text(
         json.dumps(results, indent=2)
     )
+
+    # Confusion matrix PNG (best-effort) so the model card matches YOLO. Prefer
+    # the Arctic test split (real field performance), else fall back to val.
+    from .plots import save_confusion_matrix
+
+    cm_src = final_test_arctic if final_test_arctic else final
+    preds = (cm_src or {}).get('preds')
+    truths = (cm_src or {}).get('labels')
+    if preds and truths:
+        n = len(CLASSES)
+        matrix = [[0] * n for _ in range(n)]
+        for t, p in zip(truths, preds):
+            if 0 <= t < n and 0 <= p < n:
+                matrix[t][p] += 1
+        split_name = 'Arctic test set' if final_test_arctic else 'val set'
+        save_confusion_matrix(
+            matrix,
+            list(CLASSES),
+            out_dir / 'confusion_matrix.png',
+            title=f'group {model_type} — Confusion Matrix ({split_name})',
+        )
+
     logger.info(f'Checkpoint: {stage2_ckpt}')
     return results
 

@@ -219,6 +219,7 @@ const modules: ModuleItem[] = [
       { to: '/pollinators/runs', label: 'Runs' },
       { to: '/pollinators/training', label: 'Training' },
       { to: '/pollinators/models', label: 'Models' },
+      { to: '/pollinators/settings', label: 'Settings' },
     ],
   },
 ]
