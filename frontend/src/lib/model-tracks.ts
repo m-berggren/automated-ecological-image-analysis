@@ -70,7 +70,7 @@ const POLLINATOR_TRACK_DEFS: TrackDef[] = [
   },
   {
     id: 'binary_classifier',
-    label: 'EfficientNet',
+    label: 'Binary Classifier',
     description: 'Insect vs background',
     // F1, not accuracy: the insect/background split is imbalanced (mostly
     // background), so accuracy is inflated by the majority class. F1 balances
@@ -79,7 +79,7 @@ const POLLINATOR_TRACK_DEFS: TrackDef[] = [
   },
   {
     id: 'group_classifier',
-    label: 'InsectNet',
+    label: 'Group Classifier',
     description: 'Bumblebee, fly, butterfly, other',
     // Macro-F1 (surfaced as 'f1'): multi-class with a dominant class, so
     // accuracy is dominated by the majority. Macro-F1 weights each class

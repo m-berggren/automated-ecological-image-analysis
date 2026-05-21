@@ -16,9 +16,15 @@
         <!-- Step 1: Pick model -->
         <div class="px-5 py-4 border-b border-border">
           <div
-            class="text-[11px] font-semibold uppercase tracking-wider text-muted-foreground mb-3"
+            class="text-[11px] font-semibold uppercase tracking-wider text-muted-foreground mb-3 flex items-center gap-1.5"
           >
             1. Pick a model to retrain
+            <InfoPopover>
+              This page only retrains existing models, continuing from an already trained base
+              version. Initial training of a brand-new model from scratch is GPU-intensive and is
+              done using one of the Jupyter Notebook files in ml-pipelines/notebooks/ on a GPU, not
+              here.
+            </InfoPopover>
           </div>
           <div class="space-y-2">
             <label
@@ -78,7 +84,7 @@
             <label class="text-xs text-muted-foreground">Base model</label>
             <select
               v-model.number="selectedSourceId"
-              class="px-2 py-1 rounded border border-green-300 bg-green-100 text-green-900 text-sm font-medium focus:outline-none focus:ring-2 focus:ring-green-400"
+              class="px-2 py-1 rounded border border-green-400 bg-green-300 text-green-900 text-sm font-medium focus:outline-none focus:ring-2 focus:ring-green-400"
             >
               <option v-for="v in selectedTrack.versions" :key="v.id" :value="v.id">
                 {{ v.version_name
@@ -113,10 +119,10 @@
                 </div>
               </div>
               <button
-                class="text-xs text-primary hover:underline shrink-0"
+                class="text-xm text-primary hover:underline shrink-0"
                 @click="openReviewDrawer"
               >
-                Browse pool →
+                Browse pool ->
               </button>
             </div>
             <!-- min-h reserves the class-breakdown line so the card keeps the
@@ -604,12 +610,8 @@
 
     <!-- Review drawer -->
     <Transition name="drawer">
-      <div
-        v-if="reviewDrawerOpen"
-        class="fixed inset-0 z-50 flex"
-        @click.self="reviewDrawerOpen = false"
-      >
-        <div class="flex-1 bg-black/40" />
+      <div v-if="reviewDrawerOpen" class="fixed inset-0 z-50 flex">
+        <div class="flex-1 bg-black/40" @click="reviewDrawerOpen = false" />
         <aside class="w-[640px] max-w-full bg-card border-l border-border shadow-2xl flex flex-col">
           <header
             class="px-5 py-3 border-b border-border bg-primary/[0.22] flex items-center gap-3"
@@ -903,6 +905,10 @@ interface PoolSample {
   image_filename?: string
   detection_count?: number
   classes?: string[]
+  // Binary/group crops only: persisted reviewer flag. When true the crop is
+  // greyed (excluded from classifier training) but still shown so it can be
+  // re-included.
+  exclude_from_training?: boolean
 }
 
 interface DataPool {
@@ -1728,7 +1734,18 @@ async function cancelJob(track: Track) {
   }
 }
 
+// Close the review drawer on Escape. A window listener avoids needing the
+// drawer to hold focus.
+function onDrawerKeydown(e: KeyboardEvent) {
+  if (e.key === 'Escape' && reviewDrawerOpen.value) {
+    e.preventDefault()
+    reviewDrawerOpen.value = false
+  }
+}
+onMounted(() => window.addEventListener('keydown', onDrawerKeydown))
+
 onUnmounted(() => {
+  window.removeEventListener('keydown', onDrawerKeydown)
   if (reconcileHandle !== null) clearInterval(reconcileHandle)
   for (const id of pollIntervals.values()) clearInterval(id)
   pollIntervals.clear()
@@ -1779,21 +1796,67 @@ function formatFileSize(bytes: number): string {
 
 function openReviewDrawer() {
   if (!selectedTrack.value) return
+  // Seed the exclusion set from the persisted per-crop flag so deselected
+  // crops come back greyed. Detector samples are images and have no per-crop
+  // flag (excluded images are filtered out of the pool upstream), so its
+  // exclusions stay session-only.
+  excludedSampleIds.clear()
+  if (selectedTrack.value.id !== 'detector') {
+    for (const s of selectedTrack.value.data_pool.samples ?? []) {
+      if (s.exclude_from_training) excludedSampleIds.add(String(s.id))
+    }
+  }
   drawerFilter.value = 'all'
   drawerPage.value = 1
   reviewDrawerOpen.value = true
 }
 
-// Per-run exclusion set, keyed by the sample IDs the drawer rendered. The
-// `startTraining` payload forwards this as `excluded_sample_ids`.
+// Exclusion set keyed by the sample IDs the drawer rendered. For crop tracks
+// (binary/group) it mirrors the persisted Detection.exclude_from_training
+// flag; for the detector track it's session-only. `startTraining` forwards it
+// as `excluded_sample_ids`.
 const excludedSampleIds = reactive(new Set<string>())
+
+// Persist a crop's exclusion to the DB. Fire-and-forget: the optimistic set
+// update already greyed the tile; a failed write just won't survive reload.
+async function persistCropExclusion(detectionId: string, excluded: boolean) {
+  try {
+    await api(`/api/analysis/detections/${detectionId}/exclude-training/`, {
+      method: 'POST',
+      body: JSON.stringify({ excluded }),
+    })
+  } catch {
+    // Non-fatal; leave the optimistic UI state as-is.
+  }
+}
+
+// Mirror the exclusion onto the local sample so reopening the drawer (which
+// reseeds excludedSampleIds from data_pool.samples) reflects the change
+// without a full pool refetch.
+function setLocalSampleExcluded(id: string, excluded: boolean) {
+  const samples = selectedTrack.value?.data_pool.samples
+  if (!samples) return
+  const sample = samples.find((s) => String(s.id) === id)
+  if (sample) sample.exclude_from_training = excluded
+}
 
 function toggleSampleInclusion(id: string) {
   if (excludedSampleIds.has(id)) excludedSampleIds.delete(id)
   else excludedSampleIds.add(id)
+  if (!drawerIsDetector.value) {
+    const excluded = excludedSampleIds.has(id)
+    setLocalSampleExcluded(id, excluded)
+    void persistCropExclusion(id, excluded)
+  }
 }
 
 function selectAllSamples() {
+  if (!drawerIsDetector.value) {
+    for (const id of [...excludedSampleIds]) {
+      setLocalSampleExcluded(id, false)
+      void persistCropExclusion(id, false)
+    }
+  }
   excludedSampleIds.clear()
 }
 
@@ -1801,7 +1864,13 @@ function deselectAllSamples() {
   if (drawerIsDetector.value) {
     for (const r of detectorTableRows.value) excludedSampleIds.add(String(r.id))
   } else {
-    for (const t of drawerThumbnails.value) excludedSampleIds.add(t.id)
+    for (const t of drawerThumbnails.value) {
+      if (!excludedSampleIds.has(t.id)) {
+        setLocalSampleExcluded(t.id, true)
+        void persistCropExclusion(t.id, true)
+      }
+      excludedSampleIds.add(t.id)
+    }
   }
 }
 
