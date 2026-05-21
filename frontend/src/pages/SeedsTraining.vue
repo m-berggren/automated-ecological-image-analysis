@@ -142,7 +142,7 @@
             </div>
             <div v-else class="space-y-2">
               <label
-                v-for="version in allVersions"
+                v-for="version in sortedVersions"
                 :key="version.id"
                 class="flex items-start gap-3 p-3 rounded-lg border cursor-pointer transition-colors"
                 :class="
@@ -238,7 +238,7 @@
                 <template v-if="uploadedFiles.length">
                   {{ uploadedFiles.length }}
                   file{{ uploadedFiles.length === 1 ? '' : 's' }}
-                  added — drop more to extend
+                  added to selection
                 </template>
 
                 <template v-else>
@@ -553,6 +553,15 @@ const trainingUploadTabs: UploadTab[] = [
     mode: 'folder',
   },
 ]
+
+const sortedVersions = computed(() => {
+  return [...allVersions.value].sort((a, b) => {
+    if (a.is_active !== b.is_active) {
+      return Number(b.is_active) - Number(a.is_active)
+    }
+    return b.id - a.id
+  })
+})
 
 function onTrainingUploadSelect(files: File[]) {
   for (const f of files) addFile(f)
