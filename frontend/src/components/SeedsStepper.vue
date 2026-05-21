@@ -41,7 +41,7 @@ import { computed } from 'vue'
 import { RouterLink } from 'vue-router'
 import { Check } from 'lucide-vue-next'
 
-type StepKey = 'upload' | 'detect' | 'review' | 'export'
+type StepKey = 'upload' | 'detect' | 'review'| 'review-final' | 'export'
 
 interface Step {
   key: StepKey
@@ -57,6 +57,7 @@ const steps: Step[] = [
   { key: 'upload', label: 'Upload' },
   { key: 'detect', label: 'Detect' },
   { key: 'review', label: 'Review' },
+  { key: 'review-final', label: 'Final Review' },
   { key: 'export', label: 'Export' },
 ]
 
@@ -79,6 +80,7 @@ function hrefFor(step: Step): string | null {
   if (!props.runId) return null
   if (step.key === 'detect') return `/seeds/runs/${props.runId}/detect`
   if (step.key === 'review') return `/seeds/runs/${props.runId}/review`
+  if (step.key === 'review-final') return `/seeds/runs/${props.runId}/review-final`
   if (step.key === 'export') return `/seeds/runs/${props.runId}/export`
   return null
 }
