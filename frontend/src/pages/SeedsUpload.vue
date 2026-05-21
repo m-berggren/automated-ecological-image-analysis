@@ -41,23 +41,23 @@
       <p class="text-xs text-muted-foreground">Each batch must contain a single species.</p>
 
       <!-- Seed list -->
-      <div class="grid grid-cols-4 gap-3 pt-1 max-h-[10rem] overflow-y-auto">
-        <div v-for="seed in seedTypes" :key="seed.id" class="relative shrink-0 pt-2 pr-2">
-          <!-- Delete button -->
-          <button
-            v-if="seed.isCustom"
-            @click.stop="removeSeed(seed.id)"
-            class="absolute -top-0 -right-0 w-5 h-5 flex items-center justify-center rounded-full bg-green-900 text-white text-xs z-10"
-          >
-            ×
-          </button>
+      <div
+        v-if="seedTypes.length === 0"
+        class="text-sm text-amber-700 p-4 bg-amber-50/50 border border-amber-200 rounded-lg"
+      >
+        No trained models found in the database. You must train or register a model on the
+        <RouterLink to="/seeds/training" class="font-bold underline hover:text-amber-900"
+          >Training page</RouterLink
+        >
+        before you can upload images.
+      </div>
 
-          <!-- Seed button -->
+      <div v-else class="grid grid-cols-4 gap-3 pt-1 max-h-[10rem] overflow-y-auto">
+        <div v-for="seed in seedTypes" :key="seed.id" class="relative shrink-0 pt-2 pr-2">
           <button
             @click="selectedSeed = seed.id"
             :class="[
               'group w-36 flex items-center px-3 py-2 rounded-lg border-2 text-left transition-all overflow-hidden',
-
               selectedSeed === seed.id
                 ? 'border-primary bg-primary/5'
                 : 'border-border bg-background hover:border-primary/40',
@@ -65,13 +65,6 @@
           >
             <span class="text-sm font-semibold shrink-0">
               {{ seed.id }}
-            </span>
-
-            <span
-              v-if="seed.species"
-              class="ml-2 overflow-hidden whitespace-nowrap text-[11px] text-muted-foreground italic max-w-0 group-hover:max-w-[100px] opacity-0 group-hover:opacity-100 transition-all duration-200"
-            >
-              · {{ seed.species }}
             </span>
           </button>
         </div>
@@ -321,39 +314,12 @@ const selectedSeed = ref<string | null>(null)
 
 const modelVersions = ref<ModelVersion[]>([])
 
-const seedTypes = ref<SeedType[]>([
-  {
-    id: 'PEH',
-    species: 'Species name',
-    isCustom: false,
-  },
-  {
-    id: 'PHYCA',
-    species: 'Species name',
-    isCustom: false,
-  },
-  {
-    id: 'VAU',
-    species: 'Species name',
-    isCustom: false,
-  },
-  {
-    id: 'CAT',
-    species: 'Species name',
-    isCustom: false,
-  },
-])
+const seedTypes = ref<SeedType[]>([])
 
 const config = ref<PipelineConfig>({
   confidence_threshold: 0.3,
   slice_overlap_ratio: 0.35,
-
-  models: {
-    PEH: { model_version_id: null },
-    PHYCA: { model_version_id: null },
-    VAU: { model_version_id: null },
-    CAT: { model_version_id: null },
-  },
+  models: {},
 })
 
 const filteredModelVersions = computed(() => {
@@ -390,7 +356,28 @@ onMounted(async () => {
   }
   try {
     const res = await api('/api/analysis/models/?module=seeds')
-    if (res.ok) modelVersions.value = await res.json()
+    if (res.ok) {
+      modelVersions.value = await res.json()
+
+      // Extract unique species (kind) from available models
+      const uniqueKinds = Array.from(
+        new Set(modelVersions.value.map((m) => m.kind).filter(Boolean)),
+      )
+
+      // Build the UI buttons
+      seedTypes.value = uniqueKinds.map((kind) => ({
+        id: kind,
+        species: '', // You can add a mapping dictionary here later if you want full biological names
+        isCustom: false,
+      }))
+
+      // Build the configuration tracking object
+      const dynamicModels: Record<string, SeedModelConfig> = {}
+      uniqueKinds.forEach((kind) => {
+        dynamicModels[kind] = { model_version_id: null }
+      })
+      config.value.models = dynamicModels
+    }
   } catch {}
 })
 

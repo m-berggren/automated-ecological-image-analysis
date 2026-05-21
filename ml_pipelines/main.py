@@ -28,7 +28,7 @@ TRAINING_MODE = 'finetune'  # Set to 'fresh' to train from scratch, set to 'fine
 FINETUNE_WEIGHTS = {  # Per-species checkpoint to fine-tune from, only used if TRAIN_MODE == 'finetune'
     'cat': os.path.abspath(
         os.path.join('runs', 'obb', 'cat', 'weights', 'best.pt')
-    ),  # Might need to update these paths later
+    ),
     'peh': os.path.abspath(os.path.join('runs', 'obb', 'peh', 'weights', 'best.pt')),
     'phyca': os.path.abspath(
         os.path.join('runs', 'obb', 'phyca', 'weights', 'best.pt')
