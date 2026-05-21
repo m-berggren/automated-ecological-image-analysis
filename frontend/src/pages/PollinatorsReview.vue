@@ -26,6 +26,11 @@
       }}</span>
       <span>total crops</span>
     </span>
+    <InfoPopover>
+      Visible = crops shown right now; total = every crop in the run. Crops are hidden when they
+      fall below the confidence thresholds or don't match the active filters, and already-reviewed
+      crops are hidden by default.
+    </InfoPopover>
     <span v-if="loadProgress.total && loadProgress.loaded < loadProgress.total" class="italic">
       loading {{ loadProgress.loaded.toLocaleString() }}/{{ loadProgress.total.toLocaleString() }}…
     </span>
@@ -144,38 +149,8 @@
 
             <!-- Annotation bbox colors. User-level (localStorage), shared across
                  runs; the review boxes read these from the same store. -->
-            <div class="border-t border-border pt-2 mt-2 flex items-center gap-1">
-              <span
-                class="text-[10px] xl:text-[11px] font-semibold uppercase tracking-wider text-muted-foreground"
-              >
-                Box colors
-              </span>
-              <InfoPopover>
-                Outline color for annotation boxes on the image. "Box" is the default outline;
-                "Selected" is the focused/highlighted box. Saved for your account across runs.
-              </InfoPopover>
-              <label class="ml-auto flex items-center gap-1 text-xs cursor-pointer">
-                <input
-                  type="color"
-                  :value="settings.annotationColor"
-                  class="w-5 h-5 rounded border border-border bg-transparent cursor-pointer p-0"
-                  @input="settings.setAnnotationColor(($event.target as HTMLInputElement).value)"
-                  @change="($event.target as HTMLInputElement).blur()"
-                />
-                <span class="text-muted-foreground">Box</span>
-              </label>
-              <label class="flex items-center gap-1 text-xs cursor-pointer">
-                <input
-                  type="color"
-                  :value="settings.annotationHighlightColor"
-                  class="w-5 h-5 rounded border border-border bg-transparent cursor-pointer p-0"
-                  @input="
-                    settings.setAnnotationHighlightColor(($event.target as HTMLInputElement).value)
-                  "
-                  @change="($event.target as HTMLInputElement).blur()"
-                />
-                <span class="text-muted-foreground">Selected</span>
-              </label>
+            <div class="border-t border-border pt-2 mt-2">
+              <AnnotationColorPickers />
             </div>
           </div>
 
@@ -441,13 +416,20 @@
             </button>
           </div>
           <div class="text-xs text-muted-foreground flex items-center justify-between gap-3">
-            <span class="flex-1 min-w-0 truncate">
-              {{ filteredDetections.length }} of {{ detections.length }} detections<span
-                v-if="loadProgress.total && loadProgress.loaded < loadProgress.total"
-                class="italic"
-              >
-                · loading {{ loadProgress.loaded }}/{{ loadProgress.total }}…</span
-              >
+            <span class="flex items-center gap-1 flex-1 min-w-0">
+              <span class="truncate">
+                {{ filteredDetections.length }} of {{ detections.length }} detections<span
+                  v-if="loadProgress.total && loadProgress.loaded < loadProgress.total"
+                  class="italic"
+                >
+                  · loading {{ loadProgress.loaded }}/{{ loadProgress.total }}…</span
+                >
+              </span>
+              <InfoPopover>
+                First number = detections left under the current filters (Show, Class, search, and
+                the YOLO / Group sliders); second = total in the run. The default "Pending" filter
+                hides crops you've already reviewed.
+              </InfoPopover>
             </span>
             <button
               class="text-primary hover:underline"
@@ -662,9 +644,13 @@
                   :y="ov.outline.y"
                   :width="ov.outline.width"
                   :height="ov.outline.height"
-                  :fill="isHighlighted(ov.id) ? '#ef4444' : 'transparent'"
+                  :fill="isHighlighted(ov.id) ? settings.annotationHighlightColor : 'transparent'"
                   :fill-opacity="isHighlighted(ov.id) ? 0.18 : 0"
-                  :stroke="isHighlighted(ov.id) ? '#ef4444' : '#52525b'"
+                  :stroke="
+                    isHighlighted(ov.id)
+                      ? settings.annotationHighlightColor
+                      : settings.annotationColor
+                  "
                   :stroke-width="bboxStrokeWidth"
                   class="cursor-pointer"
                   @mousedown.stop
@@ -724,9 +710,14 @@
               <!-- Label first (one row per class with radio at end). -->
               <div class="px-5 py-2 border-b border-border @[500px]:border-b-0 @[500px]:border-r">
                 <div
-                  class="text-[10px] xl:text-[11px] font-semibold uppercase tracking-wider text-muted-foreground mb-0.5"
+                  class="inline-flex items-center gap-1 text-[10px] xl:text-[11px] font-semibold uppercase tracking-wider text-muted-foreground mb-0.5"
                 >
                   Label
+                  <InfoPopover>
+                    Your decision for the selected crop (or the whole bulk selection). Pick a class
+                    to confirm/correct it, or Background to reject. Keyboard: 1-4 for classes, x to
+                    reject, u for unsure, ⏎ for the suggested class.
+                  </InfoPopover>
                   <span
                     v-if="bulkMode"
                     class="ml-1 normal-case tracking-normal text-muted-foreground/80"
@@ -787,11 +778,16 @@
               <!-- Predictions (compact, two-line). Hidden in bulk mode —
                    per-detection model output doesn't make sense when the
                    user is acting on a mixed selection. -->
-              <div v-if="!bulkMode" class="px-5 py-2">
+              <div v-if="!bulkMode" class="px-5 py-2 flex flex-col">
                 <div
-                  class="text-[10px] xl:text-[11px] font-semibold uppercase tracking-wider text-muted-foreground mb-0.5"
+                  class="inline-flex items-center gap-1 text-[10px] xl:text-[11px] font-semibold uppercase tracking-wider text-muted-foreground mb-0.5"
                 >
                   Predictions
+                  <InfoPopover>
+                    The model calls for this crop: the YOLO detector and the 4-group classifier (fly
+                    / bumblebee / butterfly / other), each with its confidence. These are model
+                    outputs, not your decision — confirm or correct them with the Label controls.
+                  </InfoPopover>
                 </div>
                 <div class="space-y-0.5 text-xs xl:text-sm">
                   <div
@@ -838,6 +834,11 @@
                   <div v-else-if="isLowConfidence(selected)" class="text-amber-700">
                     ⚠ Low confidence
                   </div>
+                </div>
+                <!-- Annotation bbox colors (shared store; same control as the
+                     image-first layout). Pushed to the bottom of the panel. -->
+                <div class="border-t border-border pt-3 mt-auto">
+                  <AnnotationColorPickers />
                 </div>
               </div>
             </div>
@@ -971,6 +972,7 @@ import {
 import { useRunDetections } from '@/composables/useRunDetections'
 import { usePollinatorSettingsStore } from '@/stores/pollinatorSettings'
 import ReviewImageFirst from '@/components/pollinator/ReviewImageFirst.vue'
+import AnnotationColorPickers from '@/components/pollinator/AnnotationColorPickers.vue'
 
 const settings = usePollinatorSettingsStore()
 

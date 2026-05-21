@@ -44,12 +44,30 @@
             </span>
             <!-- Per-image training-exclude toggle. Set when the image has
                  more real insects than boxes, so YOLO shouldn't train on it. -->
-            <div class="ml-auto inline-flex items-center gap-1 shrink-0">
+            <div class="ml-auto inline-flex items-center gap-2 shrink-0">
+              <!-- Toggle: mark every box in this image (helps when faint boxes
+                   are hard to spot). Pressing again clears the bulk, leaving
+                   the previously-selected box highlighted. -->
+              <button
+                class="inline-flex items-center gap-1 text-xs px-1.5 py-0.5 rounded border transition-colors"
+                :class="
+                  allBoxesMarked
+                    ? 'border-primary bg-primary text-primary-foreground'
+                    : 'border-border bg-muted text-foreground hover:bg-muted/70'
+                "
+                :title="
+                  allBoxesMarked
+                    ? 'Clear selection (back to the single box)'
+                    : 'Mark all boxes in this image'
+                "
+                @click="toggleMarkAllBoxes"
+              >
+                <BoxSelect class="w-3.5 h-3.5" />
+                <span>{{ allBoxesMarked ? 'Marked' : 'Mark all' }}</span>
+              </button>
               <label
                 class="inline-flex items-center gap-1.5 text-xs cursor-pointer"
-                :class="
-                  activeImageExcludeTraining ? 'text-red-600 font-medium' : 'text-muted-foreground'
-                "
+                :class="activeImageExcludeTraining ? 'text-red-600' : 'text-muted-foreground'"
               >
                 <input
                   type="checkbox"
@@ -179,9 +197,15 @@
     >
       <div class="shrink-0 flex items-center px-3 py-1.5 border-b border-border text-xs">
         <span class="font-semibold uppercase tracking-wider text-muted-foreground"> Crops </span>
-        <span v-if="activeImage" class="ml-2 text-muted-foreground">
+        <span v-if="activeImage" class="ml-2 mr-1.5 text-muted-foreground">
           {{ activeImage.detections.length }}
         </span>
+        <InfoPopover>
+          Select crops here to label several at once:
+          <br />• Click — select just that crop. <br />• Shift+click — select a range from the
+          current selection to the clicked crop. <br />• Ctrl/Cmd+click — add or remove a single
+          crop. <br />Use "Mark all" in the image header to select every box at once.
+        </InfoPopover>
         <button
           class="ml-auto p-1 rounded hover:bg-muted text-muted-foreground"
           title="Collapse crops"
@@ -191,18 +215,20 @@
         </button>
       </div>
       <div class="flex-1 overflow-y-auto">
-        <ul v-if="activeImage" class="divide-y divide-border">
+        <ul v-if="activeImage" class="divide-y divide-border select-none">
           <li v-for="d in activeImage.detections" :key="d.id">
             <div
               class="p-2 flex gap-2 transition-colors cursor-pointer"
               :class="isHighlighted(d.id) ? 'bg-primary/5' : 'hover:bg-muted/50'"
-              @click="emit('update:selectedId', d.id)"
+              @mousedown.shift.prevent
+              @click="onCropRowClick(d.id, $event)"
             >
               <!-- Sharp-cornered thumbnail. The whole row is the click
                    target (parent div); no separate popup. -->
               <div
                 class="w-14 h-14 shrink-0 overflow-hidden bg-background border-2 shadow-sm"
-                :class="isHighlighted(d.id) ? 'border-red-500' : 'border-border'"
+                :class="isHighlighted(d.id) ? '' : 'border-border'"
+                :style="isHighlighted(d.id) ? { borderColor: highlightColor } : undefined"
               >
                 <img
                   v-if="d.crop_url"
@@ -257,7 +283,7 @@
 
 <script setup lang="ts">
 import { computed, onBeforeUnmount, ref, watch } from 'vue'
-import { ChevronsLeft, ChevronsRight, ZoomOut } from 'lucide-vue-next'
+import { BoxSelect, ChevronsLeft, ChevronsRight, ZoomOut } from 'lucide-vue-next'
 import type { Detection, PollinatorClass } from '@/types/pollinator'
 import Tooltip from '@/components/Tooltip.vue'
 import InfoPopover from '@/components/InfoPopover.vue'
@@ -414,6 +440,66 @@ watch(
 function isHighlighted(id: number): boolean {
   if (props.bulkIds && props.bulkIds.size > 0) return props.bulkIds.has(id)
   return id === props.selectedId
+}
+
+// "Mark all" reflects whether every box in the active image is in the bulk
+// set. Toggling on emits all ids (parent sets bulkIds + keeps the active
+// selection); toggling off clears the bulk so the single selected box stays
+// highlighted. Routed through drag-select so bulkIds stays the parent's
+// single source of truth.
+const allBoxesMarked = computed(() => {
+  const dets = activeImage.value?.detections ?? []
+  const bulk = props.bulkIds
+  if (!dets.length || !bulk || bulk.size === 0) return false
+  return dets.every((d) => bulk.has(d.id))
+})
+
+function toggleMarkAllBoxes() {
+  const dets = activeImage.value?.detections ?? []
+  if (!dets.length) return
+  emit('drag-select', allBoxesMarked.value ? [] : dets.map((d) => d.id))
+}
+
+// The crops currently marked: the bulk set when present, otherwise the lone
+// primary selection.
+function currentSelectionSet(): Set<number> {
+  if (props.bulkIds && props.bulkIds.size > 0) return new Set(props.bulkIds)
+  if (props.selectedId != null) return new Set([props.selectedId])
+  return new Set()
+}
+
+// Crops-column row click, standard multi-select semantics:
+//  - plain click: select only this crop (drop any other marks)
+//  - Shift+click: range-select from the anchor (current selection) to here
+//  - Ctrl/Cmd+click: toggle just this crop in/out of the selection
+// Everything is routed up through drag-select so bulkIds stays the parent's
+// single source of truth.
+function onCropRowClick(id: number, e: MouseEvent) {
+  const dets = activeImage.value?.detections ?? []
+  if (e.shiftKey && props.selectedId != null && dets.length) {
+    const anchorIdx = dets.findIndex((d) => d.id === props.selectedId)
+    const clickIdx = dets.findIndex((d) => d.id === id)
+    if (anchorIdx !== -1 && clickIdx !== -1) {
+      const [lo, hi] = anchorIdx <= clickIdx ? [anchorIdx, clickIdx] : [clickIdx, anchorIdx]
+      emit(
+        'drag-select',
+        dets.slice(lo, hi + 1).map((d) => d.id),
+      )
+      return
+    }
+  }
+  if (e.ctrlKey || e.metaKey) {
+    const current = currentSelectionSet()
+    const adding = !current.has(id)
+    if (adding) current.add(id)
+    else current.delete(id)
+    emit('drag-select', [...current])
+    if (adding) emit('update:selectedId', id)
+    return
+  }
+  // Plain click: clear any bulk, then select just this crop.
+  emit('drag-select', [])
+  emit('update:selectedId', id)
 }
 
 // --- Crops column collapse state ----------------------------------------
