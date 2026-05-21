@@ -1,6 +1,6 @@
 import threading
 import logging
-from django.conf import settings
+from django.utils import timezone
 from apps.analysis.models import JobStatus, Detection, InferenceRun, ModelVersion
 
 logger = logging.getLogger(__name__)
@@ -9,7 +9,8 @@ def process_seeds_run(run_id: int):
     try:
         run = InferenceRun.objects.get(pk=run_id)
         run.status = JobStatus.RUNNING
-        run.save(update_fields=['status'])
+        run.started_at = timezone.now()
+        run.save(update_fields=['config', 'image_count', 'started_at', 'status'])
 
         # Read frontend config
         overlap = run.config.get('slice_overlap_ratio', 0.35)
@@ -97,12 +98,16 @@ def process_seeds_run(run_id: int):
 
         if run.status == JobStatus.RUNNING:
             run.status = JobStatus.COMPLETED
+            run.completed_at = timezone.now()
+            run.save(update_fields=['completed_at', 'status'])
             run.save(update_fields=['status'])
 
     except Exception as e:
         logger.exception("Seed pipeline failed")
         run.status = JobStatus.FAILED
         run.error_message = str(e)
+        run.completed_at = timezone.now()
+        run.save(update_fields=['completed_at', 'status'])
         run.save(update_fields=['status', 'error_message'])
 
 def spawn_seeds_pipeline(run):

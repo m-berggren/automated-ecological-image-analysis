@@ -58,13 +58,21 @@
             {{ cancelling ? 'Cancelling...' : 'Cancel run' }}
           </button>
 
-          <RouterLink
-            v-if="canOpenReview"
-            :to="`/seeds/runs/${run.id}/review`"
-            class="ml-auto text-sm px-3 py-1.5 rounded-md font-medium bg-primary text-primary-foreground hover:bg-primary/90"
+          <button
+            v-if="
+              run.status === 'pending' || run.status === 'running' || run.status === 'completed'
+            "
+            @click="router.push(`/seeds/runs/${run.id}/review`)"
+            :disabled="run.status !== 'completed'"
+            class="ml-auto text-sm px-3 py-1.5 rounded-md font-medium transition-colors"
+            :class="
+              run.status === 'completed'
+                ? 'bg-primary text-primary-foreground hover:bg-primary/90'
+                : 'bg-muted text-muted-foreground opacity-50 cursor-not-allowed'
+            "
           >
-            Open review →
-          </RouterLink>
+            {{ run.status === 'completed' ? 'Open review →' : 'Review pending...' }}
+          </button>
 
           <template v-if="run.status === 'failed' || run.status === 'cancelled'">
             <button
@@ -156,10 +164,12 @@
 
       <section class="rounded-xl border border-border bg-surface">
         <header class="px-5 py-3 border-b border-border flex items-center justify-between">
-          <h2 class="text-sm font-semibold">Recent activity</h2>
+          <h2 class="text-sm font-semibold">Images Processed</h2>
           <span v-if="run.failed_image_count > 0" class="text-xs text-red-600">
-            ⚠ {{ run.failed_image_count }} images failed
+            ⚠ {{ run.processed_image_count }} images processed, {{ run.failed_image_count }} images
+            failed
           </span>
+          <span v-else> {{ run.processed_image_count }} images processed </span>
         </header>
         <ul class="max-h-72 overflow-auto divide-y divide-border text-xs">
           <li
@@ -352,9 +362,12 @@ const percent = computed(() => {
   return Math.min(100, Math.round((run.value.processed_image_count / run.value.image_count) * 100))
 })
 const elapsedSeconds = computed(() => {
-  if (!run.value?.started_at) return 0
-  const start = new Date(run.value.started_at).getTime()
-  const end = run.value.completed_at ? new Date(run.value.completed_at).getTime() : now.value
+  const startTime = run.value?.started_at || run.value?.created_at
+  if (!startTime) return 0
+
+  const start = new Date(startTime).getTime()
+  const end = run.value?.completed_at ? new Date(run.value.completed_at).getTime() : now.value
+
   return Math.max(0, (end - start) / 1000)
 })
 const elapsedHuman = computed(() => humanDuration(elapsedSeconds.value))
@@ -371,12 +384,7 @@ const timingLine = computed(() => {
   return `Created ${new Date(run.value.created_at).toLocaleString()}`
 })
 const canCancel = computed(() => run.value?.status === 'pending' || run.value?.status === 'running')
-const canOpenReview = computed(
-  () =>
-    !!run.value &&
-    run.value.detection_count > 0 &&
-    (run.value.status === 'running' || run.value.status === 'completed'),
-)
+
 const avgPerImage = computed(() => {
   if (!run.value || run.value.processed_image_count === 0) return '—'
   return Math.round(run.value.detection_count / run.value.processed_image_count)
