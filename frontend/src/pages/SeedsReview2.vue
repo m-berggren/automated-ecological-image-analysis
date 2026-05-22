@@ -1,5 +1,8 @@
 <template>
-  <PageHeader :title="headerTitle" subtitle="Review oriented classifications and analyze confidence distributions" />
+  <PageHeader
+    :title="headerTitle"
+    subtitle="Review oriented classifications and analyze confidence distributions"
+  />
 
   <SeedsStepper current="review-final" :runId="run?.id" />
 
@@ -13,7 +16,9 @@
 
   <div v-else-if="currentImage" class="flex-1 flex flex-col min-h-0 bg-background">
     <section class="border-b border-border bg-surface px-6 py-4">
-      <div class="max-w-7xl mx-auto flex flex-col lg:flex-row lg:items-center lg:justify-between gap-6">
+      <div
+        class="max-w-7xl mx-auto flex flex-col lg:flex-row lg:items-center lg:justify-between gap-6"
+      >
         <div>
           <h2 class="text-base font-semibold flex items-center gap-2">
             Image Review
@@ -26,9 +31,13 @@
           </p>
         </div>
 
-        <div class="grid grid-cols-2 md:grid-cols-3 gap-4 bg-muted/20 p-3 rounded-xl border border-border flex-1 max-w-2xl">
+        <div
+          class="grid grid-cols-2 md:grid-cols-3 gap-4 bg-muted/20 p-3 rounded-xl border border-border flex-1 max-w-2xl"
+        >
           <div class="px-2 border-r border-border/60">
-            <span class="text-[10px] text-muted-foreground block font-bold uppercase tracking-wider">
+            <span
+              class="text-[10px] text-muted-foreground block font-bold uppercase tracking-wider"
+            >
               Mean Confidence
             </span>
             <div class="text-base font-mono font-bold text-foreground mt-0.5">
@@ -37,21 +46,29 @@
           </div>
 
           <div class="px-2 border-r border-border/60">
-            <span class="text-[10px] text-muted-foreground block font-bold uppercase tracking-wider">
+            <span
+              class="text-[10px] text-muted-foreground block font-bold uppercase tracking-wider"
+            >
               Approximate Range
             </span>
             <div class="text-base font-mono font-bold text-foreground mt-0.5">
-              {{ initialSeedRangeMin }} – {{ initialSeedRangeMax }} <span class="text-[10px] text-muted-foreground font-normal">seeds</span>
+              {{ initialSeedRangeMin }} – {{ initialSeedRangeMax }}
+              <span class="text-[10px] text-muted-foreground font-normal">seeds</span>
             </div>
           </div>
 
-          <div class="px-2 col-span-2 md:col-span-1 flex items-center justify-between gap-2 bg-background/50 p-1.5 rounded-lg border border-border/40">
+          <div
+            class="px-2 col-span-2 md:col-span-1 flex items-center justify-between gap-2 bg-background/50 p-1.5 rounded-lg border border-border/40"
+          >
             <div>
-              <span class="text-[10px] text-muted-foreground block font-medium uppercase tracking-tight">
+              <span
+                class="text-[10px] text-muted-foreground block font-medium uppercase tracking-tight"
+              >
                 Active Seeds
               </span>
               <div class="text-xs text-muted-foreground font-mono">
-                ML Counted: <span class="font-bold text-foreground">{{ initialAutomatedActiveCount }}</span>
+                ML Counted:
+                <span class="font-bold text-foreground">{{ initialAutomatedActiveCount }}</span>
               </div>
             </div>
 
@@ -96,13 +113,17 @@
       </div>
     </section>
 
-    <div class="bg-muted/20 px-6 py-2 border-b border-border flex items-center gap-4 text-xs font-medium">
+    <div
+      class="bg-muted/20 px-6 py-2 border-b border-border flex items-center gap-4 text-xs font-medium"
+    >
       <span class="text-muted-foreground">Legend:</span>
       <span class="flex items-center gap-1.5">
-        <span class="w-3 h-3 rounded-full bg-green-500 block border border-green-600"></span> Active Seed
+        <span class="w-3 h-3 rounded-full bg-green-500 block border border-green-600"></span> Active
+        Seed
       </span>
       <span class="flex items-center gap-1.5">
-        <span class="w-3 h-3 rounded-full bg-red-500 block border border-red-600"></span> Aborted / Inactive Seed
+        <span class="w-3 h-3 rounded-full bg-red-500 block border border-red-600"></span> Aborted /
+        Inactive Seed
       </span>
       <span class="text-muted-foreground font-normal italic ml-auto hidden sm:inline">
         Click on a bounding box to toggle its status manually.
@@ -120,22 +141,10 @@
           />
 
           <svg
-            viewBox="0 0 100 100"
+            :viewBox="`0 0 ${currentImage.width} ${currentImage.height}`"
             preserveAspectRatio="none"
             class="absolute inset-0 w-full h-full pointer-events-none select-none"
-          >
-            <polygon
-              v-for="detection in currentDetections"
-              :key="detection.id"
-              :points="getPolygonPoints(detection)"
-              class="pointer-events-auto cursor-pointer stroke-[0.4] transition-all duration-150 fill-transparent hover:fill-current/10"
-              :class="isActiveSeed(detection)
-                ? 'stroke-green-500 text-green-500 hover:stroke-green-400'
-                : 'stroke-red-500 text-red-500 hover:stroke-red-400'"
-              @click="toggleSeedStatus(detection.id)"
-              :title="`Confidence: ${(detection.confidence * 100).toFixed(1)}%`"
-            />
-          </svg>
+          />
         </div>
       </div>
     </section>
@@ -224,6 +233,10 @@ const initialSeedRangeMin = ref<number>(0)
 const initialSeedRangeMax = ref<number>(0)
 
 const isPreviewMode = computed(() => {
+  const hasRunId = route.params.id && route.params.id !== 'undefined'
+  // If we have a real Run ID, we are NOT in preview mode, even in DEV
+  if (hasRunId) return false
+
   return route.query.preview === 'default' || import.meta.env.DEV
 })
 
@@ -234,7 +247,9 @@ const currentImage = computed<ReviewImage | null>(() => {
 const totalImagesCount = computed(() => imagesList.value.length)
 
 const headerTitle = computed(() =>
-  run.value ? `Seed Classification Review · ${run.value.name || `Run #${run.value.id}`}` : 'Seed Classification Review',
+  run.value
+    ? `Seed Classification Review · ${run.value.name || `Run #${run.value.id}`}`
+    : 'Seed Classification Review',
 )
 
 const currentDetections = computed<Detection[]>(() => {
@@ -243,22 +258,28 @@ const currentDetections = computed<Detection[]>(() => {
 })
 
 // Retrieves the initial seed count metrics from the permanent map and keeps manual input synced
-watch(currentImage, (newImage) => {
-  if (!newImage) return
+watch(
+  currentImage,
+  (newImage) => {
+    if (!newImage) return
 
-  // Fetch current number of detections to set the manual input counter value correctly
-  const currentList = imageDetectionsMap.value[newImage.filename] || []
-  manualActiveCount.value = currentList.filter(d => isActiveSeed(d)).length
+    // Fetch current number of detections to set the manual input counter value correctly
+    const currentList = imageDetectionsMap.value[newImage.filename] || []
+    console.log('Detections for this image:', currentList) // DEBUG
 
-  // Fetch initial model metrics from permanent lookup map
-  const baseline = initialMetricsLookupMap.value[newImage.filename]
-  if (baseline) {
-    initialAutomatedActiveCount.value = baseline.automatedActiveCount
-    initialOverallConfidenceScore.value = baseline.overallConfidenceScore
-    initialSeedRangeMin.value = baseline.seedRangeMin
-    initialSeedRangeMax.value = baseline.seedRangeMax
-  }
-}, { immediate: true })
+    manualActiveCount.value = currentList.filter((d) => isActiveSeed(d)).length
+
+    // Fetch initial model metrics from permanent lookup map
+    const baseline = initialMetricsLookupMap.value[newImage.filename]
+    if (baseline) {
+      initialAutomatedActiveCount.value = baseline.automatedActiveCount
+      initialOverallConfidenceScore.value = baseline.overallConfidenceScore
+      initialSeedRangeMin.value = baseline.seedRangeMin
+      initialSeedRangeMax.value = baseline.seedRangeMax
+    }
+  },
+  { immediate: true },
+)
 
 function isActiveSeed(detection: Detection): boolean {
   const statusString = detection.predicted_class || (detection as any).viability_status || ''
@@ -270,7 +291,7 @@ function toggleSeedStatus(detectionId: number) {
   if (!currentImage.value) return
   const filename = currentImage.value.filename
   const detectionsList = imageDetectionsMap.value[filename] || []
-  const target = detectionsList.find(d => d.id === detectionId)
+  const target = detectionsList.find((d) => d.id === detectionId)
 
   if (target) {
     const currentClass = (target.predicted_class || '').toLowerCase()
@@ -305,7 +326,7 @@ async function initializeReviewBundle() {
   const id = route.params.id as string
 
   if ((!id || id === 'undefined') && !isPreviewMode.value) {
-    loadError.value = "Route error: Run ID could not be extracted from the URL parameters."
+    loadError.value = 'Route error: Run ID could not be extracted from the URL parameters.'
     loading.value = false
     return
   }
@@ -314,16 +335,16 @@ async function initializeReviewBundle() {
 
   try {
     if (isPreviewMode.value) {
-      console.log("Preview mode: Initialized via seed-detections.json mock.")
+      console.log('Preview mode: Initialized via seed-detections.json mock.')
 
       const rawModule = await import('@/mocks/seed-detections.json')
       const mocks = rawModule.default?.default || rawModule.default
 
       run.value = {
         id: (mocks.run?.id ?? Number(id)) || 1,
-        name: mocks.run?.name ?? "Mock Run",
-        status: "completed",
-        detection_count: mocks.run?.detection_count ?? 12
+        name: mocks.run?.name ?? 'Mock Run',
+        status: 'completed',
+        detection_count: mocks.run?.detection_count ?? 12,
       }
 
       imagesList.value = mocks.run?.images_list || mocks.images_list || []
@@ -333,7 +354,7 @@ async function initializeReviewBundle() {
 
       imagesList.value.forEach((img) => {
         const imageDetections = rawDetections.map((det: any, index: number) => {
-          const startX = 10 + (index * 14) % 75
+          const startX = 10 + ((index * 14) % 75)
           const startY = 20 + Math.floor(index / 5) * 20
           const sizeW = 7
           const sizeH = 10
@@ -343,76 +364,83 @@ async function initializeReviewBundle() {
             id: det.id + img.id * 1000,
             predicted_class: det.predicted_class || det.viability_status || 'aborted',
             poly: det.poly || [
-              startX, startY,
-              startX + sizeW, startY + 2,
-              startX + sizeW - 1, startY + sizeH,
-              startX - 1, startY + sizeH - 1
-            ]
+              startX,
+              startY,
+              startX + sizeW,
+              startY + 2,
+              startX + sizeW - 1,
+              startY + sizeH,
+              startX - 1,
+              startY + sizeH - 1,
+            ],
           }
         })
 
         distributedMap[img.filename] = imageDetections
 
         // Calculate and cache the original model calculations the image before any user modifications happen
-        const initialActive = imageDetections.filter(d => isActiveSeed(d))
+        const initialActive = imageDetections.filter((d) => isActiveSeed(d))
         const sumConfidence = imageDetections.reduce((acc, curr) => acc + curr.confidence, 0)
 
         initialMetricsLookupMap.value[img.filename] = {
           automatedActiveCount: initialActive.length,
-          overallConfidenceScore: imageDetections.length > 0 ? (sumConfidence / imageDetections.length) : 0,
-          seedRangeMin: imageDetections.filter(d => d.confidence >= 0.75 && isActiveSeed(d)).length,
-          seedRangeMax: initialActive.length
+          overallConfidenceScore:
+            imageDetections.length > 0 ? sumConfidence / imageDetections.length : 0,
+          seedRangeMin: imageDetections.filter((d) => d.confidence >= 0.75 && isActiveSeed(d))
+            .length,
+          seedRangeMax: initialActive.length,
         }
       })
 
       imageDetectionsMap.value = distributedMap
       currentImageIndex.value = 0
+
+      manualActiveCount.value = currentDetections.value.filter((d) => isActiveSeed(d)).length
       loading.value = false
       return
     }
 
     // Connected API mode
-    const [runRes, imagesRes, detRes] = await Promise.all([
-      api(`/api/analysis/runs/${id}/`),
-      api(`/api/analysis/runs/${id}/images/`),
-      api(`/api/analysis/runs/${id}/detections/`),
-    ])
+    const response = await api(`/api/seeds/runs/${id}/reference-review/`)
 
-    if (!runRes.ok || !detRes.ok) {
+    if (!response.ok) {
       loadError.value = `HTTP Server Configuration Load Error`
       return
     }
 
-    run.value = await runRes.json()
-    const allDetections: any[] = await detRes.json()
-    imagesList.value = imagesRes.ok ? await imagesRes.json() : (run.value as any).images || []
+    const data = await response.json()
+    run.value = data.run
+    imagesList.value = data.images
 
     const prodMap: Record<string, Detection[]> = {}
 
-    imagesList.value.forEach(img => {
-      const filteredDetections = allDetections
-        .filter(d => d.source_image_filename === img.filename)
-        .map(d => ({
-          ...d,
-          // Unify bounding box column mappings onto standard keys
-          bbox: Array.isArray(d.bbox) ? d.bbox : d.poly
-        }))
+    imagesList.value.forEach((img: any) => {
+      const detections = img.detections || []
+      const filteredDetections = (img.detections || []).map((d: any) => ({
+        ...d,
+        poly: d.polygon || d.poly || [],
+      }))
 
       prodMap[img.filename] = filteredDetections
 
-      // Calculate and cache the original model calculations
-      const initialActive = filteredDetections.filter(d => isActiveSeed(d))
-      const sumConfidence = filteredDetections.reduce((acc, curr) => acc + curr.confidence, 0)
-
+      // Calculate the metrics using the extracted detections
+      const initialActive = filteredDetections.filter((d: any) => isActiveSeed(d))
+      const sumConfidence = filteredDetections.reduce(
+        (acc: number, curr: any) => acc + curr.confidence,
+        0,
+      )
       initialMetricsLookupMap.value[img.filename] = {
         automatedActiveCount: initialActive.length,
-        overallConfidenceScore: filteredDetections.length > 0 ? (sumConfidence / filteredDetections.length) : 0,
-        seedRangeMin: filteredDetections.filter(d => d.confidence >= 0.75 && isActiveSeed(d)).length,
-        seedRangeMax: initialActive.length
+        overallConfidenceScore:
+          filteredDetections.length > 0 ? sumConfidence / filteredDetections.length : 0,
+        seedRangeMin: filteredDetections.filter((d: any) => d.confidence >= 0.75 && isActiveSeed(d))
+          .length,
+        seedRangeMax: initialActive.length,
       }
     })
 
     imageDetectionsMap.value = prodMap
+
     currentImageIndex.value = 0
   } catch (error) {
     loadError.value = error instanceof Error ? error.message : String(error)
@@ -428,28 +456,30 @@ async function saveCurrentPageCount() {
 
   if (isPreviewMode.value) {
     await new Promise((resolve) => setTimeout(resolve, 300))
-    alert(`[MOCK] Metrics synchronized.\nSaved manual override adjustments for ${currentImage.value.filename}.`)
+    alert(
+      `[MOCK] Metrics synchronized.\nSaved manual override adjustments for ${currentImage.value.filename}.`,
+    )
     savingCount.value = false
     return
   }
 
   try {
     const confirmedDetections = currentDetections.value
-    const activeIds = confirmedDetections.filter(d => isActiveSeed(d)).map(d => d.id)
-    const abortedIds = confirmedDetections.filter(d => !isActiveSeed(d)).map(d => d.id)
+    const activeIds = confirmedDetections.filter((d) => isActiveSeed(d)).map((d) => d.id)
+    const abortedIds = confirmedDetections.filter((d) => !isActiveSeed(d)).map((d) => d.id)
 
     // Apply modifications using bulk views update endpoints schema
     await Promise.all([
       api(`/api/analysis/detections/bulk/`, {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ ids: activeIds, reviewer_status: 'confirmed' })
+        body: JSON.stringify({ ids: activeIds, reviewer_status: 'confirmed' }),
       }),
       api(`/api/analysis/detections/bulk/`, {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ ids: abortedIds, reviewer_status: 'rejected' })
-      })
+        body: JSON.stringify({ ids: abortedIds, reviewer_status: 'rejected' }),
+      }),
     ])
     alert('Active counts updated.')
   } catch (error) {

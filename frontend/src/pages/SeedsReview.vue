@@ -127,7 +127,7 @@
             :disabled="!allImagesHaveReference"
             @click="proceed"
           >
-            Continue
+            {{ isCalculating ? 'Calculating...' : 'Continue' }}
           </button>
         </div>
       </div>
@@ -162,7 +162,8 @@ interface Detection {
   confidence: number
   class: string
   polygon?: number[]
-  bbox: { x1: number; y1: number; x2: number; y2: number }
+  bbox?: { x1: number; y1: number; x2: number; y2: number }
+  poly?: number[]
 }
 
 interface ReviewImage {
@@ -188,6 +189,7 @@ const loadError = ref('')
 const run = ref<ReviewBundle['run'] | null>(null)
 const images = ref<ReviewImage[]>([])
 const currentImageIndex = ref(0)
+const isCalculating = ref(false)
 
 // Per-image reference map: imageId (string) -> detectionId
 const referenceMap = ref<Record<string, number>>({})
@@ -297,8 +299,24 @@ async function loadFromApi() {
   }
 }
 
-function proceed() {
-  router.push({ name: 'seed-count-review', params: { id: route.params.id } })
+async function proceed() {
+  const id = route.params.id
+  isCalculating.value = true
+
+  try {
+    const response = await api(`/api/seeds/runs/${id}/calculate/`, {
+      method: 'POST',
+    })
+
+    if (!response.ok) throw new Error(`HTTP ${response.status}`)
+
+    router.push({ name: 'seed-count-review', params: { id } })
+  } catch (error) {
+    showToast('Failed to calculate seed statuses.', 'error')
+    console.error(error)
+  } finally {
+    isCalculating.value = false
+  }
 }
 
 onMounted(loadFromApi)

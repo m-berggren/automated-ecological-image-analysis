@@ -1,21 +1,26 @@
 """Seed species dataset bootstrap service."""
+
 from __future__ import annotations
 
 import logging
 import os
-from pathlib import Path
 import threading
-import logging
+from pathlib import Path
+
 from django.core.files import File
 from django.utils import timezone
-from apps.analysis.models import JobStatus, Detection, InferenceRun, ModelVersion
+
+from apps.analysis.models import Detection, InferenceRun, JobStatus, ModelVersion
 from apps.datasets.models import ImageAsset
 
 logger = logging.getLogger(__name__)
 
+
 def _base_data() -> Path:
     from django.conf import settings
+
     return settings.BASE_DIR / 'data' / 'seed'
+
 
 def bootstrap_species_dataset(species: str) -> Path:
     """Create the folder structure and YAML config for a new seed species.
@@ -54,9 +59,11 @@ def bootstrap_species_dataset(species: str) -> Path:
     logger.info(f'Dataset folder created at {species_dir}')
     return yaml_path
 
+
 def species_dataset_exists(species: str) -> bool:
     """Check if a species dataset folder already exists."""
     return (_base_data() / f'{species.lower()}_model').exists()
+
 
 def process_seeds_run(run_id: int):
     try:
@@ -74,7 +81,9 @@ def process_seeds_run(run_id: int):
         model_id = run.config.get('model_version_id')
 
         if not model_id:
-            raise ValueError(f"No model version selected for seed type: {selected_seed}")
+            raise ValueError(
+                f'No model version selected for seed type: {selected_seed}'
+            )
 
         # Fetch the model path from the DB
         model_version = ModelVersion.objects.get(pk=model_id)
@@ -82,10 +91,11 @@ def process_seeds_run(run_id: int):
 
         # Load the model
         from django.core.files import File
-        from apps.datasets.models import ImageAsset
-        from seed_src.utils.helpers import load_model
-        from seed_src.inference.inference import generate_prediction_visuals
         from sahi.predict import get_sliced_prediction
+        from seed_src.inference.inference import generate_prediction_visuals
+        from seed_src.utils.helpers import load_model
+
+        from apps.datasets.models import ImageAsset
 
         model = load_model(model_path)
 
@@ -106,7 +116,7 @@ def process_seeds_run(run_id: int):
                 slice_width=768,
                 overlap_height_ratio=overlap,
                 overlap_width_ratio=overlap,
-                postprocess_match_threshold=conf_thresh
+                postprocess_match_threshold=conf_thresh,
             )
 
             # Extract just the filename
@@ -114,15 +124,16 @@ def process_seeds_run(run_id: int):
 
             # Generate the path to the annotated prediction image
             annotated_img_path = generate_prediction_visuals(
-                result, img_path, base_filename, 'ml_pipelines/seed_src/prediction_images/'
+                result,
+                img_path,
+                base_filename,
+                'ml_pipelines/seed_src/prediction_images/',
             )
 
             # Save the annotated prediction image to Django's media storage
             with open(annotated_img_path, 'rb') as f:
                 annotated_asset = ImageAsset.objects.create(
-                    module='seeds',
-                    purpose='inference_output',
-                    upload=run.upload
+                    module='seeds', purpose='inference_output', upload=run.upload
                 )
                 annotated_asset.file.save(f'annotated_{base_filename}', File(f))
 
@@ -138,12 +149,27 @@ def process_seeds_run(run_id: int):
                 if hasattr(pred, 'obb') and pred.obb is not None:
                     poly = pred.obb.points if hasattr(pred.obb, 'points') else pred.obb
                 elif hasattr(pred, 'polygon') and pred.polygon is not None:
-                    poly = pred.polygon.exterior if hasattr(pred.polygon, 'exterior') else pred.polygon
+                    poly = (
+                        pred.polygon.exterior
+                        if hasattr(pred.polygon, 'exterior')
+                        else pred.polygon
+                    )
+                elif hasattr(pred, 'mask') and pred.mask is not None:
+                    poly = pred.mask.segmentation[0]
 
                 # Fallback to standard HBBs if OBB fails
                 if poly is None and pred.bbox is not None:
                     bbox = pred.bbox
-                    poly = [bbox.minx, bbox.miny, bbox.maxx, bbox.miny, bbox.maxx, bbox.maxy, bbox.minx, bbox.maxy]
+                    poly = [
+                        bbox.minx,
+                        bbox.miny,
+                        bbox.maxx,
+                        bbox.miny,
+                        bbox.maxx,
+                        bbox.maxy,
+                        bbox.minx,
+                        bbox.maxy,
+                    ]
 
                 if poly is not None:
                     # Flatten the polygon to an 8-point list
@@ -158,7 +184,10 @@ def process_seeds_run(run_id: int):
                         area = float(pred.area.value)
                     elif pred.bbox is not None:
                         # Fallback area calculation: width * height
-                        area = float((pred.bbox.maxx - pred.bbox.minx) * (pred.bbox.maxy - pred.bbox.miny))
+                        area = float(
+                            (pred.bbox.maxx - pred.bbox.minx)
+                            * (pred.bbox.maxy - pred.bbox.miny)
+                        )
 
                     # Create the detection record
                     Detection.objects.create(
@@ -168,7 +197,7 @@ def process_seeds_run(run_id: int):
                         polygon=flat_poly[:8],
                         confidence=float(pred.score.value),
                         predicted_class=selected_seed,
-                        area=area
+                        area=area,
                     )
 
             run.processed_image_count += 1
@@ -181,12 +210,13 @@ def process_seeds_run(run_id: int):
             run.save(update_fields=['status'])
 
     except Exception as e:
-        logger.exception("Seed pipeline failed")
+        logger.exception('Seed pipeline failed')
         run.status = JobStatus.FAILED
         run.error_message = str(e)
         run.completed_at = timezone.now()
         run.save(update_fields=['completed_at', 'status'])
         run.save(update_fields=['status', 'error_message'])
+
 
 def spawn_seeds_pipeline(run):
     thread = threading.Thread(target=process_seeds_run, args=(run.pk,))

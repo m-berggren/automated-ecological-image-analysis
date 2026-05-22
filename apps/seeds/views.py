@@ -11,7 +11,7 @@ from apps.analysis.models import TrainingJob, JobStatus, InferenceRun
 from apps.datasets.models import Module, ImageAsset
 from apps.seeds.services import bootstrap_species_dataset
 from apps.seeds.training import spawn_training_job
-from apps.seeds.reference_seed_service import calculate_seed_status
+from apps.seeds.reference_seed_service import calculate_seed_status, bulk_calculate_run_seed_status
 
 class SeedTrainingDataUploadView(APIView):
     """POST /api/seeds/training/upload-data/ to upload training images."""
@@ -196,4 +196,14 @@ class SeedReferenceView(APIView):
         except Exception as e:
             import traceback
             traceback.print_exc()  # prints full traceback to Django terminal
+            return Response({'error': str(e)}, status=500)
+
+class SeedRunBulkCalculateView(APIView):
+    def post(self, request, run_id):
+        try:
+            results = bulk_calculate_run_seed_status(run_id)
+            return Response({"status": "success", "results": results})
+        except Exception as e:
+            import traceback
+            traceback.print_exc()
             return Response({'error': str(e)}, status=500)
