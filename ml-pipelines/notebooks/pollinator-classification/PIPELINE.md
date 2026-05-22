@@ -110,8 +110,8 @@ The exported `yolo.zip` is placed in the project root (or any path you set in Ce
 
 ### Ground truth for evaluation
 `evaluate.ipynb` uses the same CVAT annotations as ground truth.
-The raw `.txt` files live in `data/evaluation/e2e_yolo_annotations/{dataset_name}/obj_train_data/`.
-These match the images in `data/evaluation/e2e_evaluation_images/`.
+The raw `.txt` files live in `data/evaluation/annotations/{dataset_name}/obj_train_data/`.
+These match the images in `data/evaluation/images/`.
 
 ---
 
@@ -356,7 +356,7 @@ beyond pip packages) and **backend-linked** (`colab_master_pipeline.ipynb`, whic
 | Notebook | Trains | Notes |
 |---|---|---|
 | `train_yolo.ipynb` | YOLO detector | yolo26n, 2-stage, tile-based |
-| `train_binary_group.ipynb` | Binary + group (4-class) classifiers | EfficientNet binary, InsectNet group |
+| `train_binary_group.ipynb` | Binary + group (4-class) classifiers | Binary backbone: EfficientNet-B2 or InsectNet (set `BINARY_BACKBONE`); group: InsectNet |
 | `train_5class.ipynb` | 5-class classifier | **standalone only** — not in the backend |
 
 All three are fully self-contained: no `pollinator` package needed, run identically on

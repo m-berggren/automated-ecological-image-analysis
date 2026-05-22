@@ -5,18 +5,22 @@ Input image data used by the ML pipelines. **Not tracked in git** — add `data/
 ```
 data/
 ├── training/
-│   └── annotated_crops/        ← manually labeled crops, one sub-folder per class
-│       ├── bumblebee/
+│   ├── annotated_crops/        ← manually labeled crops, one sub-folder per class
+│   │   ├── bumblebee/
+│   │   ├── fly/
+│   │   ├── butterfly/
+│   │   ├── other/
+│   │   └── background/
+│   └── web_images/             ← iNaturalist downloads (fly, butterfly, other)
 │       ├── fly/
 │       ├── butterfly/
-│       ├── other/
-│       └── background/
+│       └── other/
 └── evaluation/
-    ├── e2e_evaluation_images/  ← camera trap images for end-to-end evaluation
+    ├── images/  ← camera trap images for end-to-end evaluation
     │   └── {camera_name}/
     │       ├── frame_001.jpg
     │       └── ...
-    └── e2e_yolo_annotations/   ← CVAT YOLO 1.1 ground truth
+    └── annotations/   ← CVAT YOLO 1.1 ground truth
         ├── obj_Train_data/
         │   └── {frame_name}.txt    ← one line per bounding box: class cx cy w h
         ├── train.txt
@@ -63,15 +67,17 @@ experiments/training/retrain_cropbased.ipynb
 ```
 
 You can also add web-downloaded images with `tools/data_prep/download_web_images.py` —
-these are used for both classifiers: directly for the group classifier, and as extra
-`insect` data for the binary classifier when `USE_WEB_FOR_BINARY = True` (default).
+these land in `data/training/web_images/{fly,butterfly,other}/` and are used for both
+classifiers: directly for the group classifier, and as extra `insect` data for the binary
+classifier when `USE_WEB_FOR_BINARY = True` (default). Set `WEB_DIR` in the training
+notebooks to point to this folder.
 
 Do not mix unlabeled or `unsure/` crops into the class folders — both training notebooks
 skip any sub-folder not in the expected class list.
 
 ---
 
-## evaluation/e2e_evaluation_images/
+## evaluation/images/
 
 Raw camera trap image sequences, one sub-folder per camera location. These are the inputs
 to `experiments/inference/infer_cropbased.ipynb` and `experiments/inference/infer_yolo.ipynb`.
@@ -85,7 +91,7 @@ and place the frames in it. Set `RUN_NAME` in Cell 2 of the inference notebook b
 
 ---
 
-## evaluation/e2e_yolo_annotations/
+## evaluation/annotations/
 
 Ground-truth bounding box annotations exported from CVAT in **YOLO 1.1 format**. Used by
 `experiments/evaluation/evaluate.ipynb` to score pipeline outputs.

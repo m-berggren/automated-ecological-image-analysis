@@ -89,8 +89,8 @@ pollinator-classification/
 │   ├── training/                   ← data used for model training
 │   │   └── annotated_crops/        ← manually labeled crops ({class}/ sub-folders)
 │   └── evaluation/                 ← data used for pipeline evaluation
-│       ├── e2e_evaluation_images/  ← camera folders for end-to-end eval
-│       └── e2e_yolo_annotations/   ← CVAT YOLO 1.1 ground truth
+│       ├── images/  ← camera folders for inference (evaluation and general runs)
+│       └── annotations/   ← CVAT YOLO 1.1 ground truth
 │
 ├── outputs/                        ← generated outputs (not in git)
 │   ├── README.md                   ← output folder structure, CSV column reference
@@ -111,10 +111,10 @@ pollinator-classification/
 
 ## Common tasks
 
-**Run inference on new camera images**
-→ Put images in `data/evaluation/e2e_evaluation_images/{camera_name}/`
-→ Open `experiments/inference/infer_cropbased.ipynb`, set `RUN_NAME`, run all cells
-→ If a run with the same `RUN_NAME` already exists the notebook will abort — choose a new name
+**Run inference on camera images**
+→ Put images in `data/evaluation/images/{camera_name}/` — works for any camera images, not just evaluation datasets
+→ Open `experiments/inference/infer_cropbased.ipynb`, run all cells — `RUN_NAME` auto-generates a timestamp
+→ To add a descriptive label, uncomment Option B in Cell 3 and edit the suffix
 
 **Read temperatures from camera strip (optional)**
 → Set `strip_ocr_temperature: True` in Cell 3 of `infer_cropbased.ipynb`
@@ -148,7 +148,7 @@ and how initial training differs from incremental retraining.
 | What | Where |
 |------|-------|
 | Labeled training crops | `data/training/annotated_crops/{class}/` |
-| YOLO annotations (CVAT export) | `data/evaluation/e2e_yolo_annotations/` |
+| YOLO annotations (CVAT export) | `data/evaluation/annotations/` |
 | Inference results | `outputs/inference/crop_results/{run_name}/` |
 | Trained model weights (current) | `models/*.pth` / `models/*.pt` |
 | Training run outputs (historical) | `outputs/training/model_runs/{name}_{timestamp}/` |

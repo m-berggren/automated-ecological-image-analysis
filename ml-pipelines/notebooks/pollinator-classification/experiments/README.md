@@ -23,9 +23,9 @@ experiments/
 
 | Notebook | Reads from | Writes to |
 |----------|-----------|-----------|
-| `inference/infer_cropbased.ipynb` | `data/evaluation/e2e_evaluation_images/` | `outputs/inference/crop_results/` |
-| `inference/infer_yolo.ipynb` | `data/evaluation/e2e_evaluation_images/` | `outputs/inference/yolo_results/` |
-| `evaluation/evaluate.ipynb` | `outputs/inference/*/` + `data/evaluation/e2e_yolo_annotations/` | `outputs/evaluation/` |
+| `inference/infer_cropbased.ipynb` | `data/evaluation/images/` | `outputs/inference/crop_results/` |
+| `inference/infer_yolo.ipynb` | `data/evaluation/images/` | `outputs/inference/yolo_results/` |
+| `evaluation/evaluate.ipynb` | `outputs/inference/*/` + `data/evaluation/annotations/` | `outputs/evaluation/` |
 | `training/train_binary_group.ipynb` | `data/training/annotated_crops/` | `outputs/training/model_runs/`, `models/` |
 | `training/train_5class.ipynb` | `data/training/annotated_crops/` | `outputs/training/model_runs/`, `models/` |
 | `training/train_yolo.ipynb` | CVAT YOLO 1.1 zip (path set in Cell 2) | `outputs/training/model_runs/`, `models/` |
@@ -41,13 +41,16 @@ IN_COLAB = 'google.colab' in sys.modules
 if IN_COLAB:
     from google.colab import drive
     drive.mount('/content/drive')
-    BASE_DIR = Path('/content/drive/MyDrive/pollinator-classification')
+    # Extracts pollinator-colab.zip from Drive to local SSD for fast I/O
+    zipfile.ZipFile('/content/drive/MyDrive/pollinator-colab.zip').extractall('/content/')
+    BASE_DIR = Path('/content/pollinator-colab')
 else:
     BASE_DIR = Path('...')   # absolute path to this repo on disk
 ```
 
-**Only edit Cell 1** if your Google Drive folder has a different name than
-`pollinator-classification`. All other paths are derived from `BASE_DIR` automatically.
+**On Colab:** upload `pollinator-colab.zip` to the root of your Google Drive before running.
+The zip must have `pollinator-colab/` as its top-level folder. See the Cell 0 markdown in each
+notebook for the required zip contents. All other paths are derived from `BASE_DIR` automatically.
 
 ## Difference from colab/
 
@@ -100,7 +103,9 @@ Key toggles inside `PREPROCESS_CONFIG`:
 | `min_contour_area` | `200` | Minimum pixel area for a detected contour to become a crop |
 
 **Important:** The notebook raises `FileExistsError` at startup if `RUN_NAME` already exists in
-`outputs/inference/crop_results/`. Choose a new name or delete the old folder first.
+`outputs/inference/crop_results/` **or** in the Drive backup folder. This check covers both
+local and Drive paths so a fresh Colab session can't silently overwrite a previous run.
+Choose a new name each time.
 
 **Colab auto-save (last cell):** Results are copied from local Colab runtime (`/content/data/`)
 to Drive at the end. This is intentional — writing directly to Drive during inference risks
@@ -149,16 +154,30 @@ Use `evaluation/evaluate.ipynb` to compare this against the crop-based pipeline.
 
 Trains the two-stage crop classifier from scratch.
 
-- **Stage 1 — binary classifier:** InsectNet or EfficientNet backbone, 2 classes (insect / background).
-  Reads from all class folders in `data/training/annotated_crops/`; background class vs everything else.
-- **Stage 2 — group classifier:** InsectNet backbone, 4 classes (bumblebee / fly / butterfly / other).
-  Reads from the four insect class folders only (no background).
+- **Binary classifier:** EfficientNet-B2 or InsectNet backbone, 2 classes (insect / background).
+  Backbone chosen via `BINARY_BACKBONE`; optimises for insect recall so real insects are not missed.
+  Web images (`data/web_images/`) are added as extra insect data when `USE_WEB_FOR_BINARY = True`.
+- **Group classifier:** InsectNet backbone, 4 classes (bumblebee / fly / butterfly / other).
+  Reads from the four insect class folders only (no background). Uses web images for Stage 1.
 
-Both stages write timestamped run folders to `outputs/training/model_runs/` and copy best
+Both classifiers write timestamped run folders to `outputs/training/model_runs/` and copy best
 weights to `models/binary_best.pth` and `models/4group_insectnet.pth` on completion.
+When `BINARY_BACKBONE = 'both'`, backbone-specific copies (`binary_efficientnet_best.pth`,
+`binary_insectnet_best.pth`) are also saved for comparison.
 
-**Key config (Cell 2):** `EPOCHS`, `BATCH_SIZE`, `LR`, `BACKBONE` (`'insectnet'` or `'efficientnet'`),
-`AUGMENT` (enable data augmentation), `VAL_SPLIT`.
+**Key config (Cell 2):**
+
+| Variable | Default | Description |
+|----------|---------|-------------|
+| `BINARY_BACKBONE` | `'both'` | Which backbone to use for binary: `'efficientnet'` \| `'insectnet'` \| `'both'` |
+| `EPOCHS_BINARY` | `20` | Epochs for binary classifier |
+| `EPOCHS_S1` | `20` | Epochs for group classifier Stage 1 (web + field combined) |
+| `EPOCHS_S2` | `0` | Epochs for group classifier Stage 2 fine-tune on field only (0 = skip) |
+| `LR_S1` | `1e-3` | Learning rate for Stage 1 |
+| `LR_S2` | `1e-4` | Learning rate for Stage 2 |
+| `BG_RATIO` | `3` | Background : insect sampling ratio (balanced per camera plot) |
+| `USE_WEB_FOR_BINARY` | `True` | Add iNaturalist web images as extra insect data for binary |
+| `WEB_DIR` | `data/web_images/` | Folder produced by `download_web_images.py` |
 
 ---
 
@@ -171,7 +190,16 @@ of the two-stage approach. Useful for comparing single-model vs two-stage accura
 `colab/colab_master_pipeline.ipynb`. Best weights go to `models/5group_efficientnet.pth`
 or `models/5group_insectnet.pth` depending on the chosen backbone.
 
-**Key config (Cell 2):** same structure as `train_binary_group.ipynb`.
+**Key config (Cell 2):**
+
+| Variable | Default | Description |
+|----------|---------|-------------|
+| `TRAIN_MODEL` | `'both'` | Which backbone: `'efficientnet'` \| `'insectnet'` \| `'both'` |
+| `EPOCHS_S1` | `20` | Stage 1 epochs (web + field combined) |
+| `EPOCHS_S2` | `0` | Stage 2 fine-tune on field only (0 = skip) |
+| `LR_S1` / `LR_S2` | `1e-3` / `1e-4` | Learning rates for each stage |
+| `BG_RATIO` | `3` | Background : insect sampling ratio |
+| `WEB_DIR` | `None` | Set to `BASE_DIR / 'data' / 'web_images'` to use web images |
 
 ---
 
@@ -241,13 +269,22 @@ go straight to `relabel.py` — the filtering step adds overhead not worth it at
 Fine-tunes the existing binary and group classifiers with newly labeled crops, rather
 than training from scratch. Faster and requires fewer new samples than a full retrain.
 
-**What it does:** loads the current `models/binary_best.pth` and `models/4group_insectnet.pth`,
-freezes early layers, and continues training on the updated `annotated_crops/` dataset.
+**What it does:** loads the current `models/binary_best.pth` and `models/5group_efficientnet.pth`,
+optionally freezes the backbone, and continues training on the updated `annotated_crops/` dataset.
 
-**Key config (Cell 2):** `EPOCHS`, `LR` (typically `1e-4`, lower than scratch training),
-`FREEZE_LAYERS`, `BATCH_SIZE`.
+**Key config (Cell 2):**
 
-Best weights overwrite `models/binary_best.pth` and `models/4group_insectnet.pth` on completion.
+| Variable | Default | Description |
+|----------|---------|-------------|
+| `RETRAIN_BINARY` | `True` | Whether to fine-tune the binary classifier |
+| `RETRAIN_5CLASS` | `True` | Whether to fine-tune the 5-class classifier |
+| `EPOCHS_BINARY` | `12` | Fine-tune epochs for binary |
+| `EPOCHS_5CLASS` | `12` | Fine-tune epochs for 5-class |
+| `LR_FINETUNE` | `1e-4` | Lower LR than scratch training to avoid overwriting learned features |
+| `FREEZE_BACKBONE` | `False` | `True` = update head only (safer for small datasets); `False` = full network |
+| `USE_WEB_FOR_BINARY` | `True` | Add web images as extra insect data for binary |
+
+Best weights overwrite `models/binary_best.pth` and `models/5group_efficientnet.pth` on completion.
 The old weights are backed up to `outputs/training/model_runs/` before overwriting.
 
 ---
@@ -257,7 +294,7 @@ The old weights are backed up to `outputs/training/model_runs/` before overwriti
 ### evaluate.ipynb
 
 Scores one or both pipeline outputs against the CVAT ground truth in
-`data/evaluation/e2e_yolo_annotations/`.
+`data/evaluation/annotations/`.
 
 **Key config (Cell 2):**
 
