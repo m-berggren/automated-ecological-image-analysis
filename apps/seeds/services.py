@@ -4,11 +4,13 @@ from __future__ import annotations
 
 import logging
 import os
+import tempfile
 import threading
 from pathlib import Path
 
 from django.core.files import File
 from django.utils import timezone
+from PIL import Image, ImageDraw
 
 from apps.analysis.models import Detection, InferenceRun, JobStatus, ModelVersion
 from apps.datasets.models import ImageAsset
@@ -222,3 +224,77 @@ def spawn_seeds_pipeline(run):
     thread = threading.Thread(target=process_seeds_run, args=(run.pk,))
     thread.daemon = True
     thread.start()
+
+
+def generate_export_bundle(run_id: int):
+    run = InferenceRun.objects.get(pk=run_id)
+    images = run.upload.images.filter(purpose='inference')
+    species = run.config.get('selected_seed', 'Unknown')
+
+    # Clean up old export images if the user hits export multiple times
+    ImageAsset.objects.filter(upload=run.upload, purpose='export').delete()
+
+    results = []
+
+    for img in images:
+        detections = Detection.objects.filter(image=img)
+
+        # Extract the metrics saved from the ML calculation scripts
+        meta = img.metadata or {}
+        calc_active = meta.get('calculated_active', 0)
+        conf = meta.get('overall_confidence', 0.0)
+
+        final_active = 0
+        export_asset = None
+
+        # Permanently draw the final status polygons onto the image (green for 'active', red for 'aborted' seeds)
+        if img.file and os.path.exists(img.file.path):
+            with Image.open(img.file.path) as pil_img:
+                pil_img = pil_img.convert('RGB')
+                draw = ImageDraw.Draw(pil_img)
+
+                for d in detections:
+                    rev_status = str(getattr(d, 'status', '')).lower()
+                    if rev_status in ['confirmed', '1']:
+                        is_active = True
+                    elif rev_status in ['rejected', '2']:
+                        is_active = False
+                    else:
+                        is_active = str(d.predicted_class).lower() == 'active'
+
+                    color = '#22c55e' if is_active else '#ef4444'
+
+                    if is_active:
+                        final_active += 1
+
+                    poly = d.polygon
+                    if poly and len(poly) >= 8:
+                        # Draw the rotated 8-point OBB with a thick line
+                        draw.polygon(poly[:8], outline=color, width=12)
+
+                base_name = os.path.basename(img.file.name)
+                export_name = f'export_{base_name}'
+
+                with tempfile.NamedTemporaryFile(suffix='.jpg') as tmp:
+                    pil_img.save(tmp.name, format='JPEG', quality=90)
+
+                    export_asset = ImageAsset.objects.create(
+                        module='seeds', purpose='export', upload=run.upload
+                    )
+                    with open(tmp.name, 'rb') as f:
+                        export_asset.file.save(export_name, File(f))
+
+        results.append(
+            {
+                'filename': os.path.basename(img.file.name),
+                'species': species.capitalize(),
+                'calculated_active': calc_active,
+                'confidence': round(conf, 4),
+                'final_active': final_active,
+                'export_image_url': export_asset.file.url
+                if export_asset and export_asset.file
+                else None,
+            }
+        )
+
+    return results

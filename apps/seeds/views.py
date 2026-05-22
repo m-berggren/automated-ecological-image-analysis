@@ -14,7 +14,7 @@ from apps.seeds.reference_seed_service import (
     bulk_calculate_run_seed_status,
     calculate_seed_status,
 )
-from apps.seeds.services import bootstrap_species_dataset
+from apps.seeds.services import bootstrap_species_dataset, generate_export_bundle
 from apps.seeds.training import spawn_training_job
 
 
@@ -233,6 +233,24 @@ class SeedRunBulkCalculateView(APIView):
         try:
             results = bulk_calculate_run_seed_status(run_id)
             return Response({'status': 'success', 'results': results})
+        except Exception as e:
+            import traceback
+
+            traceback.print_exc()
+            return Response({'error': str(e)}, status=500)
+
+
+class SeedExportView(APIView):
+    def get(self, request, run_id):
+        try:
+            results = generate_export_bundle(run_id)
+            # The re-annotated images have absolute URLs for the frontend
+            for r in results:
+                if r['export_image_url']:
+                    r['export_image_url'] = request.build_absolute_uri(
+                        r['export_image_url']
+                    )
+            return Response({'data': results})
         except Exception as e:
             import traceback
 

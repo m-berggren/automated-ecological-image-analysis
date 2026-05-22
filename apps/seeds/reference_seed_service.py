@@ -46,6 +46,8 @@ def calculate_seed_status(reference_detection_id: int, image_id: int):
     image.metadata['seed_range_min'] = conf_analysis['estimated_range'][0]
     image.metadata['seed_range_max'] = conf_analysis['estimated_range'][1]
     image.metadata['overall_confidence'] = conf_analysis['overall_confidence']
+    image.metadata['calculated_active'] = result['summary']['active_seeds']
+
     image.save(update_fields=['metadata'])
 
     return result
