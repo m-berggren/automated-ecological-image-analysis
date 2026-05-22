@@ -253,6 +253,8 @@ const loadError = ref('')
 const showConfig = ref(false)
 const cancelling = ref(false)
 const creatingRun = ref(false)
+const estimatedCompletionTime = ref<number | null>(null)
+const lastProcessedCount = ref(0)
 
 const now = ref(Date.now())
 let timerHandle: ReturnType<typeof setInterval> | null = null
@@ -304,6 +306,20 @@ async function loadRun() {
       failed_image_count: 0,
       activity_log: [],
       ...data,
+    }
+    if (run.value?.status === 'running' && run.value.processed_image_count > 0) {
+      if (run.value.processed_image_count > lastProcessedCount.value) {
+        const startTs = new Date(run.value.started_at || run.value.created_at).getTime()
+        const elapsedSecs = (Date.now() - startTs) / 1000
+        const avgPerImage = elapsedSecs / run.value.processed_image_count
+        const remainingImages = run.value.image_count - run.value.processed_image_count
+
+        estimatedCompletionTime.value = Date.now() + avgPerImage * remainingImages * 1000
+        lastProcessedCount.value = run.value.processed_image_count
+      }
+    } else {
+      estimatedCompletionTime.value = null
+      lastProcessedCount.value = 0
     }
   } catch (e) {
     loadError.value = e instanceof Error ? e.message : String(e)
@@ -374,9 +390,7 @@ const elapsedHuman = computed(() => humanDuration(elapsedSeconds.value))
 const etaHuman = computed(() => {
   if (!run.value || run.value.status !== 'running') return ''
   if (run.value.processed_image_count === 0) return ''
-  const remaining =
-    (elapsedSeconds.value / run.value.processed_image_count) *
-    (run.value.image_count - run.value.processed_image_count)
+  const remaining = Math.max(0, (estimatedCompletionTime.value - now.value) / 1000)
   return humanDuration(remaining)
 })
 const timingLine = computed(() => {
