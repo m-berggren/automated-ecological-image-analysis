@@ -6,7 +6,7 @@ All generated outputs from running the ML pipelines. **Not tracked in git** — 
 outputs/
 ├── inference/
 │   ├── crop_results/
-│   │   └── {run_name}_{timestamp}/
+│   │   └── {run_name}/
 │   │       ├── results.csv
 │   │       ├── {camera_name}/
 │   │       │   ├── crops/
@@ -52,22 +52,37 @@ outputs/
 
 Written by `experiments/inference/infer_cropbased.ipynb`.
 
-One timestamped folder per run. The `{run_name}` comes from the `RUN_NAME` variable in Cell 2 of the notebook. **The notebook aborts at startup if a folder with that name already exists** — choose a new name or delete the old folder first.
+One folder per run. The `{run_name}` comes from the `RUN_NAME` variable in Cell 2 of the notebook. **The notebook aborts at startup if a folder with that name already exists** (checks both local and Drive) — choose a new name before re-running.
 
 ### results.csv
 
-One row per detected crop across all cameras in the run:
+One row per detected crop across all cameras in the run. Multiple classifiers can run on
+the same crops in a single pass — each pipeline adds its own prefixed columns.
+
+**Base columns (always present):**
 
 | Column | Description |
 |--------|-------------|
 | `frame_path` | Absolute path to the source frame |
 | `camera` | Camera folder name |
 | `x1, y1, x2, y2` | Bounding box in pixels (top-left, bottom-right) |
-| `binary_class` | `insect` or `background` (Stage 1 output) |
-| `binary_conf` | Binary classifier confidence [0, 1] |
-| `group_class` | `bumblebee` / `fly` / `butterfly` / `other` (Stage 2 output; empty if binary = background) |
-| `group_conf` | Group classifier confidence [0, 1] |
-| `temperature_c` | Temperature extracted from frame strip (only if OCR enabled) |
+| `skip` | `True` if the frame was skipped before motion detection |
+| `skip_reason` | `flash` or `foggy` (only set when `skip=True`) |
+| `laplacian_var` | Laplacian variance of the frame (sharpness proxy) |
+| `temperature_c` | Temperature OCR'd from frame strip (only if `strip_ocr_temperature=True`) |
+| `pollinator_detected` | `True` if any active pipeline classified the crop as insect |
+
+**Per-pipeline columns** (one set per pipeline listed in `PIPELINES`; prefix = pipeline name):
+
+| Column | Description |
+|--------|-------------|
+| `{pipe}__binary_label` | `insect` or `background` (Stage 1 output) |
+| `{pipe}__binary_conf` | Binary classifier confidence [0, 1] |
+| `{pipe}__group_label` | `bumblebee` / `fly` / `butterfly` / `other` (Stage 2; empty if binary = background) |
+| `{pipe}__group_conf` | Group classifier confidence [0, 1] |
+
+Default pipeline names: `two_stage`, `five_class_eff`, `five_class_ins` (whichever are
+enabled in Cell 4 of `infer_cropbased.ipynb`).
 
 ### crops/
 

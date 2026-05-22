@@ -31,9 +31,11 @@ The notebooks load models from this folder by default. Historical checkpoints st
 
 | File | Architecture | Classes | Notes |
 |------|-------------|---------|-------|
-| `binary_best.pth` | EfficientNet-B2 | 2 (insect, background) | Stage 1 of crop pipeline |
+| `binary_best.pth` | EfficientNet-B2 **or** InsectNet | 2 (insect, background) | Stage 1 of crop pipeline; backbone auto-detected from checkpoint |
+| `binary_efficientnet_best.pth` | EfficientNet-B2 | 2 | Saved when `BINARY_BACKBONE='both'`; kept for comparison |
+| `binary_insectnet_best.pth` | InsectNet | 2 | Saved when `BINARY_BACKBONE='both'`; kept for comparison |
 | `4group_insectnet.pth` | InsectNet (fine-tuned) | 4 (bee, fly, butterfly, other) | Stage 2 of crop pipeline |
-| `5group_efficientnet.pth` | EfficientNet | 5 (+ background) | Standalone alternative |
+| `5group_efficientnet.pth` | EfficientNet-B2 | 5 (+ background) | Standalone alternative |
 | `5group_insectnet.pth` | InsectNet (fine-tuned) | 5 (+ background) | Standalone alternative |
 | `yolo_best.pt` | YOLOv26n (Ultralytics) | 4 (bee, fly, butterfly, other) | Fine-tuned 2-stage |
 
