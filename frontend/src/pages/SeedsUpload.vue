@@ -177,44 +177,56 @@
     </section>
 
     <!-- Upload -->
-    <section
-      class="rounded-xl border-2 border-dashed border-border bg-surface p-10 text-center transition-colors"
-      :class="{
-        'border-primary bg-primary/5': dragOver,
-        'opacity-60': creatingUpload,
-      }"
-      @dragover.prevent="dragOver = true"
-      @dragleave.prevent="onDragLeave"
-      @drop.prevent="onDrop"
-    >
-      <UploadCloud class="w-10 h-10 mx-auto text-muted-foreground" />
+    <div class="relative">
+      <div
+        v-if="!selectedSeed || !config.model_version_id"
+        class="absolute inset-0 z-10 bg-surface/60 backdrop-blur-[1px] flex items-center justify-center rounded-xl border border-border"
+      >
+        <p
+          class="text-sm font-medium bg-background px-4 py-2 rounded-md shadow-sm border border-border"
+        >
+          Select a seed species and model version first
+        </p>
+      </div>
+      <section
+        class="rounded-xl border-2 border-dashed border-border bg-surface p-10 text-center transition-colors"
+        :class="{
+          'border-primary bg-primary/5': dragOver,
+          'opacity-60': creatingUpload,
+        }"
+        @dragover.prevent="dragOver = true"
+        @dragleave.prevent="onDragLeave"
+        @drop.prevent="onDrop"
+      >
+        <UploadCloud class="w-10 h-10 mx-auto text-muted-foreground" />
 
-      <p class="mt-3 text-sm font-medium">
-        Drop a folder or images here, or
+        <p class="mt-3 text-sm font-medium">
+          Drop a folder or images here, or
 
-        <label class="text-primary cursor-pointer hover:underline">
-          browse files
+          <label class="text-primary cursor-pointer hover:underline">
+            browse files
 
-          <input
-            type="file"
-            multiple
-            accept="image/png, image/jpeg, image/jpg"
-            class="hidden"
-            @change="onPick($event)"
-          />
-        </label>
+            <input
+              type="file"
+              multiple
+              accept="image/png, image/jpeg, image/jpg"
+              class="hidden"
+              @change="onPick($event)"
+            />
+          </label>
 
-        /
+          /
 
-        <label class="text-primary cursor-pointer hover:underline">
-          browse folder
+          <label class="text-primary cursor-pointer hover:underline">
+            browse folder
 
-          <input ref="folderInput" type="file" multiple class="hidden" @change="onPick($event)" />
-        </label>
-      </p>
+            <input ref="folderInput" type="file" multiple class="hidden" @change="onPick($event)" />
+          </label>
+        </p>
 
-      <p class="text-xs text-muted-foreground mt-1">JPG, PNG - uploads in batches of 4</p>
-    </section>
+        <p class="text-xs text-muted-foreground mt-1">JPG, PNG - uploads in batches of 4</p>
+      </section>
+    </div>
 
     <!-- Upload progress -->
     <section
@@ -238,7 +250,7 @@
         </div>
 
         <button
-          :disabled="!doneCount || starting"
+          :disabled="!doneCount || starting || uploadingCount > 0"
           class="px-3 py-1.5 rounded-md text-sm font-medium bg-primary text-primary-foreground hover:bg-primary/90 disabled:opacity-50 disabled:cursor-not-allowed"
           @click="startDetection"
         >
@@ -266,12 +278,20 @@
             {{ formatError(item.error) }}
           </span>
 
-          <button
-            class="text-xs px-2 py-0.5 rounded border border-border hover:bg-muted"
-            @click="onRetry(item.id)"
-          >
-            Retry
-          </button>
+          <div class="flex items-center gap-2">
+            <button
+              class="text-xs px-2 py-0.5 rounded border border-border hover:bg-muted"
+              @click="onRetry(item.id)"
+            >
+              Retry
+            </button>
+            <button
+              class="text-xs px-2 py-0.5 rounded border border-red-200 text-red-600 hover:bg-red-50 transition-colors"
+              @click="onRemove(item.id)"
+            >
+              Remove
+            </button>
+          </div>
         </li>
       </ul>
 
@@ -413,6 +433,14 @@ onMounted(async () => {
 
 function onRetry(id: string) {
   uploader.value?.retry(id)
+}
+
+function onRemove(id: string) {
+  if (!uploader.value) return
+  const idx = uploader.value.items.findIndex((item) => item.id === id)
+  if (idx > -1) {
+    uploader.value.items.splice(idx, 1)
+  }
 }
 
 function formatError(err?: string) {

@@ -41,7 +41,7 @@ import { computed } from 'vue'
 import { RouterLink } from 'vue-router'
 import { Check } from 'lucide-vue-next'
 
-type StepKey = 'upload' | 'detect' | 'review'| 'review-final' | 'export'
+type StepKey = 'upload' | 'detect' | 'review' | 'review-final' | 'export'
 
 interface Step {
   key: StepKey
@@ -76,6 +76,9 @@ function circleClass(_step: Step, idx: number) {
 }
 
 function hrefFor(step: Step): string | null {
+  const stepIdx = steps.findIndex((s) => s.key === step.key)
+
+  if (!isCompleted(stepIdx)) return null
   if (step.key === 'upload') return '/seeds/upload'
   if (!props.runId) return null
   if (step.key === 'detect') return `/seeds/runs/${props.runId}/detect`
