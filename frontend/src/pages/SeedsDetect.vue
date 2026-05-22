@@ -62,7 +62,7 @@
             v-if="
               run.status === 'pending' || run.status === 'running' || run.status === 'completed'
             "
-            @click="router.push(`/seeds/runs/${run.id}/review`)"
+            @click="router.push(`/seeds/runs/${run.id}/set-reference`)"
             :disabled="run.status !== 'completed'"
             class="ml-auto text-sm px-3 py-1.5 rounded-md font-medium transition-colors"
             :class="
@@ -71,7 +71,7 @@
                 : 'bg-muted text-muted-foreground opacity-50 cursor-not-allowed'
             "
           >
-            {{ run.status === 'completed' ? 'Open review →' : 'Review pending...' }}
+            {{ run.status === 'completed' ? 'Set reference seed →' : 'Pending...' }}
           </button>
 
           <template v-if="run.status === 'failed' || run.status === 'cancelled'">

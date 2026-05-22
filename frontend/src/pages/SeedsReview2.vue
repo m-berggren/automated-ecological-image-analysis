@@ -510,7 +510,7 @@ function navigateImage(direction: number) {
 }
 
 function goBack() {
-  router.push({ path: `/seeds/runs/${route.params.id}/review` })
+  router.push({ path: `/seeds/runs/${route.params.id}/set-reference` })
 }
 
 function navigateToExport() {
