@@ -1,12 +1,16 @@
 import os
+import tempfile
+
 from django.db.models import Count, QuerySet
-from apps.datasets.models import Upload
 from rest_framework import generics, status
+from rest_framework.exceptions import ValidationError
 from rest_framework.parsers import FormParser, MultiPartParser
 from rest_framework.permissions import IsAuthenticated
 from rest_framework.response import Response
 from rest_framework.views import APIView
 from seed_src.utils.label_extractor import LabelExtractor
+
+from apps.datasets.models import Upload
 
 from .models import ImageAsset, Module, Upload
 from .serializers import (
@@ -15,7 +19,6 @@ from .serializers import (
     UploadCreateSerializer,
     UploadSerializer,
 )
-
 
 _DEFAULT_META: dict = {
     'width': None,
@@ -48,8 +51,13 @@ def _extract_metadata(module: str, file, upload_id=None) -> dict:
             extracted_text = extractor.extract_text(file)
 
             # Simple validation logic
-            if expected_species.lower() not in file.name.lower() and expected_species.lower() not in extracted_text.lower():
-                raise ValidationError(f"Image does not appear to contain {expected_species}.")
+            if (
+                expected_species.lower() not in file.name.lower()
+                and expected_species.lower() not in extracted_text.lower()
+            ):
+                raise ValidationError(
+                    f'Image does not appear to contain {expected_species}.'
+                )
 
     if module == Module.POLLINATORS:
         from apps.pollinator.exif import extract_image_metadata
@@ -73,6 +81,7 @@ class ImageUploadView(APIView):
     Per-module post-upload processing (EXIF, weather, exclusion flags) is
     dispatched in _extract_metadata.
     """
+
     permission_classes = [IsAuthenticated]
     parser_classes = [MultiPartParser, FormParser]
 
@@ -99,7 +108,9 @@ class ImageUploadView(APIView):
                     extractor = LabelExtractor(gpu=False)
                     ext = os.path.splitext(file.name)[1]
 
-                    with tempfile.NamedTemporaryFile(delete=False, suffix=ext) as temp_file:
+                    with tempfile.NamedTemporaryFile(
+                        delete=False, suffix=ext
+                    ) as temp_file:
                         for chunk in file.chunks():
                             temp_file.write(chunk)
                         temp_path = temp_file.name
