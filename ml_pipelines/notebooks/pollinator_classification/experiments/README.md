@@ -322,13 +322,14 @@ Cell 10 (`threshold_analysis.png`) plots the full precision-recall curve so you 
 Example:
 ```python
 CROP_RUNS = {
-    'run_01': CROP_RESULTS_ROOT / 'run_01_lm_on',
-    'run_02': CROP_RESULTS_ROOT / 'run_02_lm_off',
+    'run_lm_on':  CROP_RESULTS_ROOT / 'run_20260522_143000',
+    'run_lm_off': CROP_RESULTS_ROOT / 'run_20260522_151200',
 }
 YOLO_RUNS = {
-    'yolo_run_01': YOLO_RESULTS_ROOT / 'yolo_run_01',
+    'yolo': YOLO_RESULTS_ROOT / 'run_20260522_160000',
 }
 ```
+Run names are auto-generated timestamps (e.g. `run_20260522_143000`). Use the key (left side) as a short label in the output plots.
 
 **Outputs** go to `outputs/evaluation/{run_name}_{timestamp}/`:
 
