@@ -67,7 +67,6 @@
                 Active Seeds
               </span>
               <div class="text-xs text-muted-foreground font-mono">
-                ML Counted:
                 <span class="font-bold text-foreground">{{ initialAutomatedActiveCount }}</span>
               </div>
             </div>
@@ -144,7 +143,22 @@
             :viewBox="`0 0 ${currentImage.width} ${currentImage.height}`"
             preserveAspectRatio="none"
             class="absolute inset-0 w-full h-full pointer-events-none select-none"
-          />
+          >
+            <polygon
+              v-for="detection in currentDetections"
+              :key="detection.id"
+              :points="getPolygonPoints(detection)"
+              stroke-width="12"
+              class="pointer-events-auto cursor-pointer transition-all duration-150 fill-transparent hover:fill-current/10"
+              :class="
+                isActiveSeed(detection)
+                  ? 'stroke-green-500 text-green-500 hover:stroke-green-400'
+                  : 'stroke-red-500 text-red-500 hover:stroke-red-400'
+              "
+              @click="toggleSeedStatus(detection.id)"
+              :title="`Confidence: ${(detection.confidence * 100).toFixed(1)}%`"
+            />
+          </svg>
         </div>
       </div>
     </section>
@@ -191,7 +205,9 @@ interface Detection {
   area: number
   reviewer_status: 'unreviewed' | 'confirmed' | 'rejected'
   source_image_filename: string
-  poly: number[] // Oriented Bounding Box: [x1, y1, x2, y2, x3, y3, x4, y4]
+  polygon?: number[]
+  bbox?: any
+  poly?: number[]
 }
 
 interface ReviewImage {
@@ -234,7 +250,6 @@ const initialSeedRangeMax = ref<number>(0)
 
 const isPreviewMode = computed(() => {
   const hasRunId = route.params.id && route.params.id !== 'undefined'
-  // If we have a real Run ID, we are NOT in preview mode, even in DEV
   if (hasRunId) return false
 
   return route.query.preview === 'default' || import.meta.env.DEV
@@ -265,7 +280,6 @@ watch(
 
     // Fetch current number of detections to set the manual input counter value correctly
     const currentList = imageDetectionsMap.value[newImage.filename] || []
-    console.log('Detections for this image:', currentList) // DEBUG
 
     manualActiveCount.value = currentList.filter((d) => isActiveSeed(d)).length
 
@@ -311,8 +325,8 @@ function toggleSeedStatus(detectionId: number) {
 }
 
 function getPolygonPoints(detection: Detection): string {
-  // Handle both bbox and poly mode
-  const p = detection.bbox || detection.poly
+  const p =
+    detection.polygon || (detection.bbox && detection.bbox.poly) || detection.bbox || detection.poly
   if (!p || p.length < 8) return ''
   return `${p[0]},${p[1]} ${p[2]},${p[3]} ${p[4]},${p[5]} ${p[6]},${p[7]}`
 }
@@ -378,7 +392,6 @@ async function initializeReviewBundle() {
 
         distributedMap[img.filename] = imageDetections
 
-        // Calculate and cache the original model calculations the image before any user modifications happen
         const initialActive = imageDetections.filter((d) => isActiveSeed(d))
         const sumConfidence = imageDetections.reduce((acc, curr) => acc + curr.confidence, 0)
 
@@ -416,32 +429,41 @@ async function initializeReviewBundle() {
 
     imagesList.value.forEach((img: any) => {
       const detections = img.detections || []
-      const filteredDetections = (img.detections || []).map((d: any) => ({
+      const filteredDetections = detections.map((d: any) => ({
         ...d,
+        predicted_class: d.class || d.predicted_class || 'aborted',
         poly: d.polygon || d.poly || [],
       }))
 
       prodMap[img.filename] = filteredDetections
 
-      // Calculate the metrics using the extracted detections
       const initialActive = filteredDetections.filter((d: any) => isActiveSeed(d))
-      const sumConfidence = filteredDetections.reduce(
-        (acc: number, curr: any) => acc + curr.confidence,
-        0,
-      )
+
+      // Grab the exact metrics directly from the backend analyzer
       initialMetricsLookupMap.value[img.filename] = {
         automatedActiveCount: initialActive.length,
-        overallConfidenceScore:
-          filteredDetections.length > 0 ? sumConfidence / filteredDetections.length : 0,
-        seedRangeMin: filteredDetections.filter((d: any) => d.confidence >= 0.75 && isActiveSeed(d))
-          .length,
-        seedRangeMax: initialActive.length,
+        overallConfidenceScore: img.overall_confidence || 0,
+        seedRangeMin: img.seed_range_min || 0,
+        seedRangeMax: img.seed_range_max || 0,
       }
     })
 
     imageDetectionsMap.value = prodMap
-
     currentImageIndex.value = 0
+
+    if (imagesList.value.length > 0) {
+      const firstImg = imagesList.value[0]
+      const baseline = initialMetricsLookupMap.value[firstImg.filename]
+      if (baseline) {
+        initialAutomatedActiveCount.value = baseline.automatedActiveCount
+        initialOverallConfidenceScore.value = baseline.overallConfidenceScore
+        initialSeedRangeMin.value = baseline.seedRangeMin
+        initialSeedRangeMax.value = baseline.seedRangeMax
+        manualActiveCount.value = prodMap[firstImg.filename].filter((d: any) =>
+          isActiveSeed(d),
+        ).length
+      }
+    }
   } catch (error) {
     loadError.value = error instanceof Error ? error.message : String(error)
   } finally {
@@ -468,19 +490,39 @@ async function saveCurrentPageCount() {
     const activeIds = confirmedDetections.filter((d) => isActiveSeed(d)).map((d) => d.id)
     const abortedIds = confirmedDetections.filter((d) => !isActiveSeed(d)).map((d) => d.id)
 
-    // Apply modifications using bulk views update endpoints schema
-    await Promise.all([
-      api(`/api/analysis/detections/bulk/`, {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ ids: activeIds, reviewer_status: 'confirmed' }),
-      }),
-      api(`/api/analysis/detections/bulk/`, {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ ids: abortedIds, reviewer_status: 'rejected' }),
-      }),
-    ])
+    const apiPromises = []
+
+    // Only send the active seeds request if the array is not empty
+    if (activeIds.length > 0) {
+      apiPromises.push(
+        api(`/api/analysis/detections/bulk/`, {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ ids: activeIds, reviewer_status: 'confirmed' }),
+        }),
+      )
+    }
+
+    // Only send the aborted seeds request if the array is not empty
+    if (abortedIds.length > 0) {
+      apiPromises.push(
+        api(`/api/analysis/detections/bulk/`, {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ ids: abortedIds, reviewer_status: 'rejected' }),
+        }),
+      )
+    }
+
+    // Await all queued requests
+    if (apiPromises.length > 0) {
+      const responses = await Promise.all(apiPromises)
+
+      for (const res of responses) {
+        if (!res.ok) throw new Error(`HTTP ${res.status}: Failed to update database`)
+      }
+    }
+
     alert('Active counts updated.')
   } catch (error) {
     console.error(error)

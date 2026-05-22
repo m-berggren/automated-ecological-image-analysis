@@ -1,6 +1,5 @@
 <template>
   <PageHeader :title="headerTitle" subtitle="Select a healthy active seed as the reference seed" />
-
   <SeedsStepper current="review" :runId="run?.id" />
 
   <!-- Loading -->
@@ -19,7 +18,7 @@
     <section class="border-b border-border bg-surface px-6 py-5">
       <div class="w-full flex items-center justify-between gap-4">
         <div>
-          <h2 class="text-lg font-semibold">Select a reference active seed</h2>
+          <h2 class="text-lg font-semibold">Select a reference seed</h2>
 
           <p class="mt-2 text-sm text-muted-foreground leading-relaxed">
             Click on one healthy active seed in the image. This seed will be used as the reference
