@@ -17,54 +17,57 @@
   <div v-else-if="images.length" class="flex-1 flex flex-col min-h-0 bg-background">
     <!-- Instructions -->
     <section class="border-b border-border bg-surface px-6 py-5">
-      <div class="max-w-5xl">
-        <h2 class="text-lg font-semibold">Select a reference active seed</h2>
+      <div class="w-full flex items-center justify-between gap-4">
+        <div>
+          <h2 class="text-lg font-semibold">Select a reference active seed</h2>
 
-        <p class="mt-2 text-sm text-muted-foreground leading-relaxed">
-          Click on one healthy active seed in the image. This seed will be used as the reference
-          example for determining which detected seeds are active versus aborted.
-        </p>
+          <p class="mt-2 text-sm text-muted-foreground leading-relaxed">
+            Click on one healthy active seed in the image. This seed will be used as the reference
+            example for determining which detected seeds are active versus aborted.
+          </p>
 
-        <div class="mt-4 flex flex-wrap items-center gap-3 text-sm">
-          <div class="px-3 py-1 rounded-full bg-muted text-muted-foreground">
-            {{ currentDetections.length }} detected seeds
+          <div class="mt-4 flex flex-wrap items-center gap-3 text-sm">
+            <div class="px-3 py-1 rounded-full bg-muted text-muted-foreground">
+              {{ currentDetections.length }} detected seeds
+            </div>
+
+            <div
+              v-if="selectedReference"
+              class="px-3 py-1 rounded-full bg-green-100 text-green-700"
+            >
+              Reference seed selected
+            </div>
           </div>
+        </div>
 
-          <div v-if="selectedReference" class="px-3 py-1 rounded-full bg-green-100 text-green-700">
-            Reference seed selected
-          </div>
+        <div class="flex items-center gap-2 shrink-0">
+          <button
+            type="button"
+            class="p-2 rounded-md border border-border bg-surface hover:bg-muted transition-colors disabled:opacity-40 disabled:cursor-not-allowed text-xs font-medium"
+            :disabled="currentImageIndex === 0"
+            @click="currentImageIndex--"
+          >
+            ← Prev
+          </button>
+          <button
+            type="button"
+            class="p-2 rounded-md border border-border bg-surface hover:bg-muted transition-colors disabled:opacity-40 disabled:cursor-not-allowed text-xs font-medium"
+            :disabled="currentImageIndex === images.length - 1"
+            @click="currentImageIndex++"
+          >
+            Next →
+          </button>
         </div>
       </div>
     </section>
 
     <!-- IMAGE AREA -->
     <section class="flex-1 overflow-auto p-6">
-      <div class="mx-auto max-w-7xl">
+      <div class="mx-auto max-w-5xl">
         <!-- IMAGE WRAPPER -->
         <div
           class="relative w-full overflow-hidden rounded-2xl border border-border bg-black/5 shadow-sm"
         >
-          <div class="flex items-center justify-between mb-3">
-            <button
-              class="px-3 py-1 border rounded"
-              :disabled="currentImageIndex === 0"
-              @click="currentImageIndex--"
-            >
-              Prev
-            </button>
-
-            <div class="text-sm text-muted-foreground">
-              Image {{ currentImageIndex + 1 }} / {{ images.length }}
-            </div>
-
-            <button
-              class="px-3 py-1 border rounded"
-              :disabled="currentImageIndex === images.length - 1"
-              @click="currentImageIndex++"
-            >
-              Next
-            </button>
-          </div>
           <div class="relative w-full">
             <svg
               ref="svgRef"
