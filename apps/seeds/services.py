@@ -237,12 +237,13 @@ def generate_export_bundle(run_id: int):
     results = []
 
     for img in images:
+        final_active_boxes = 0
+        export_asset = None
         detections = Detection.objects.filter(image=img)
 
-        # Extract the metrics saved from the ML calculation scripts
         meta = img.metadata or {}
-        calc_active = meta.get('calculated_active', 0)
-        conf = meta.get('overall_confidence', 0.0)
+        calc_active = meta.get('calculated_active', 0) if img.metadata else 0
+        conf = meta.get('overall_confidence', 0.0) if img.metadata else 0.0
 
         final_active = 0
         export_asset = None
@@ -254,10 +255,11 @@ def generate_export_bundle(run_id: int):
                 draw = ImageDraw.Draw(pil_img)
 
                 for d in detections:
-                    rev_status = str(getattr(d, 'status', '')).lower()
-                    if rev_status in ['confirmed', '1']:
+                    status_val = getattr(d, 'status', 1)
+
+                    if status_val == 2 or str(status_val).lower() == 'confirmed':
                         is_active = True
-                    elif rev_status in ['rejected', '2']:
+                    elif status_val == 3 or str(status_val).lower() == 'rejected':
                         is_active = False
                     else:
                         is_active = str(d.predicted_class).lower() == 'active'
@@ -265,11 +267,10 @@ def generate_export_bundle(run_id: int):
                     color = '#22c55e' if is_active else '#ef4444'
 
                     if is_active:
-                        final_active += 1
+                        final_active_boxes += 1
 
                     poly = d.polygon
                     if poly and len(poly) >= 8:
-                        # Draw the rotated 8-point OBB with a thick line
                         draw.polygon(poly[:8], outline=color, width=12)
 
                 base_name = os.path.basename(img.file.name)
@@ -283,6 +284,8 @@ def generate_export_bundle(run_id: int):
                     )
                     with open(tmp.name, 'rb') as f:
                         export_asset.file.save(export_name, File(f))
+
+        final_active = meta.get('manual_active_count', final_active_boxes)
 
         results.append(
             {

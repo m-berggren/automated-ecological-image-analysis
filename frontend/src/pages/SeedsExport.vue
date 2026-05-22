@@ -48,7 +48,7 @@
                 <th class="px-6 py-3 font-medium">Species</th>
                 <th class="px-6 py-3 font-medium">Calculated Active Seed Count</th>
                 <th class="px-6 py-3 font-medium">Model Confidence</th>
-                <th class="px-6 py-3 font-medium text-green-600">Corrected Active Seed Count</th>
+                <th class="px-6 py-3 font-medium">Corrected Active Seed Count</th>
               </tr>
             </thead>
             <tbody class="divide-y divide-border">
@@ -57,7 +57,7 @@
                 <td class="px-6 py-3">{{ row.species }}</td>
                 <td class="px-6 py-3">{{ row.calculated_active }}</td>
                 <td class="px-6 py-3">{{ (row.confidence * 100).toFixed(1) }}%</td>
-                <td class="px-6 py-3 font-bold text-green-600">{{ row.final_active }}</td>
+                <td class="px-6 py-3 font-bold">{{ row.final_active }}</td>
               </tr>
             </tbody>
           </table>
@@ -71,7 +71,7 @@
           <div>
             <h2 class="text-lg font-semibold">Annotated Images</h2>
             <p class="text-xs text-muted-foreground mt-1">
-              Images featuring hard-drawn OBB polygons reflecting final status.
+              Downloadable images reflecting the final results.
             </p>
           </div>
         </header>

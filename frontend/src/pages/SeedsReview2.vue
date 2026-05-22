@@ -130,35 +130,58 @@
     </div>
 
     <section class="flex-1 overflow-auto p-6">
-      <div class="mx-auto max-w-5xl">
-        <div class="relative overflow-hidden rounded-2xl border border-border bg-black/5 shadow-sm">
-          <img
-            :src="currentImage.image_url"
-            :alt="currentImage.filename"
-            class="w-full h-auto select-none block"
-            draggable="false"
-          />
-
-          <svg
-            :viewBox="`0 0 ${currentImage.width} ${currentImage.height}`"
-            preserveAspectRatio="none"
-            class="absolute inset-0 w-full h-full pointer-events-none select-none"
+      <div
+        class="relative w-full overflow-hidden rounded-2xl border border-border bg-black/5 shadow-sm"
+      >
+        <div
+          class="absolute top-4 right-4 z-10 flex items-center bg-surface border border-border rounded-lg shadow-md overflow-hidden text-sm"
+        >
+          <button @click="zoomOut" class="px-3 py-2 hover:bg-muted font-bold text-lg leading-none">
+            −
+          </button>
+          <button
+            @click="resetZoom"
+            class="px-3 py-2 hover:bg-muted border-x border-border font-medium"
           >
-            <polygon
-              v-for="detection in currentDetections"
-              :key="detection.id"
-              :points="getPolygonPoints(detection)"
-              stroke-width="12"
-              class="pointer-events-auto cursor-pointer transition-all duration-150 fill-transparent hover:fill-current/10"
-              :class="
-                isActiveSeed(detection)
-                  ? 'stroke-green-500 text-green-500 hover:stroke-green-400'
-                  : 'stroke-red-500 text-red-500 hover:stroke-red-400'
-              "
-              @click="toggleSeedStatus(detection.id)"
-              :title="`Confidence: ${(detection.confidence * 100).toFixed(1)}%`"
+            {{ Math.round(zoom * 100) }}%
+          </button>
+          <button @click="zoomIn" class="px-3 py-2 hover:bg-muted font-bold text-lg leading-none">
+            +
+          </button>
+        </div>
+        <div class="relative w-full h-[65vh] overflow-auto">
+          <div
+            class="relative w-full transition-transform duration-200"
+            :style="{ transform: `scale(${zoom})`, transformOrigin: 'top left' }"
+          >
+            <img
+              :src="currentImage.image_url"
+              :alt="currentImage.filename"
+              class="w-full h-auto select-none block"
+              draggable="false"
             />
-          </svg>
+
+            <svg
+              :viewBox="`0 0 ${currentImage.width} ${currentImage.height}`"
+              preserveAspectRatio="none"
+              class="absolute inset-0 w-full h-full pointer-events-none select-none"
+            >
+              <polygon
+                v-for="detection in currentDetections"
+                :key="detection.id"
+                :points="getPolygonPoints(detection)"
+                stroke-width="12"
+                class="pointer-events-auto cursor-pointer transition-all duration-150 fill-transparent hover:fill-current/10"
+                :class="
+                  isActiveSeed(detection)
+                    ? 'stroke-green-500 text-green-500 hover:stroke-green-400'
+                    : 'stroke-red-500 text-red-500 hover:stroke-red-400'
+                "
+                @click="toggleSeedStatus(detection.id)"
+                :title="`Confidence: ${(detection.confidence * 100).toFixed(1)}%`"
+              />
+            </svg>
+          </div>
         </div>
       </div>
     </section>
@@ -227,6 +250,7 @@ interface BaselineMetrics {
   overallConfidenceScore: number
   seedRangeMin: number
   seedRangeMax: number
+  savedManualCount: number | null
 }
 
 const route = useRoute()
@@ -234,6 +258,7 @@ const router = useRouter()
 
 const loading = ref(true)
 const loadError = ref('')
+const zoom = ref(1)
 const savingCount = ref(false)
 
 const run = ref<ClassificationBundle['run'] | null>(null)
@@ -291,9 +316,24 @@ watch(
       initialSeedRangeMin.value = baseline.seedRangeMin
       initialSeedRangeMax.value = baseline.seedRangeMax
     }
+    if (baseline.savedManualCount !== null) {
+      manualActiveCount.value = baseline.savedManualCount
+    } else {
+      manualActiveCount.value = currentList.filter((d) => isActiveSeed(d)).length
+    }
   },
   { immediate: true },
 )
+
+function zoomIn() {
+  zoom.value = Math.min(zoom.value + 0.25, 4)
+}
+function zoomOut() {
+  zoom.value = Math.max(zoom.value - 0.25, 0.5)
+}
+function resetZoom() {
+  zoom.value = 1
+}
 
 function isActiveSeed(detection: Detection): boolean {
   const statusString = detection.predicted_class || (detection as any).viability_status || ''
@@ -339,81 +379,9 @@ onMounted(async () => {
 async function initializeReviewBundle() {
   const id = route.params.id as string
 
-  if ((!id || id === 'undefined') && !isPreviewMode.value) {
-    loadError.value = 'Route error: Run ID could not be extracted from the URL parameters.'
-    loading.value = false
-    return
-  }
-
   loading.value = true
 
   try {
-    if (isPreviewMode.value) {
-      console.log('Preview mode: Initialized via seed-detections.json mock.')
-
-      const rawModule = await import('@/mocks/seed-detections.json')
-      const mocks = rawModule.default?.default || rawModule.default
-
-      run.value = {
-        id: (mocks.run?.id ?? Number(id)) || 1,
-        name: mocks.run?.name ?? 'Mock Run',
-        status: 'completed',
-        detection_count: mocks.run?.detection_count ?? 12,
-      }
-
-      imagesList.value = mocks.run?.images_list || mocks.images_list || []
-
-      const rawDetections = mocks.detections || []
-      const distributedMap: Record<string, Detection[]> = {}
-
-      imagesList.value.forEach((img) => {
-        const imageDetections = rawDetections.map((det: any, index: number) => {
-          const startX = 10 + ((index * 14) % 75)
-          const startY = 20 + Math.floor(index / 5) * 20
-          const sizeW = 7
-          const sizeH = 10
-
-          return {
-            ...det,
-            id: det.id + img.id * 1000,
-            predicted_class: det.predicted_class || det.viability_status || 'aborted',
-            poly: det.poly || [
-              startX,
-              startY,
-              startX + sizeW,
-              startY + 2,
-              startX + sizeW - 1,
-              startY + sizeH,
-              startX - 1,
-              startY + sizeH - 1,
-            ],
-          }
-        })
-
-        distributedMap[img.filename] = imageDetections
-
-        const initialActive = imageDetections.filter((d) => isActiveSeed(d))
-        const sumConfidence = imageDetections.reduce((acc, curr) => acc + curr.confidence, 0)
-
-        initialMetricsLookupMap.value[img.filename] = {
-          automatedActiveCount: initialActive.length,
-          overallConfidenceScore:
-            imageDetections.length > 0 ? sumConfidence / imageDetections.length : 0,
-          seedRangeMin: imageDetections.filter((d) => d.confidence >= 0.75 && isActiveSeed(d))
-            .length,
-          seedRangeMax: initialActive.length,
-        }
-      })
-
-      imageDetectionsMap.value = distributedMap
-      currentImageIndex.value = 0
-
-      manualActiveCount.value = currentDetections.value.filter((d) => isActiveSeed(d)).length
-      loading.value = false
-      return
-    }
-
-    // Connected API mode
     const response = await api(`/api/seeds/runs/${id}/reference-review/`)
 
     if (!response.ok) {
@@ -439,12 +407,12 @@ async function initializeReviewBundle() {
 
       const initialActive = filteredDetections.filter((d: any) => isActiveSeed(d))
 
-      // Grab the exact metrics directly from the backend analyzer
       initialMetricsLookupMap.value[img.filename] = {
         automatedActiveCount: initialActive.length,
         overallConfidenceScore: img.overall_confidence || 0,
         seedRangeMin: img.seed_range_min || 0,
         seedRangeMax: img.seed_range_max || 0,
+        savedManualCount: img.manual_active_count !== undefined ? img.manual_active_count : null,
       }
     })
 
@@ -476,15 +444,6 @@ async function saveCurrentPageCount() {
   if (!currentImage.value || !run.value) return
   savingCount.value = true
 
-  if (isPreviewMode.value) {
-    await new Promise((resolve) => setTimeout(resolve, 300))
-    alert(
-      `[MOCK] Metrics synchronized.\nSaved manual override adjustments for ${currentImage.value.filename}.`,
-    )
-    savingCount.value = false
-    return
-  }
-
   try {
     const confirmedDetections = currentDetections.value
     const activeIds = confirmedDetections.filter((d) => isActiveSeed(d)).map((d) => d.id)
@@ -492,7 +451,6 @@ async function saveCurrentPageCount() {
 
     const apiPromises = []
 
-    // Only send the active seeds request if the array is not empty
     if (activeIds.length > 0) {
       apiPromises.push(
         api(`/api/analysis/detections/bulk/`, {
@@ -503,7 +461,6 @@ async function saveCurrentPageCount() {
       )
     }
 
-    // Only send the aborted seeds request if the array is not empty
     if (abortedIds.length > 0) {
       apiPromises.push(
         api(`/api/analysis/detections/bulk/`, {
@@ -512,6 +469,19 @@ async function saveCurrentPageCount() {
           body: JSON.stringify({ ids: abortedIds, reviewer_status: 'rejected' }),
         }),
       )
+    }
+
+    apiPromises.push(
+      api(`/api/seeds/images/${currentImage.value.id}/manual-count/`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ manual_count: manualActiveCount.value }),
+      }),
+    )
+
+    if (initialMetricsLookupMap.value[currentImage.value.filename]) {
+      initialMetricsLookupMap.value[currentImage.value.filename].savedManualCount =
+        manualActiveCount.value
     }
 
     // Await all queued requests

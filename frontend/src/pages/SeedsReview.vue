@@ -64,10 +64,20 @@
     <section class="flex-1 overflow-auto p-6">
       <div class="mx-auto max-w-5xl">
         <!-- IMAGE WRAPPER -->
+         <div class="relative w-full overflow-hidden rounded-2xl border border-border bg-black/5 shadow-sm">
+
+          <div class="absolute top-4 right-4 z-10 flex items-center bg-surface border border-border rounded-lg shadow-md overflow-hidden text-sm">
+            <button @click="zoomOut" class="px-3 py-2 hover:bg-muted font-bold text-lg leading-none">−</button>
+            <button @click="resetZoom" class="px-3 py-2 hover:bg-muted border-x border-border font-medium">{{ Math.round(zoom * 100) }}%</button>
+            <button @click="zoomIn" class="px-3 py-2 hover:bg-muted font-bold text-lg leading-none">+</button>
+          </div>
         <div
-          class="relative w-full overflow-hidden rounded-2xl border border-border bg-black/5 shadow-sm"
+          class="relative w-full h-[65vh] overflow-auto""
         >
-          <div class="relative w-full">
+          <div
+            class="relative w-full transition-transform duration-200"
+            :style="{ transform: `scale(${zoom})`, transformOrigin: 'top left' }"
+          >
             <svg
               ref="svgRef"
               class="absolute inset-0 w-full h-full"
@@ -96,6 +106,7 @@
             />
           </div>
         </div>
+      </div>
       </div>
     </section>
 
@@ -188,6 +199,8 @@ const router = useRouter()
 
 const loading = ref(true)
 const loadError = ref('')
+const zoom = ref(1)
+
 const run = ref<ReviewBundle['run'] | null>(null)
 const images = ref<ReviewImage[]>([])
 const currentImageIndex = ref(0)
@@ -221,6 +234,16 @@ const allImagesHaveReference = computed(() =>
 const headerTitle = computed(() =>
   run.value ? `Seed Reference Review · ${run.value.name}` : 'Seed Reference Review',
 )
+
+function zoomIn() {
+  zoom.value = Math.min(zoom.value + 0.25, 4)
+}
+function zoomOut() {
+  zoom.value = Math.max(zoom.value - 0.25, 0.5)
+}
+function resetZoom() {
+  zoom.value = 1
+}
 
 function showToast(message: string, type: 'success' | 'error' = 'success') {
   if (toastTimer) clearTimeout(toastTimer)

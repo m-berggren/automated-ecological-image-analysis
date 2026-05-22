@@ -177,6 +177,9 @@ class SeedReferenceReviewView(APIView):
                     'overall_confidence': img.metadata.get('overall_confidence', 0.0)
                     if img.metadata
                     else 0.0,
+                    'manual_active_count': img.metadata.get('manual_active_count')
+                    if img.metadata
+                    else None,
                     'detections': [
                         {
                             'id': d.id,
@@ -251,6 +254,27 @@ class SeedExportView(APIView):
                         r['export_image_url']
                     )
             return Response({'data': results})
+        except Exception as e:
+            import traceback
+
+            traceback.print_exc()
+            return Response({'error': str(e)}, status=500)
+
+
+class ImageManualCountView(APIView):
+    def post(self, request, image_id):
+        try:
+            from apps.datasets.models import ImageAsset
+
+            img = ImageAsset.objects.get(id=image_id)
+            if not isinstance(img.metadata, dict):
+                img.metadata = {}
+
+            img.metadata['manual_active_count'] = int(
+                request.data.get('manual_count', 0)
+            )
+            img.save(update_fields=['metadata'])
+            return Response({'status': 'success'})
         except Exception as e:
             import traceback
 
