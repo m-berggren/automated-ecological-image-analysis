@@ -4,7 +4,7 @@
     subtitle="Review oriented classifications and analyze confidence distributions"
   />
 
-  <SeedsStepper current="review-final" :runId="run?.id" />
+  <SeedsStepper current="review" :runId="run?.id" />
 
   <div v-if="loading" class="flex-1 flex items-center justify-center text-sm text-muted-foreground">
     Loading classification results...

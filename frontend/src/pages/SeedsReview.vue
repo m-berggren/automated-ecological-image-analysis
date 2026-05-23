@@ -1,6 +1,6 @@
 <template>
   <PageHeader :title="headerTitle" subtitle="Select a healthy active seed as the reference seed" />
-  <SeedsStepper current="review" :runId="run?.id" />
+  <SeedsStepper current="set-reference" :runId="run?.id" />
 
   <!-- Loading -->
   <div v-if="loading" class="flex-1 flex items-center justify-center text-sm text-muted-foreground">
