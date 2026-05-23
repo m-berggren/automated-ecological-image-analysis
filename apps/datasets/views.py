@@ -1,9 +1,16 @@
+import os
+import tempfile
+
 from django.db.models import Count, QuerySet
 from rest_framework import generics, status
+from rest_framework.exceptions import ValidationError
 from rest_framework.parsers import FormParser, MultiPartParser
 from rest_framework.permissions import IsAuthenticated
 from rest_framework.response import Response
 from rest_framework.views import APIView
+from seed_src.utils.label_extractor import LabelExtractor
+
+from apps.datasets.models import Upload
 
 from .models import ImageAsset, Module, Upload
 from .serializers import (
@@ -12,7 +19,6 @@ from .serializers import (
     UploadCreateSerializer,
     UploadSerializer,
 )
-
 
 _DEFAULT_META: dict = {
     'width': None,
@@ -28,18 +34,39 @@ _DEFAULT_META: dict = {
 }
 
 
-def _extract_metadata(module: str, file) -> dict:
+def _extract_metadata(module: str, file, upload_id=None) -> dict:
     """Module-aware metadata extraction. Pollinator uploads run the
     camera-trap EXIF/weather/fog pipeline; other modules get defaults
     until they grow their own extractor."""
+
+    meta = dict(_DEFAULT_META)
+
+    if module == Module.SEEDS and upload_id:
+        upload = Upload.objects.select_related('inference_runs').get(pk=upload_id)
+        run = upload.inference_runs.first()
+        expected_species = run.config.get('selected_seed') if run else None
+
+        if expected_species:
+            extractor = LabelExtractor(gpu=False)
+            extracted_text = extractor.extract_text(file)
+
+            # Simple validation logic
+            if (
+                expected_species.lower() not in file.name.lower()
+                and expected_species.lower() not in extracted_text.lower()
+            ):
+                raise ValidationError(
+                    f'Image does not appear to contain {expected_species}.'
+                )
+
     if module == Module.POLLINATORS:
         from apps.pollinator.exif import extract_image_metadata
 
         try:
             return extract_image_metadata(file)
         except Exception:
-            return dict(_DEFAULT_META)
-    return dict(_DEFAULT_META)
+            return meta
+    return meta
 
 
 class ImageUploadView(APIView):
@@ -64,6 +91,41 @@ class ImageUploadView(APIView):
 
         file = upload.validated_data['file']
         module = upload.validated_data['module']
+        upload_instance = upload.validated_data.get('upload')
+
+        if module == Module.SEEDS and upload_instance:
+            run = upload_instance.inference_runs.first()
+            expected_species = run.config.get('selected_seed') if run else None
+
+            if expected_species:
+                expected_lower = expected_species.lower()
+
+                # Check filename to validate species
+                if expected_lower not in file.name.lower():
+                    from seed_src.utils.label_extractor import LabelExtractor
+
+                    # Fallback for species validation via OCR on the handwritten label
+                    extractor = LabelExtractor(gpu=False)
+                    ext = os.path.splitext(file.name)[1]
+
+                    with tempfile.NamedTemporaryFile(
+                        delete=False, suffix=ext
+                    ) as temp_file:
+                        for chunk in file.chunks():
+                            temp_file.write(chunk)
+                        temp_path = temp_file.name
+
+                    try:
+                        extracted_text = extractor.extract_from_image(temp_path)
+                        if expected_lower not in extracted_text.lower():
+                            raise ValidationError(
+                                f"Validation failed: '{expected_species}' not found in filename or image label."
+                            )
+                    finally:
+                        if os.path.exists(temp_path):
+                            os.remove(temp_path)
+                        # Rewind the file pointer
+                        file.seek(0)
 
         meta = _extract_metadata(module, file)
 

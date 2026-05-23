@@ -3,6 +3,7 @@ import AppShell from '@/components/AppShell.vue'
 import SeedsUpload from '@/pages/SeedsUpload.vue'
 import SeedsRuns from '@/pages/SeedsRuns.vue'
 import SeedsDetect from '@/pages/SeedsDetect.vue'
+import SeedsSetReference from '@/pages/SeedsSetReference.vue'
 import SeedsReview from '@/pages/SeedsReview.vue'
 import SeedsModels from '@/pages/SeedsModels.vue'
 import SeedsTraining from '@/pages/SeedsTraining.vue'
@@ -34,10 +35,11 @@ const router = createRouter({
         { path: 'seeds/upload', component: SeedsUpload },
         { path: 'seeds/runs', component: SeedsRuns },
         { path: 'seeds/runs/:id/detect', component: SeedsDetect },
-        { path: 'seeds/runs/:id/review', component: SeedsReview },
+        { path: 'seeds/runs/:id/set-reference', component: SeedsSetReference },
+        { path: 'seeds/runs/:id/review', name: 'seed-count-review', component: SeedsReview },
+        { path: 'seeds/runs/:id/export', component: SeedsExport },
         { path: 'seeds/training', component: SeedsTraining },
         { path: 'seeds/models', component: SeedsModels },
-        { path: 'seeds/runs/:id/export', component: SeedsExport },
         { path: 'pollinators', redirect: '/pollinators/upload' },
         { path: 'pollinators/upload', component: PollinatorsUpload },
         { path: 'pollinators/runs', component: PollinatorsRuns },

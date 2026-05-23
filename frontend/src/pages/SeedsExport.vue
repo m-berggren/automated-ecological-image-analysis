@@ -1,306 +1,205 @@
 <template>
-  <PageHeader title="Export" subtitle="Download results from this seed detection run" />
-  <SeedsStepper v-if="runId" current="export" :run-id="runId" />
+  <PageHeader
+    title="Export Results"
+    subtitle="Download your final annotated images and CSV dataset"
+  />
 
-  <div class="flex-1 p-8 max-w-3xl mx-auto w-full space-y-4">
-    <div v-if="loading" class="text-sm text-muted-foreground">Loading…</div>
-    <div v-else-if="loadError" class="text-sm text-red-600">{{ loadError }}</div>
+  <SeedsStepper current="export" :runId="route.params.id" />
 
-    <template v-else-if="run">
-      <!-- Run summary -->
-      <section class="rounded-xl border border-border bg-surface p-5 space-y-1">
-        <h2 class="text-sm font-semibold">{{ run.name || `Run #${run.id}` }}</h2>
-        <p class="text-xs text-muted-foreground">
-          {{ run.detection_count.toLocaleString() }} seeds detected ·
-          {{ run.image_count.toLocaleString() }} images · completed
-          {{ formatRelative(run.completed_at) }}
-        </p>
-      </section>
+  <div
+    v-if="loading"
+    class="flex-1 flex flex-col items-center justify-center p-12 text-muted-foreground"
+  >
+    <div class="animate-spin rounded-full h-8 w-8 border-b-2 border-primary mb-4"></div>
+    Generating final annotated images and dataset...
+  </div>
 
-      <!-- Export options -->
-      <section class="rounded-xl border border-border bg-surface p-5 space-y-4">
-        <h2 class="text-sm font-semibold">Export options</h2>
+  <div v-else-if="loadError" class="flex-1 flex items-center justify-center text-sm text-red-600">
+    {{ loadError }}
+  </div>
 
-        <!-- Format -->
-        <div class="space-y-2">
-          <label class="text-xs text-muted-foreground">Format</label>
-          <div class="flex gap-3">
-            <button
-              v-for="fmt in formats"
-              :key="fmt.id"
-              @click="selectedFormat = fmt.id"
-              :class="[
-                'flex flex-col items-start px-4 py-3 rounded-lg border-2 text-left transition-all flex-1',
-                selectedFormat === fmt.id
-                  ? 'border-primary bg-primary/5'
-                  : 'border-border bg-background hover:border-primary/40',
-              ]"
-            >
-              <span class="text-sm font-semibold">{{ fmt.label }}</span>
-              <span class="text-xs text-muted-foreground">{{ fmt.desc }}</span>
-            </button>
+  <div v-else class="flex-1 flex flex-col min-h-0 bg-background p-6 overflow-y-auto">
+    <div class="max-w-7xl mx-auto w-full space-y-8">
+      <section class="rounded-xl border border-border bg-surface overflow-hidden">
+        <header
+          class="px-6 py-4 border-b border-border flex items-center justify-between bg-muted/20"
+        >
+          <div>
+            <h2 class="text-lg font-semibold">Dataset Preview</h2>
+            <p class="text-xs text-muted-foreground mt-1">
+              Final active seed counts and confidence metrics.
+            </p>
           </div>
-        </div>
+          <button
+            @click="downloadCSV"
+            class="px-4 py-2 bg-primary text-primary-foreground text-sm font-medium rounded-md hover:bg-primary/90 shadow-sm"
+          >
+            Download CSV
+          </button>
+        </header>
 
-        <!-- Filter -->
-        <div class="space-y-2">
-          <label class="text-xs text-muted-foreground">Include detections</label>
-          <div class="flex gap-3">
-            <button
-              v-for="opt in filterOptions"
-              :key="opt.id"
-              @click="selectedFilter = opt.id"
-              :class="[
-                'flex flex-col items-start px-4 py-3 rounded-lg border-2 text-left transition-all flex-1',
-                selectedFilter === opt.id
-                  ? 'border-primary bg-primary/5'
-                  : 'border-border bg-background hover:border-primary/40',
-              ]"
+        <div class="overflow-x-auto">
+          <table class="w-full text-sm text-left">
+            <thead
+              class="text-xs text-muted-foreground bg-muted/30 uppercase border-b border-border"
             >
-              <span class="text-sm font-semibold">{{ opt.label }}</span>
-              <span class="text-xs text-muted-foreground">{{ opt.desc }}</span>
-            </button>
-          </div>
-        </div>
-
-        <!-- Columns (CSV only) -->
-        <div v-if="selectedFormat === 'csv'" class="space-y-2">
-          <label class="text-xs text-muted-foreground">Columns to include</label>
-          <div class="flex flex-wrap gap-2">
-            <label
-              v-for="col in csvColumns"
-              :key="col.id"
-              class="flex items-center gap-2 text-xs px-3 py-1.5 rounded-lg border border-border bg-background cursor-pointer hover:border-primary/40"
-            >
-              <input type="checkbox" v-model="col.enabled" />
-              {{ col.label }}
-            </label>
-          </div>
-        </div>
-      </section>
-
-      <!-- Preview -->
-      <section class="rounded-xl border border-border bg-surface p-5 space-y-3">
-        <div class="flex items-center justify-between">
-          <h2 class="text-sm font-semibold">Preview</h2>
-          <span class="text-xs text-muted-foreground">first 5 rows</span>
-        </div>
-        <div class="overflow-x-auto rounded-lg border border-border">
-          <table class="text-xs w-full">
-            <thead class="bg-muted/30">
               <tr>
-                <th
-                  v-for="col in enabledColumns"
-                  :key="col.id"
-                  class="text-left font-medium px-3 py-2 text-muted-foreground"
-                >
-                  {{ col.label }}
-                </th>
+                <th class="px-6 py-3 font-medium">Filename</th>
+                <th class="px-6 py-3 font-medium">Species</th>
+                <th class="px-6 py-3 font-medium">Calculated Active Seed Count</th>
+                <th class="px-6 py-3 font-medium">Model Confidence</th>
+                <th class="px-6 py-3 font-medium">Corrected Active Seed Count</th>
               </tr>
             </thead>
-            <tbody>
-              <tr v-for="(row, i) in previewRows" :key="i" class="border-t border-border">
-                <td v-for="col in enabledColumns" :key="col.id" class="px-3 py-2 font-mono">
-                  {{ row[col.id] ?? '—' }}
-                </td>
+            <tbody class="divide-y divide-border">
+              <tr v-for="row in exportData" :key="row.filename" class="hover:bg-muted/10">
+                <td class="px-6 py-3 font-mono text-xs">{{ row.filename }}</td>
+                <td class="px-6 py-3">{{ row.species }}</td>
+                <td class="px-6 py-3">{{ row.calculated_active }}</td>
+                <td class="px-6 py-3">{{ (row.confidence * 100).toFixed(1) }}%</td>
+                <td class="px-6 py-3 font-bold">{{ row.final_active }}</td>
               </tr>
             </tbody>
           </table>
         </div>
       </section>
 
-      <!-- Download -->
-      <div class="flex items-center justify-between">
-        <p class="text-xs text-muted-foreground">
-          ~{{ estimatedRows.toLocaleString() }} rows in export
-        </p>
-        <button
-          @click="onDownload"
-          :disabled="downloading"
-          class="px-4 py-2 rounded-md text-sm font-medium bg-primary text-primary-foreground hover:bg-primary/90 disabled:opacity-50 disabled:cursor-not-allowed"
+      <section class="rounded-xl border border-border bg-surface overflow-hidden">
+        <header
+          class="px-6 py-4 border-b border-border flex items-center justify-between bg-muted/20"
         >
-          <span v-if="!downloading">Download {{ selectedFormat.toUpperCase() }}</span>
-          <span v-else>Preparing…</span>
-        </button>
-      </div>
+          <div>
+            <h2 class="text-lg font-semibold">Annotated Images</h2>
+            <p class="text-xs text-muted-foreground mt-1">
+              Downloadable images reflecting the final results.
+            </p>
+          </div>
+        </header>
 
-      <p v-if="downloadError" class="text-sm text-red-600">{{ downloadError }}</p>
-    </template>
+        <div class="p-6 grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-6">
+          <div v-for="row in exportData" :key="row.filename" class="flex flex-col gap-3 group">
+            <div
+              class="relative rounded-lg overflow-hidden border border-border shadow-sm bg-black/5 aspect-[4/3]"
+            >
+              <img
+                v-if="row.export_image_url"
+                :src="row.export_image_url"
+                class="w-full h-full object-cover"
+              />
+              <div
+                class="absolute inset-0 bg-black/40 opacity-0 group-hover:opacity-100 transition-opacity flex items-center justify-center"
+              >
+                <button
+                  @click="downloadImage(row.export_image_url, `annotated_${row.filename}`)"
+                  class="px-4 py-2 bg-white text-black text-sm font-medium rounded-md shadow-lg hover:bg-gray-100"
+                >
+                  Download Image
+                </button>
+              </div>
+            </div>
+            <div class="text-xs font-mono text-center text-muted-foreground truncate px-2">
+              {{ row.filename }}
+            </div>
+          </div>
+        </div>
+      </section>
+
+      <div class="flex justify-end pt-4 pb-12">
+        <RouterLink
+          to="/seeds/runs"
+          class="px-6 py-2 border border-border text-foreground hover:bg-muted font-medium text-sm rounded-md transition-colors"
+        >
+          Return to Runs
+        </RouterLink>
+      </div>
+    </div>
   </div>
 </template>
 
 <script setup lang="ts">
-import { computed, onMounted, reactive, ref } from 'vue'
+import { ref, onMounted } from 'vue'
 import { useRoute } from 'vue-router'
 import PageHeader from '@/components/PageHeader.vue'
 import SeedsStepper from '@/components/SeedsStepper.vue'
 import { api } from '@/api'
 
-interface Run {
-  id: number
-  name: string
-  detection_count: number
-  image_count: number
-  completed_at: string | null
+const route = useRoute()
+
+interface ExportRow {
+  filename: string
+  species: string
+  calculated_active: number
+  confidence: number
+  final_active: number
+  export_image_url: string
 }
 
-type Format = 'csv' | 'json'
-type FilterOption = 'confirmed' | 'all' | 'unrejected'
-
-const route = useRoute()
-const runId = computed(() => (route.params.id ? String(route.params.id) : null))
 const loading = ref(true)
 const loadError = ref('')
-const downloading = ref(false)
-const downloadError = ref('')
-const run = ref<Run | null>(null)
-const selectedFormat = ref<Format>('csv')
-const selectedFilter = ref<FilterOption>('confirmed')
-
-const formats = [
-  { id: 'csv' as Format, label: 'CSV', desc: 'Spreadsheet-compatible, one row per seed' },
-  { id: 'json' as Format, label: 'JSON', desc: 'Structured, one object per seed' },
-]
-
-const filterOptions = [
-  {
-    id: 'confirmed' as FilterOption,
-    label: 'Confirmed only',
-    desc: 'Seeds marked as confirmed in review',
-  },
-  { id: 'all' as FilterOption, label: 'All detections', desc: 'Including rejected' },
-]
-
-const csvColumns = reactive([
-  { id: 'image_id', label: 'Image ID', enabled: true },
-  { id: 'image_filename', label: 'Image filename', enabled: true },
-  { id: 'seed_count', label: 'Seed count', enabled: true },
-  { id: 'confidence', label: 'Confidence', enabled: true },
-  { id: 'reviewer_status', label: 'Review status', enabled: true },
-])
-
-const enabledColumns = computed(() => csvColumns.filter((c) => c.enabled))
-
-const previewRows = ref<Record<string, string | number | null>[]>([
-  {
-    image_id: 'PEH_001',
-    image_filename: 'PEH_001.jpg',
-    seed_count: 8,
-    confidence: '0.94',
-    reviewer_status: 'confirmed',
-  },
-  {
-    image_id: 'PEH_002',
-    image_filename: 'PEH_002.jpg',
-    seed_count: 6,
-    confidence: '0.91',
-    reviewer_status: 'confirmed',
-  },
-  {
-    image_id: 'PEH_003',
-    image_filename: 'PEH_003.jpg',
-    seed_count: 11,
-    confidence: '0.88',
-    reviewer_status: 'confirmed',
-  },
-  {
-    image_id: 'PEH_004',
-    image_filename: 'PEH_004.jpg',
-    seed_count: 3,
-    confidence: '0.71',
-    reviewer_status: 'confirmed',
-  },
-  {
-    image_id: 'PEH_005',
-    image_filename: 'PEH_005.jpg',
-    seed_count: 0,
-    confidence: '0.58',
-    reviewer_status: 'rejected',
-  },
-])
-
-const estimatedRows = computed(() => {
-  if (!run.value) return 0
-  switch (selectedFilter.value) {
-    case 'confirmed':
-      return Math.round(run.value.detection_count * 0.7)
-    case 'unrejected':
-      return Math.round(run.value.detection_count * 0.9)
-    case 'all':
-      return run.value.detection_count
-  }
-})
-
-const previewMode = computed<string | null>(() => {
-  const value = route.query.preview
-  return typeof value === 'string' ? value : null
-})
+const exportData = ref<ExportRow[]>([])
 
 onMounted(async () => {
-  if (previewMode.value) {
-    run.value = {
-      id: 1,
-      name: 'PEH batch May 2026',
-      detection_count: 312,
-      image_count: 40,
-      completed_at: new Date(Date.now() - 3600_000).toISOString(),
-    }
-    loading.value = false
-    return
-  }
-  if (!runId.value) {
-    loading.value = false
-    return
-  }
+  const id = route.params.id
   try {
-    const res = await api(`/api/analysis/runs/${runId.value}/`)
-    if (!res.ok) {
-      loadError.value = `HTTP ${res.status}`
-      return
-    }
-    run.value = await res.json()
+    const res = await api(`/api/seeds/runs/${id}/export/`)
+    if (!res.ok) throw new Error(`Failed to generate export: ${res.status}`)
+
+    const data = await res.json()
+    exportData.value = data.data
   } catch (e) {
-    loadError.value = e instanceof Error ? e.message : String(e)
+    loadError.value = String(e)
   } finally {
     loading.value = false
   }
 })
 
-async function onDownload() {
-  if (!runId.value) return
-  downloadError.value = ''
-  downloading.value = true
-  try {
-    const params = new URLSearchParams({
-      format: selectedFormat.value,
-      filter: selectedFilter.value,
-      columns: enabledColumns.value.map((c) => c.id).join(','),
-    })
-    const res = await api(`/api/analysis/runs/${runId.value}/export/?${params}`)
-    if (!res.ok) {
-      downloadError.value = `Export failed: HTTP ${res.status}`
-      return
-    }
-    const blob = await res.blob()
-    const url = URL.createObjectURL(blob)
-    const a = document.createElement('a')
-    a.href = url
-    a.download = `run-${runId.value}-seeds.${selectedFormat.value}`
-    a.click()
-    URL.revokeObjectURL(url)
-  } catch (e) {
-    downloadError.value = e instanceof Error ? e.message : String(e)
-  } finally {
-    downloading.value = false
-  }
+function downloadCSV() {
+  const headers = [
+    'Filename',
+    'Species',
+    'Calculated Active Seed Count',
+    'Model Confidence',
+    'Corrected Active Seed Count',
+  ]
+
+  const rows = exportData.value.map((r) => [
+    r.filename,
+    r.species,
+    r.calculated_active,
+    r.confidence,
+    r.final_active,
+  ])
+
+  const csvContent = [headers.join(','), ...rows.map((e) => e.join(','))].join('\n')
+
+  const blob = new Blob([csvContent], { type: 'text/csv;charset=utf-8;' })
+  const url = URL.createObjectURL(blob)
+
+  const link = document.createElement('a')
+  link.setAttribute('href', url)
+  link.setAttribute('download', `seeds_export_run_${route.params.id}.csv`)
+  link.style.visibility = 'hidden'
+  document.body.appendChild(link)
+  link.click()
+  document.body.removeChild(link)
 }
 
-function formatRelative(iso: string | null): string {
-  if (!iso) return '—'
-  const diff = (Date.now() - new Date(iso).getTime()) / 1000
-  if (diff < 60) return 'just now'
-  if (diff < 3600) return `${Math.round(diff / 60)}m ago`
-  if (diff < 86400) return `${Math.round(diff / 3600)}h ago`
-  return `${Math.round(diff / 86400)}d ago`
+async function downloadImage(url: string, filename: string) {
+  try {
+    const response = await fetch(url)
+    const blob = await response.blob()
+    const blobUrl = URL.createObjectURL(blob)
+
+    const link = document.createElement('a')
+    link.href = blobUrl
+    link.download = filename
+    document.body.appendChild(link)
+    link.click()
+    document.body.removeChild(link)
+    URL.revokeObjectURL(blobUrl)
+  } catch (e) {
+    console.error('Image download failed', e)
+    alert('Failed to download image.')
+  }
 }
 </script>

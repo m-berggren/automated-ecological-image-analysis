@@ -88,6 +88,9 @@ class ImageAsset(models.Model):
     file = models.FileField(upload_to=image_upload_path)
     purpose = models.CharField(max_length=20, choices=ImagePurpose.choices)
 
+    width = models.PositiveIntegerField(null=True, blank=True)
+    height = models.PositiveIntegerField(null=True, blank=True)
+
     upload = models.ForeignKey(
         Upload,
         on_delete=models.CASCADE,

@@ -88,8 +88,8 @@
               "training_curve": [
                 { "epoch": 1, "loss": 0.62, "val_metric": 0.71 },
                 { "epoch": 3, "loss": 0.42, "val_metric": 0.81 },
-                { "epoch": 6, "loss": 0.30, "val_metric": 0.87 },
-                { "epoch": 9, "loss": 0.22, "val_metric": 0.90 },
+                { "epoch": 6, "loss": 0.3, "val_metric": 0.87 },
+                { "epoch": 9, "loss": 0.22, "val_metric": 0.9 },
                 { "epoch": 12, "loss": 0.18, "val_metric": 0.92 },
                 { "epoch": 16, "loss": 0.15, "val_metric": 0.93 },
                 { "epoch": 20, "loss": 0.13, "val_metric": 0.93 }
