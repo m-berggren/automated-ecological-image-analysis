@@ -1,428 +1,516 @@
 <template>
-  <PageHeader :title="headerTitle" subtitle="Confirm or reject seed detections" />
+  <PageHeader :title="headerTitle" subtitle="Review seed status classifications and calculations" />
+
   <SeedsStepper current="review" :runId="run?.id" />
 
-  <div v-if="loading" class="flex-1 p-8 text-sm text-muted-foreground">Loading…</div>
-  <div v-else-if="loadError" class="flex-1 p-8 text-sm text-red-600">{{ loadError }}</div>
+  <div v-if="loading" class="flex-1 flex items-center justify-center text-sm text-muted-foreground">
+    Loading classification results...
+  </div>
 
-  <div v-else class="flex-1 flex flex-col-reverse lg:flex-row min-h-0">
-    <!-- Left: grid of detections -->
-    <section
-      class="w-full lg:w-[480px] shrink-0 border-t lg:border-t-0 lg:border-r border-border flex flex-col bg-surface max-h-[55vh] lg:max-h-none"
-    >
-      <div class="px-4 py-3 border-b border-border space-y-2">
-        <div class="flex items-center gap-2 text-xs">
-          <label class="text-muted-foreground">Show</label>
-          <select
-            v-model="statusFilter"
-            class="px-2 py-1 rounded border border-border bg-background"
-          >
-            <option value="unreviewed">Unreviewed</option>
-            <option value="all">All</option>
-            <option value="reviewed">Reviewed</option>
-          </select>
+  <div v-else-if="loadError" class="flex-1 flex items-center justify-center text-sm text-red-600">
+    {{ loadError }}
+  </div>
+
+  <div v-else-if="currentImage" class="flex-1 flex flex-col min-h-0 bg-background">
+    <section class="border-b border-border bg-surface px-6 py-4">
+      <div
+        class="max-w-7xl mx-auto flex flex-col lg:flex-row lg:items-center lg:justify-between gap-6"
+      >
+        <div>
+          <h2 class="text-base font-semibold flex items-center gap-2">
+            Image Review
+            <span class="text-sm font-normal text-muted-foreground">
+              ({{ currentImageIndex + 1 }} of {{ totalImagesCount }})
+            </span>
+          </h2>
+          <p class="text-xs text-muted-foreground mt-0.5 font-mono">
+            {{ currentImage.filename }}
+          </p>
         </div>
-        <div class="text-xs text-muted-foreground flex items-center justify-between">
-          <span>{{ filteredDetections.length }} of {{ detections.length }} detections</span>
-          <button
-            class="text-primary hover:underline"
-            :disabled="!filteredDetections.length"
-            @click="selectAllVisible"
+
+        <div
+          class="grid grid-cols-2 md:grid-cols-3 gap-4 bg-muted/20 p-3 rounded-xl border border-border flex-1 max-w-2xl"
+        >
+          <div class="px-2 border-r border-border/60">
+            <span
+              class="text-[10px] text-muted-foreground block font-bold uppercase tracking-wider"
+            >
+              Mean Confidence
+            </span>
+            <div class="text-base font-mono font-bold text-foreground mt-0.5">
+              {{ (initialOverallConfidenceScore * 100).toFixed(1) }}%
+            </div>
+          </div>
+
+          <div class="px-2 border-r border-border/60">
+            <span
+              class="text-[10px] text-muted-foreground block font-bold uppercase tracking-wider"
+            >
+              Approximate Range
+            </span>
+            <div class="text-base font-mono font-bold text-foreground mt-0.5">
+              {{ initialSeedRangeMin }} – {{ initialSeedRangeMax }}
+              <span class="text-[10px] text-muted-foreground font-normal">seeds</span>
+            </div>
+          </div>
+
+          <div
+            class="px-2 col-span-2 md:col-span-1 flex items-center justify-between gap-2 bg-background/50 p-1.5 rounded-lg border border-border/40"
           >
-            Select all
+            <div>
+              <span
+                class="text-[10px] text-muted-foreground block font-medium uppercase tracking-tight"
+              >
+                Active Seeds
+              </span>
+              <div class="text-xs text-muted-foreground font-mono">
+                <span class="font-bold text-foreground">{{ initialAutomatedActiveCount }}</span>
+              </div>
+            </div>
+
+            <div class="flex items-center gap-1">
+              <input
+                id="manual-count"
+                type="number"
+                min="0"
+                v-model.number="manualActiveCount"
+                class="w-14 px-1 py-1 rounded border border-border bg-background text-xs text-center font-bold focus:outline-none focus:ring-2 focus:ring-primary"
+              />
+              <button
+                type="button"
+                class="px-2 py-1 bg-primary text-primary-foreground rounded text-[10px] font-medium hover:bg-primary/90 transition-colors shadow-sm"
+                @click="saveCurrentPageCount"
+                :disabled="savingCount"
+              >
+                {{ savingCount ? '...' : 'Save' }}
+              </button>
+            </div>
+          </div>
+        </div>
+
+        <div class="flex items-center gap-2 shrink-0">
+          <button
+            type="button"
+            class="p-2 rounded-md border border-border bg-surface hover:bg-muted transition-colors disabled:opacity-40 disabled:cursor-not-allowed text-xs font-medium"
+            :disabled="currentImageIndex === 0"
+            @click="navigateImage(-1)"
+          >
+            ← Prev
+          </button>
+          <button
+            type="button"
+            class="p-2 rounded-md border border-border bg-surface hover:bg-muted transition-colors disabled:opacity-40 disabled:cursor-not-allowed text-xs font-medium"
+            :disabled="currentImageIndex === totalImagesCount - 1"
+            @click="navigateImage(1)"
+          >
+            Next →
           </button>
         </div>
       </div>
+    </section>
 
-      <!-- Bulk action bar -->
+    <div
+      class="bg-muted/20 px-6 py-2 border-b border-border flex items-center gap-4 text-xs font-medium"
+    >
+      <span class="text-muted-foreground">Legend:</span>
+      <span class="flex items-center gap-1.5">
+        <span class="w-3 h-3 rounded-full bg-green-500 block border border-green-600"></span> Active
+        Seed
+      </span>
+      <span class="flex items-center gap-1.5">
+        <span class="w-3 h-3 rounded-full bg-red-500 block border border-red-600"></span> Aborted /
+        Inactive Seed
+      </span>
+      <span class="text-muted-foreground font-normal italic ml-auto hidden sm:inline">
+        Click on a bounding box to toggle its status manually.
+      </span>
+    </div>
+
+    <section class="flex-1 overflow-auto p-6">
       <div
-        v-if="bulkIds.size > 0"
-        class="px-4 py-2 border-b border-border bg-primary/5 flex items-center gap-2 text-xs"
+        class="relative w-full overflow-hidden rounded-2xl border border-border bg-black/5 shadow-sm"
       >
-        <span class="font-medium">{{ bulkIds.size }} selected</span>
-        <button
-          class="px-2 py-1 rounded bg-primary text-primary-foreground hover:bg-primary/90"
-          @click="bulkConfirm"
-        >
-          Confirm
-        </button>
-        <button class="px-2 py-1 rounded border border-border hover:bg-muted" @click="bulkReject">
-          Reject
-        </button>
-        <button class="ml-auto text-muted-foreground hover:text-foreground" @click="clearBulk">
-          Clear
-        </button>
-      </div>
-
-      <div class="flex-1 overflow-auto">
-        <div class="grid grid-cols-5 gap-1 p-2">
-          <div
-            v-for="d in filteredDetections"
-            :key="d.id"
-            class="rounded-md overflow-hidden border-2 transition-all"
-            :class="[
-              selectedId === d.id
-                ? 'border-primary ring-2 ring-primary'
-                : 'border-transparent hover:border-border',
-              d.reviewer_status !== 'unreviewed' ? 'opacity-50' : '',
-            ]"
-          >
-            <div
-              :data-detection-id="d.id"
-              role="button"
-              tabindex="0"
-              class="relative aspect-square cursor-pointer focus:outline-none bg-eco-mint/30 flex items-center justify-center"
-              @click="selectedId = d.id"
-              @keydown.enter.prevent="selectedId = d.id"
-            >
-              <span class="text-2xl opacity-40">🌱</span>
-              <span
-                class="absolute top-1 left-1 w-2 h-2 rounded-full"
-                :class="statusDotClass(d.reviewer_status)"
-              />
-              <span class="absolute bottom-1 right-1 text-[9px] font-mono text-muted-foreground/70">
-                {{ d.confidence.toFixed(2) }}
-              </span>
-            </div>
-            <div
-              role="checkbox"
-              :aria-checked="bulkIds.has(d.id)"
-              tabindex="0"
-              class="h-5 flex items-center justify-center text-xs cursor-pointer transition-colors"
-              :class="
-                bulkIds.has(d.id)
-                  ? 'bg-primary text-primary-foreground'
-                  : 'bg-surface text-muted-foreground hover:bg-muted'
-              "
-              @click="toggleBulk(d.id)"
-              @keydown.space.prevent="toggleBulk(d.id)"
-            >
-              <span v-if="bulkIds.has(d.id)">✓</span>
-            </div>
-          </div>
-        </div>
         <div
-          v-if="!filteredDetections.length"
-          class="p-8 text-center text-sm text-muted-foreground"
+          class="absolute top-4 right-4 z-10 flex items-center bg-surface border border-border rounded-lg shadow-md overflow-hidden text-sm"
         >
-          No detections match the current filter.
-        </div>
-      </div>
-    </section>
-
-    <!-- Right: detail pane -->
-    <section class="flex-1 flex flex-col min-w-0">
-      <div v-if="!selected" class="m-auto text-sm text-muted-foreground">
-        Select a detection on the left to review it.
-      </div>
-      <template v-else>
-        <header class="px-5 py-3 border-b border-border bg-surface text-sm flex items-center gap-3">
-          <span class="font-medium">Detection #{{ selected.id }}</span>
-          <span class="text-muted-foreground font-mono text-xs truncate">
-            {{ selected.source_image_filename }}
-          </span>
-          <span
-            class="ml-auto text-xs px-2 py-0.5 rounded-full shrink-0"
-            :class="statusBadgeClass(selected.reviewer_status)"
+          <button @click="zoomOut" class="px-3 py-2 hover:bg-muted font-bold text-lg leading-none">
+            −
+          </button>
+          <button
+            @click="resetZoom"
+            class="px-3 py-2 hover:bg-muted border-x border-border font-medium"
           >
-            {{ statusLabel(selected.reviewer_status) }}
-          </span>
-        </header>
-
-        <div class="flex-1 overflow-auto">
-          <!-- Crop preview -->
+            {{ Math.round(zoom * 100) }}%
+          </button>
+          <button @click="zoomIn" class="px-3 py-2 hover:bg-muted font-bold text-lg leading-none">
+            +
+          </button>
+        </div>
+        <div class="relative w-full h-[65vh] overflow-auto">
           <div
-            class="aspect-video flex items-center justify-center text-7xl bg-eco-mint/20 relative"
+            class="relative w-full transition-transform duration-200"
+            :style="{ transform: `scale(${zoom})`, transformOrigin: 'top left' }"
           >
-            <span class="opacity-30">🌱</span>
-          </div>
+            <img
+              :src="currentImage.image_url"
+              :alt="currentImage.filename"
+              class="w-full h-auto select-none block"
+              draggable="false"
+            />
 
-          <!-- Stats -->
-          <div class="px-5 py-4 border-b border-border space-y-3">
-            <div class="text-[11px] font-semibold uppercase tracking-wider text-muted-foreground">
-              Detection details
-            </div>
-            <dl class="grid grid-cols-2 gap-x-6 gap-y-2 text-sm">
-              <div>
-                <dt class="text-xs text-muted-foreground">Confidence</dt>
-                <dd class="font-mono font-medium">{{ selected.confidence.toFixed(3) }}</dd>
-              </div>
-              <div>
-                <dt class="text-xs text-muted-foreground">Area (px²)</dt>
-                <dd class="font-mono font-medium">{{ selected.area.toLocaleString() }}</dd>
-              </div>
-              <div v-if="selected.length_mm">
-                <dt class="text-xs text-muted-foreground">Length</dt>
-                <dd class="font-mono font-medium">{{ selected.length_mm.toFixed(1) }} mm</dd>
-              </div>
-              <div v-if="selected.width_mm">
-                <dt class="text-xs text-muted-foreground">Width</dt>
-                <dd class="font-mono font-medium">{{ selected.width_mm.toFixed(1) }} mm</dd>
-              </div>
-              <div v-if="selected.viability_status">
-                <dt class="text-xs text-muted-foreground">Viability</dt>
-                <dd
-                  class="font-medium"
-                  :class="
-                    selected.viability_status === 'Active' ? 'text-green-600' : 'text-red-500'
-                  "
-                >
-                  {{ selected.viability_status }}
-                </dd>
-              </div>
-            </dl>
+            <svg
+              :viewBox="`0 0 ${currentImage.width} ${currentImage.height}`"
+              preserveAspectRatio="none"
+              class="absolute inset-0 w-full h-full pointer-events-none select-none"
+            >
+              <polygon
+                v-for="detection in currentDetections"
+                :key="detection.id"
+                :points="getPolygonPoints(detection)"
+                stroke-width="12"
+                class="pointer-events-auto cursor-pointer transition-all duration-150 fill-transparent hover:fill-current/10"
+                :class="
+                  isActiveSeed(detection)
+                    ? 'stroke-green-500 text-green-500 hover:stroke-green-400'
+                    : 'stroke-red-500 text-red-500 hover:stroke-red-400'
+                "
+                @click="toggleSeedStatus(detection.id)"
+                :title="`Confidence: ${(detection.confidence * 100).toFixed(1)}%`"
+              />
+            </svg>
           </div>
         </div>
-
-        <!-- Action bar -->
-        <footer
-          class="border-t border-border bg-surface px-5 py-3 flex items-center justify-between"
-        >
-          <span class="text-[11px] text-muted-foreground font-mono hidden md:block">
-            ↵ confirm · x reject · ↑↓ navigate
-          </span>
-          <div class="flex gap-2 ml-auto">
-            <button
-              class="px-3 py-1.5 rounded-md text-sm font-medium border border-border hover:bg-muted"
-              @click="reject"
-            >
-              Reject
-            </button>
-            <button
-              class="px-3 py-1.5 rounded-md text-sm font-medium bg-primary text-primary-foreground hover:bg-primary/90"
-              @click="confirm"
-            >
-              Confirm seed
-            </button>
-          </div>
-        </footer>
-      </template>
+      </div>
     </section>
+
+    <footer class="border-t border-border bg-surface px-6 py-4 mt-auto">
+      <div class="max-w-7xl mx-auto flex items-center justify-between gap-4">
+        <div class="text-sm text-muted-foreground">
+          Review metrics can be exported as unified datasets in the final step.
+        </div>
+
+        <div class="flex items-center gap-3">
+          <button
+            type="button"
+            class="px-4 py-2 rounded-md border border-border hover:bg-muted text-sm font-medium transition-colors"
+            @click="goBack"
+          >
+            Back
+          </button>
+
+          <button
+            type="button"
+            class="px-5 py-2 rounded-md bg-primary text-primary-foreground hover:bg-primary/90 text-sm font-medium transition-colors shadow-sm"
+            @click="navigateToExport"
+          >
+            Export
+          </button>
+        </div>
+      </div>
+    </footer>
   </div>
 </template>
 
 <script setup lang="ts">
-import { computed, nextTick, onMounted, onUnmounted, ref, watch } from 'vue'
-import { useRoute } from 'vue-router'
+import { computed, onMounted, ref, watch } from 'vue'
+import { useRoute, useRouter } from 'vue-router'
 import PageHeader from '@/components/PageHeader.vue'
 import SeedsStepper from '@/components/SeedsStepper.vue'
 import { api } from '@/api'
 
-type ReviewerStatus = 'unreviewed' | 'confirmed' | 'rejected'
-
 interface Detection {
   id: number
   confidence: number
+  predicted_class: string
   area: number
-  length_mm?: number
-  width_mm?: number
-  viability_status?: 'Active' | 'Aborted'
-  reviewer_status: ReviewerStatus
+  reviewer_status: 'unreviewed' | 'confirmed' | 'rejected'
   source_image_filename: string
+  polygon?: number[]
+  bbox?: any
+  poly?: number[]
 }
 
-interface ReviewBundle {
+interface ReviewImage {
+  id: number
+  filename: string
+  image_url: string
+}
+
+interface ClassificationBundle {
   run: { id: number; name: string; status: string; detection_count: number }
+  images_list: ReviewImage[]
   detections: Detection[]
 }
 
+interface BaselineMetrics {
+  automatedActiveCount: number
+  overallConfidenceScore: number
+  seedRangeMin: number
+  seedRangeMax: number
+  savedManualCount: number | null
+}
+
 const route = useRoute()
+const router = useRouter()
+
 const loading = ref(true)
 const loadError = ref('')
-const run = ref<ReviewBundle['run'] | null>(null)
-const detections = ref<Detection[]>([])
-const selectedId = ref<number | null>(null)
-const statusFilter = ref<'unreviewed' | 'all' | 'reviewed'>('unreviewed')
-const bulkIds = ref<Set<number>>(new Set())
+const zoom = ref(1)
+const savingCount = ref(false)
 
-const previewMode = computed<string | null>(() => {
-  const value = route.query.preview
-  return typeof value === 'string' ? value : null
+const run = ref<ClassificationBundle['run'] | null>(null)
+const imagesList = ref<ReviewImage[]>([])
+const currentImageIndex = ref(0)
+
+const imageDetectionsMap = ref<Record<string, Detection[]>>({})
+const initialMetricsLookupMap = ref<Record<string, BaselineMetrics>>({})
+const manualActiveCount = ref<number>(0)
+const initialAutomatedActiveCount = ref<number>(0)
+const initialOverallConfidenceScore = ref<number>(0)
+const initialSeedRangeMin = ref<number>(0)
+const initialSeedRangeMax = ref<number>(0)
+
+const isPreviewMode = computed(() => {
+  const hasRunId = route.params.id && route.params.id !== 'undefined'
+  if (hasRunId) return false
+
+  return route.query.preview === 'default' || import.meta.env.DEV
 })
 
-onMounted(async () => {
-  if (previewMode.value) {
-    const bundle = await loadPreview(previewMode.value)
-    if (bundle) {
-      run.value = bundle.run
-      detections.value = bundle.detections
-      loading.value = false
-      return
-    }
-  }
-  await loadFromApi()
+const currentImage = computed<ReviewImage | null>(() => {
+  return imagesList.value[currentImageIndex.value] || null
 })
 
-async function loadPreview(_mode: string): Promise<ReviewBundle | null> {
-  if (!import.meta.env.DEV) return null
-  const { default: mocks } = await import('@/mocks/seed-detections.json')
-  const bundle = (mocks as Record<string, ReviewBundle | undefined>).default
-  if (!bundle) return null
-  return JSON.parse(JSON.stringify(bundle))
-}
-
-async function loadFromApi() {
-  const id = route.params.id as string
-  try {
-    const [runRes, detRes] = await Promise.all([
-      api(`/api/analysis/runs/${id}/`),
-      api(`/api/analysis/runs/${id}/detections/`),
-    ])
-    if (!runRes.ok) {
-      loadError.value = `Run: HTTP ${runRes.status}`
-      return
-    }
-    if (!detRes.ok) {
-      loadError.value = `Detections: HTTP ${detRes.status}`
-      return
-    }
-    run.value = await runRes.json()
-    detections.value = await detRes.json()
-  } catch (e) {
-    loadError.value = e instanceof Error ? e.message : String(e)
-  } finally {
-    loading.value = false
-  }
-}
+const totalImagesCount = computed(() => imagesList.value.length)
 
 const headerTitle = computed(() =>
-  run.value ? `Review · ${run.value.name || `Run #${run.value.id}`}` : 'Review',
+  run.value
+    ? `Seed Classification Review · ${run.value.name || `Run #${run.value.id}`}`
+    : 'Seed Classification Review',
 )
 
-const filteredDetections = computed(() => {
-  let list = detections.value
-  if (statusFilter.value === 'unreviewed')
-    list = list.filter((d) => d.reviewer_status === 'unreviewed')
-  else if (statusFilter.value === 'reviewed')
-    list = list.filter((d) => d.reviewer_status !== 'unreviewed')
-  return [...list].sort((a, b) => a.confidence - b.confidence)
+const currentDetections = computed<Detection[]>(() => {
+  if (!currentImage.value) return []
+  return imageDetectionsMap.value[currentImage.value.filename] || []
 })
 
-const selected = computed(() => detections.value.find((d) => d.id === selectedId.value) ?? null)
-
+// Retrieves the initial seed count metrics from the permanent map and keeps manual input synced
 watch(
-  filteredDetections,
-  (list) => {
-    if (selectedId.value && !list.find((d) => d.id === selectedId.value)) {
-      selectedId.value = list[0]?.id ?? null
-    } else if (!selectedId.value && list.length) {
-      selectedId.value = list[0].id
+  currentImage,
+  (newImage) => {
+    if (!newImage) return
+
+    // Fetch current number of detections to set the manual input counter value correctly
+    const currentList = imageDetectionsMap.value[newImage.filename] || []
+
+    manualActiveCount.value = currentList.filter((d) => isActiveSeed(d)).length
+
+    // Fetch initial model metrics from permanent lookup map
+    const baseline = initialMetricsLookupMap.value[newImage.filename]
+    if (baseline) {
+      initialAutomatedActiveCount.value = baseline.automatedActiveCount
+      initialOverallConfidenceScore.value = baseline.overallConfidenceScore
+      initialSeedRangeMin.value = baseline.seedRangeMin
+      initialSeedRangeMax.value = baseline.seedRangeMax
+    }
+    if (baseline.savedManualCount !== null) {
+      manualActiveCount.value = baseline.savedManualCount
+    } else {
+      manualActiveCount.value = currentList.filter((d) => isActiveSeed(d)).length
     }
   },
   { immediate: true },
 )
 
-watch(selectedId, async (id) => {
-  if (id == null) return
-  await nextTick()
-  document
-    .querySelector(`[data-detection-id="${id}"]`)
-    ?.scrollIntoView({ block: 'nearest', behavior: 'smooth' })
+function zoomIn() {
+  zoom.value = Math.min(zoom.value + 0.25, 4)
+}
+function zoomOut() {
+  zoom.value = Math.max(zoom.value - 0.25, 0.5)
+}
+function resetZoom() {
+  zoom.value = 1
+}
+
+function isActiveSeed(detection: Detection): boolean {
+  const statusString = detection.predicted_class || (detection as any).viability_status || ''
+  return statusString.toLowerCase() === 'active'
+}
+
+// Updates bounding box state and input values
+function toggleSeedStatus(detectionId: number) {
+  if (!currentImage.value) return
+  const filename = currentImage.value.filename
+  const detectionsList = imageDetectionsMap.value[filename] || []
+  const target = detectionsList.find((d) => d.id === detectionId)
+
+  if (target) {
+    const currentClass = (target.predicted_class || '').toLowerCase()
+
+    if (currentClass === 'active') {
+      target.predicted_class = 'aborted'
+      target.reviewer_status = 'confirmed'
+      manualActiveCount.value = Math.max(0, manualActiveCount.value - 1)
+    } else {
+      target.predicted_class = 'active'
+      target.reviewer_status = 'confirmed'
+      manualActiveCount.value++
+    }
+
+    console.log(`Box #${detectionId} successfully toggled to: ${target.predicted_class}`)
+  }
+}
+
+function getPolygonPoints(detection: Detection): string {
+  const p =
+    detection.polygon || (detection.bbox && detection.bbox.poly) || detection.bbox || detection.poly
+  if (!p || p.length < 8) return ''
+  return `${p[0]},${p[1]} ${p[2]},${p[3]} ${p[4]},${p[5]} ${p[6]},${p[7]}`
+}
+
+onMounted(async () => {
+  await initializeReviewBundle()
 })
 
-function statusDotClass(s: ReviewerStatus): string {
-  switch (s) {
-    case 'confirmed':
-      return 'bg-green-500'
-    case 'rejected':
-      return 'bg-red-500'
-    default:
-      return 'bg-muted-foreground/40'
-  }
-}
-function statusBadgeClass(s: ReviewerStatus): string {
-  switch (s) {
-    case 'confirmed':
-      return 'bg-green-100 text-green-700'
-    case 'rejected':
-      return 'bg-red-100 text-red-700'
-    default:
-      return 'bg-muted text-muted-foreground'
-  }
-}
-function statusLabel(s: ReviewerStatus): string {
-  return s[0].toUpperCase() + s.slice(1)
-}
+// Initialize the run session data structure
+async function initializeReviewBundle() {
+  const id = route.params.id as string
 
-function applyAction(status: ReviewerStatus) {
-  if (!selected.value) return
-  selected.value.reviewer_status = status
-  advanceToNext()
-}
+  loading.value = true
 
-function confirm() {
-  applyAction('confirmed')
-}
-function reject() {
-  applyAction('rejected')
-}
+  try {
+    const response = await api(`/api/seeds/runs/${id}/reference-review/`)
 
-function toggleBulk(id: number) {
-  const next = new Set(bulkIds.value)
-  if (next.has(id)) next.delete(id)
-  else next.add(id)
-  bulkIds.value = next
-}
-function clearBulk() {
-  bulkIds.value = new Set()
-}
-function selectAllVisible() {
-  bulkIds.value = new Set(filteredDetections.value.map((d) => d.id))
-}
-function bulkConfirm() {
-  for (const d of detections.value) {
-    if (bulkIds.value.has(d.id)) d.reviewer_status = 'confirmed'
-  }
-  clearBulk()
-}
-function bulkReject() {
-  for (const d of detections.value) {
-    if (bulkIds.value.has(d.id)) d.reviewer_status = 'rejected'
-  }
-  clearBulk()
-}
+    if (!response.ok) {
+      loadError.value = `HTTP Server Configuration Load Error`
+      return
+    }
 
-function advanceToNext() {
-  const list = filteredDetections.value
-  const idx = list.findIndex((d) => d.id === selectedId.value)
-  if (idx >= 0 && idx + 1 < list.length) selectedId.value = list[idx + 1].id
-}
+    const data = await response.json()
+    run.value = data.run
+    imagesList.value = data.images
 
-function navigate(delta: number) {
-  const list = filteredDetections.value
-  const idx = list.findIndex((d) => d.id === selectedId.value)
-  if (idx < 0) return
-  const next = list[Math.max(0, Math.min(list.length - 1, idx + delta))]
-  if (next) selectedId.value = next.id
-}
+    const prodMap: Record<string, Detection[]> = {}
 
-function onKeydown(e: KeyboardEvent) {
-  if (!selected.value) return
-  if (e.target instanceof HTMLElement && ['INPUT', 'SELECT', 'TEXTAREA'].includes(e.target.tagName))
-    return
-  switch (e.key) {
-    case 'Enter':
-      confirm()
-      e.preventDefault()
-      break
-    case 'x':
-    case 'X':
-      reject()
-      e.preventDefault()
-      break
-    case 'ArrowDown':
-    case 'j':
-      navigate(1)
-      e.preventDefault()
-      break
-    case 'ArrowUp':
-    case 'k':
-      navigate(-1)
-      e.preventDefault()
-      break
+    imagesList.value.forEach((img: any) => {
+      const detections = img.detections || []
+      const filteredDetections = detections.map((d: any) => ({
+        ...d,
+        predicted_class: d.class || d.predicted_class || 'aborted',
+        poly: d.polygon || d.poly || [],
+      }))
+
+      prodMap[img.filename] = filteredDetections
+
+      const initialActive = filteredDetections.filter((d: any) => isActiveSeed(d))
+
+      initialMetricsLookupMap.value[img.filename] = {
+        automatedActiveCount: initialActive.length,
+        overallConfidenceScore: img.overall_confidence || 0,
+        seedRangeMin: img.seed_range_min || 0,
+        seedRangeMax: img.seed_range_max || 0,
+        savedManualCount: img.manual_active_count !== undefined ? img.manual_active_count : null,
+      }
+    })
+
+    imageDetectionsMap.value = prodMap
+    currentImageIndex.value = 0
+
+    if (imagesList.value.length > 0) {
+      const firstImg = imagesList.value[0]
+      const baseline = initialMetricsLookupMap.value[firstImg.filename]
+      if (baseline) {
+        initialAutomatedActiveCount.value = baseline.automatedActiveCount
+        initialOverallConfidenceScore.value = baseline.overallConfidenceScore
+        initialSeedRangeMin.value = baseline.seedRangeMin
+        initialSeedRangeMax.value = baseline.seedRangeMax
+        manualActiveCount.value = prodMap[firstImg.filename].filter((d: any) =>
+          isActiveSeed(d),
+        ).length
+      }
+    }
+  } catch (error) {
+    loadError.value = error instanceof Error ? error.message : String(error)
+  } finally {
+    loading.value = false
   }
 }
 
-onMounted(() => window.addEventListener('keydown', onKeydown))
-onUnmounted(() => window.removeEventListener('keydown', onKeydown))
+// Saves edits on current image
+async function saveCurrentPageCount() {
+  if (!currentImage.value || !run.value) return
+  savingCount.value = true
+
+  try {
+    const confirmedDetections = currentDetections.value
+    const activeIds = confirmedDetections.filter((d) => isActiveSeed(d)).map((d) => d.id)
+    const abortedIds = confirmedDetections.filter((d) => !isActiveSeed(d)).map((d) => d.id)
+
+    const apiPromises = []
+
+    if (activeIds.length > 0) {
+      apiPromises.push(
+        api(`/api/analysis/detections/bulk/`, {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ ids: activeIds, reviewer_status: 'confirmed' }),
+        }),
+      )
+    }
+
+    if (abortedIds.length > 0) {
+      apiPromises.push(
+        api(`/api/analysis/detections/bulk/`, {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ ids: abortedIds, reviewer_status: 'rejected' }),
+        }),
+      )
+    }
+
+    apiPromises.push(
+      api(`/api/seeds/images/${currentImage.value.id}/manual-count/`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ manual_count: manualActiveCount.value }),
+      }),
+    )
+
+    if (initialMetricsLookupMap.value[currentImage.value.filename]) {
+      initialMetricsLookupMap.value[currentImage.value.filename].savedManualCount =
+        manualActiveCount.value
+    }
+
+    // Await all queued requests
+    if (apiPromises.length > 0) {
+      const responses = await Promise.all(apiPromises)
+
+      for (const res of responses) {
+        if (!res.ok) throw new Error(`HTTP ${res.status}: Failed to update database`)
+      }
+    }
+
+    alert('Active counts updated.')
+  } catch (error) {
+    console.error(error)
+    alert('Failed to execute bulk counts persistence transactions.')
+  } finally {
+    savingCount.value = false
+  }
+}
+
+function navigateImage(direction: number) {
+  const nextIndex = currentImageIndex.value + direction
+  if (nextIndex >= 0 && nextIndex < totalImagesCount.value) {
+    currentImageIndex.value = nextIndex
+  }
+}
+
+function goBack() {
+  router.push({ path: `/seeds/runs/${route.params.id}/set-reference` })
+}
+
+function navigateToExport() {
+  router.push({ path: `/seeds/runs/${route.params.id}/export` })
+}
 </script>

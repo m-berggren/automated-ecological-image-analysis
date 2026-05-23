@@ -1,6 +1,6 @@
 from django.contrib import admin
 
-from .models import Annotation, ImageAsset
+from .models import ImageAsset
 
 
 @admin.register(ImageAsset)
@@ -16,13 +16,5 @@ class ImageAssetAdmin(admin.ModelAdmin):
         'uploaded_at',
     )
     list_filter = ('module', 'purpose', 'weather', 'excluded')
-    search_fields = ('file', 'site', 'plot', 'notes')
+    search_fields = ('file', 'notes')
     readonly_fields = ('uploaded_at',)
-
-
-@admin.register(Annotation)
-class AnnotationAdmin(admin.ModelAdmin):
-    list_display = ('id', 'image', 'class_label', 'created_at')
-    list_filter = ('class_label',)
-    search_fields = ('class_label',)
-    readonly_fields = ('created_at',)

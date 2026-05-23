@@ -20,8 +20,6 @@ class ImageAssetSerializer(serializers.ModelSerializer):
             'captured_at',
             'flash_fired',
             'exif',
-            'site',
-            'plot',
             'weather',
             'notes',
             'excluded',

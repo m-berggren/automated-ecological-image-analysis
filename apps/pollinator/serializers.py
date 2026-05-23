@@ -157,9 +157,30 @@ class PollinatorTrainingCreateSerializer(serializers.ModelSerializer):
                     raise serializers.ValidationError(
                         'img_size must be a positive multiple of 32'
                     )
+            token = value.get('uploaded_detector_token')
+            if token:
+                from .detector_upload import staging_dir_for
+
+                if staging_dir_for(token) is None:
+                    raise serializers.ValidationError(
+                        'uploaded_detector_token is unknown or expired; re-upload the dataset'
+                    )
+        elif value.get('uploaded_detector_token'):
+            raise serializers.ValidationError(
+                'uploaded_detector_token is only valid for the detector track'
+            )
 
         epochs = value.get('epochs')
         if epochs is not None and (not isinstance(epochs, int) or epochs <= 0):
             raise serializers.ValidationError('epochs must be a positive integer')
+
+        version_name = value.get('version_name')
+        if version_name is not None:
+            if not isinstance(version_name, str) or not version_name.strip():
+                raise serializers.ValidationError('version_name must be a non-empty string')
+            if ModelVersion.objects.filter(version_name=version_name.strip()).exists():
+                raise serializers.ValidationError(
+                    f'version_name "{version_name.strip()}" already exists'
+                )
 
         return value

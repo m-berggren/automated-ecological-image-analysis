@@ -39,22 +39,36 @@ def count_active_and_aborted_seeds(reference_seed, detected_seeds, threshold=0.3
     active_count = 0
     aborted_count = 0
 
+    classifications = []
+
     for seed in detected_seeds:
-        poly = seed['poly'] if isinstance(seed, dict) and 'poly' in seed else seed
+        poly = seed['poly']
+        detection_id = seed.get('id')
 
         seed_area = calculate_polygon_area(poly)
 
         if seed_area <= threshold_area:
+            status = 'aborted'
             aborted_count += 1
         else:
+            status = 'active'
             active_count += 1
+
+        classifications.append({
+            'detection_id': detection_id,
+            'status': status,
+            'area': seed_area,
+        })
 
     total_count = active_count + aborted_count
 
     return {
-        'total_seeds': total_count,
-        'active_seeds': active_count,
-        'aborted_seeds': aborted_count,
+        'summary': {
+            'total_seeds': total_count,
+            'active_seeds': active_count,
+            'aborted_seeds': aborted_count,
+        },
+        'classifications': classifications,
     }
 
 

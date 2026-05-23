@@ -7,7 +7,6 @@
     <div v-else-if="loadError" class="text-sm text-red-600">{{ loadError }}</div>
 
     <template v-else-if="run">
-      <!-- Status card -->
       <section class="rounded-xl border bg-surface p-5" :class="statusBorderClass">
         <div class="flex items-center gap-3 mb-3">
           <span
@@ -21,6 +20,10 @@
 
         <div v-if="run.status === 'failed'" class="text-sm text-red-700 mb-3">
           {{ run.error_message || 'Run failed before completion.' }}
+        </div>
+
+        <div v-else-if="run.status === 'cancelled'" class="text-sm text-amber-700 mb-3">
+          {{ run.error_message || 'Run was cancelled by the user.' }}
         </div>
 
         <div v-else-if="run.status === 'pending'" class="text-sm text-muted-foreground mb-3">
@@ -48,29 +51,48 @@
         <div class="mt-4 flex gap-2">
           <button
             v-if="canCancel"
-            class="text-sm px-3 py-1.5 rounded-md border border-border hover:bg-muted"
+            class="text-sm px-3 py-1.5 rounded-md border border-border hover:bg-muted disabled:opacity-50"
             @click="onCancel"
+            :disabled="cancelling"
           >
-            Cancel run
+            {{ cancelling ? 'Cancelling...' : 'Cancel run' }}
           </button>
-          <RouterLink
-            v-if="canOpenReview"
-            :to="`/seeds/runs/${run.id}/review`"
-            class="ml-auto text-sm px-3 py-1.5 rounded-md font-medium bg-primary text-primary-foreground hover:bg-primary/90"
-          >
-            Open review →
-          </RouterLink>
+
           <button
-            v-if="run.status === 'failed'"
-            class="ml-auto text-sm px-3 py-1.5 rounded-md border border-border hover:bg-muted"
-            disabled
+            v-if="
+              run.status === 'pending' || run.status === 'running' || run.status === 'completed'
+            "
+            @click="router.push(`/seeds/runs/${run.id}/set-reference`)"
+            :disabled="run.status !== 'completed'"
+            class="ml-auto text-sm px-3 py-1.5 rounded-md font-medium transition-colors"
+            :class="
+              run.status === 'completed'
+                ? 'bg-primary text-primary-foreground hover:bg-primary/90'
+                : 'bg-muted text-muted-foreground opacity-50 cursor-not-allowed'
+            "
           >
-            Re-run with same config
+            {{ run.status === 'completed' ? 'Set reference seed →' : 'Pending...' }}
           </button>
+
+          <template v-if="run.status === 'failed' || run.status === 'cancelled'">
+            <button
+              class="text-sm px-3 py-1.5 rounded-md border border-border hover:bg-muted disabled:opacity-50"
+              @click="reRun"
+              :disabled="creatingRun"
+            >
+              {{ creatingRun ? 'Starting...' : 'Re-run with same config' }}
+            </button>
+
+            <RouterLink
+              to="/seeds/upload"
+              class="ml-auto text-sm px-3 py-1.5 rounded-md font-medium bg-primary text-primary-foreground hover:bg-primary/90"
+            >
+              Upload new batch
+            </RouterLink>
+          </template>
         </div>
       </section>
 
-      <!-- Seed count summary -->
       <section
         v-if="run.detection_count > 0"
         class="rounded-xl border border-border bg-surface p-5"
@@ -105,7 +127,6 @@
           </div>
         </div>
 
-        <!-- Viability bar -->
         <div v-if="run.viability" class="mt-4">
           <div class="flex justify-between text-xs text-muted-foreground mb-1">
             <span>Batch health</span>
@@ -119,7 +140,6 @@
           </div>
         </div>
 
-        <!-- Seed type + condition badges -->
         <div class="mt-4 flex gap-2 flex-wrap">
           <span
             v-if="run.config?.selected_seed"
@@ -142,13 +162,14 @@
         </div>
       </section>
 
-      <!-- Activity log -->
       <section class="rounded-xl border border-border bg-surface">
         <header class="px-5 py-3 border-b border-border flex items-center justify-between">
-          <h2 class="text-sm font-semibold">Recent activity</h2>
+          <h2 class="text-sm font-semibold">Images Processed</h2>
           <span v-if="run.failed_image_count > 0" class="text-xs text-red-600">
-            ⚠ {{ run.failed_image_count }} images failed
+            ⚠ {{ run.processed_image_count }} images processed, {{ run.failed_image_count }} images
+            failed
           </span>
+          <span v-else> {{ run.processed_image_count }} images processed </span>
         </header>
         <ul class="max-h-72 overflow-auto divide-y divide-border text-xs">
           <li
@@ -163,7 +184,6 @@
         </ul>
       </section>
 
-      <!-- Configuration disclosure -->
       <section class="rounded-xl border border-border bg-surface">
         <button
           class="w-full px-5 py-3 text-left text-sm font-medium flex items-center justify-between hover:bg-muted/30"
@@ -186,13 +206,13 @@
 
 <script setup lang="ts">
 import { computed, onMounted, onUnmounted, ref } from 'vue'
-import { RouterLink, useRoute } from 'vue-router'
+import { RouterLink, useRoute, useRouter } from 'vue-router'
 import PageHeader from '@/components/PageHeader.vue'
 import SeedsStepper from '@/components/SeedsStepper.vue'
 import { api } from '@/api'
 
-type RunStatus = 'pending' | 'running' | 'completed' | 'failed'
-type PreviewMode = 'queued' | 'running' | 'completed' | 'failed'
+type RunStatus = 'pending' | 'running' | 'completed' | 'failed' | 'cancelled'
+type PreviewMode = 'queued' | 'running' | 'completed' | 'failed' | 'cancelled'
 
 interface ActivityEntry {
   time: string
@@ -210,6 +230,8 @@ interface RunDetail {
   id: number
   name: string
   status: RunStatus
+  upload: number
+  model_version: number | null
   created_at: string
   started_at: string | null
   completed_at: string | null
@@ -223,52 +245,41 @@ interface RunDetail {
   error_message?: string
 }
 
-interface RunDetailMock {
-  id: number
-  name: string
-  status: RunStatus
-  created_at_offset_seconds: number
-  started_at_offset_seconds: number | null
-  completed_at_offset_seconds: number | null
-  image_count: number
-  processed_image_count: number
-  detection_count: number
-  failed_image_count: number
-  viability?: Viability
-  config: Record<string, unknown>
-  error_message?: string
-  activity_log: Array<{
-    offset_seconds: number
-    message: string
-    level: ActivityEntry['level']
-  }>
-}
-
 const route = useRoute()
+const router = useRouter()
 const run = ref<RunDetail | null>(null)
 const loading = ref(true)
 const loadError = ref('')
 const showConfig = ref(false)
+const cancelling = ref(false)
+const creatingRun = ref(false)
+const estimatedCompletionTime = ref<number | null>(null)
+const lastProcessedCount = ref(0)
 
+const now = ref(Date.now())
+let timerHandle: ReturnType<typeof setInterval> | null = null
 let pollHandle: ReturnType<typeof setInterval> | null = null
 
 const previewMode = computed<PreviewMode | null>(() => {
   const value = route.query.preview
   if (typeof value !== 'string') return null
-  if (['queued', 'running', 'completed', 'failed'].includes(value)) return value as PreviewMode
+  if (['queued', 'running', 'completed', 'failed', 'cancelled'].includes(value))
+    return value as PreviewMode
   return null
 })
 
 onMounted(async () => {
   if (previewMode.value) {
-    const preview = await loadPreview(previewMode.value)
-    if (preview) {
-      run.value = preview
-      loading.value = false
-      return
-    }
+    loading.value = false
+    return
   }
+
   void loadRun()
+
+  timerHandle = setInterval(() => {
+    now.value = Date.now()
+  }, 1000)
+
   pollHandle = setInterval(() => {
     if (run.value && (run.value.status === 'pending' || run.value.status === 'running')) {
       void loadRun()
@@ -278,41 +289,8 @@ onMounted(async () => {
 
 onUnmounted(() => {
   if (pollHandle) clearInterval(pollHandle)
+  if (timerHandle) clearInterval(timerHandle)
 })
-
-async function loadPreview(mode: PreviewMode): Promise<RunDetail | null> {
-  if (!import.meta.env.DEV) return null
-  const { default: mocks } = await import('@/mocks/seed-runs.json')
-  const raw = (mocks as Record<string, RunDetailMock | undefined>)[mode]
-  if (!raw) return null
-  return resolveTimestamps(raw)
-}
-
-function resolveTimestamps(mock: RunDetailMock): RunDetail {
-  const now = Date.now()
-  const offsetIso = (offset: number | null): string | null =>
-    offset == null ? null : new Date(now + offset * 1000).toISOString()
-  return {
-    id: mock.id,
-    name: mock.name,
-    status: mock.status,
-    created_at: offsetIso(mock.created_at_offset_seconds) ?? new Date(now).toISOString(),
-    started_at: offsetIso(mock.started_at_offset_seconds),
-    completed_at: offsetIso(mock.completed_at_offset_seconds),
-    image_count: mock.image_count,
-    processed_image_count: mock.processed_image_count,
-    detection_count: mock.detection_count,
-    failed_image_count: mock.failed_image_count,
-    viability: mock.viability,
-    config: mock.config,
-    error_message: mock.error_message,
-    activity_log: mock.activity_log.map((e) => ({
-      time: offsetIso(e.offset_seconds) ?? new Date(now).toISOString(),
-      message: e.message,
-      level: e.level,
-    })),
-  }
-}
 
 async function loadRun() {
   const id = route.params.id as string
@@ -328,6 +306,20 @@ async function loadRun() {
       failed_image_count: 0,
       activity_log: [],
       ...data,
+    }
+    if (run.value?.status === 'running' && run.value.processed_image_count > 0) {
+      if (run.value.processed_image_count > lastProcessedCount.value) {
+        const startTs = new Date(run.value.started_at || run.value.created_at).getTime()
+        const elapsedSecs = (Date.now() - startTs) / 1000
+        const avgPerImage = elapsedSecs / run.value.processed_image_count
+        const remainingImages = run.value.image_count - run.value.processed_image_count
+
+        estimatedCompletionTime.value = Date.now() + avgPerImage * remainingImages * 1000
+        lastProcessedCount.value = run.value.processed_image_count
+      }
+    } else {
+      estimatedCompletionTime.value = null
+      lastProcessedCount.value = 0
     }
   } catch (e) {
     loadError.value = e instanceof Error ? e.message : String(e)
@@ -353,6 +345,8 @@ const statusLabel = computed(() => {
       return 'Completed'
     case 'failed':
       return 'Failed'
+    case 'cancelled':
+      return 'Cancelled'
     default:
       return ''
   }
@@ -367,12 +361,15 @@ const statusBadgeClass = computed(() => {
       return 'bg-green-100 text-green-700'
     case 'failed':
       return 'bg-red-100 text-red-700'
+    case 'cancelled':
+      return 'bg-amber-100 text-amber-800'
     default:
       return 'bg-muted text-muted-foreground'
   }
 })
 const statusBorderClass = computed(() => {
   if (run.value?.status === 'failed') return 'border-red-300'
+  if (run.value?.status === 'cancelled') return 'border-amber-300'
   if (run.value?.status === 'completed') return 'border-green-300'
   return 'border-border'
 })
@@ -381,17 +378,19 @@ const percent = computed(() => {
   return Math.min(100, Math.round((run.value.processed_image_count / run.value.image_count) * 100))
 })
 const elapsedSeconds = computed(() => {
-  if (!run.value?.started_at) return 0
-  const end = run.value.completed_at ? new Date(run.value.completed_at) : new Date()
-  return Math.max(0, (end.getTime() - new Date(run.value.started_at).getTime()) / 1000)
+  const startTime = run.value?.started_at || run.value?.created_at
+  if (!startTime) return 0
+
+  const start = new Date(startTime).getTime()
+  const end = run.value?.completed_at ? new Date(run.value.completed_at).getTime() : now.value
+
+  return Math.max(0, (end - start) / 1000)
 })
 const elapsedHuman = computed(() => humanDuration(elapsedSeconds.value))
 const etaHuman = computed(() => {
   if (!run.value || run.value.status !== 'running') return ''
   if (run.value.processed_image_count === 0) return ''
-  const remaining =
-    (elapsedSeconds.value / run.value.processed_image_count) *
-    (run.value.image_count - run.value.processed_image_count)
+  const remaining = Math.max(0, (estimatedCompletionTime.value - now.value) / 1000)
   return humanDuration(remaining)
 })
 const timingLine = computed(() => {
@@ -399,12 +398,7 @@ const timingLine = computed(() => {
   return `Created ${new Date(run.value.created_at).toLocaleString()}`
 })
 const canCancel = computed(() => run.value?.status === 'pending' || run.value?.status === 'running')
-const canOpenReview = computed(
-  () =>
-    !!run.value &&
-    run.value.detection_count > 0 &&
-    (run.value.status === 'running' || run.value.status === 'completed'),
-)
+
 const avgPerImage = computed(() => {
   if (!run.value || run.value.processed_image_count === 0) return '—'
   return Math.round(run.value.detection_count / run.value.processed_image_count)
@@ -431,10 +425,51 @@ function logLevelClass(level: ActivityEntry['level']): string {
   if (level === 'warn') return 'text-amber-700'
   return ''
 }
-function onCancel() {
-  if (previewMode.value && run.value) {
-    run.value.status = 'failed'
-    run.value.error_message = 'Cancelled by user.'
+
+async function onCancel() {
+  if (!run.value) return
+  cancelling.value = true
+  try {
+    const res = await api(`/api/analysis/runs/${run.value.id}/cancel/`, { method: 'POST' })
+    if (!res.ok) {
+      loadError.value = (await res.text()) || `HTTP ${res.status}`
+      return
+    }
+    const data = await res.json()
+    run.value = { ...run.value, ...data }
+  } catch (e) {
+    loadError.value = e instanceof Error ? e.message : String(e)
+  } finally {
+    cancelling.value = false
+  }
+}
+
+async function reRun() {
+  if (!run.value) return
+  creatingRun.value = true
+  try {
+    const response = await api('/api/analysis/runs/', {
+      method: 'POST',
+      body: JSON.stringify({
+        module: 'seeds',
+        upload: run.value.upload,
+        name: `${run.value.name} (Retry)`,
+        config: run.value.config,
+        model_version: run.value.model_version,
+      }),
+    })
+
+    if (!response.ok) throw new Error(await response.text())
+
+    const newRun = await response.json()
+    router.push(`/seeds/runs/${newRun.id}/detect`)
+    setTimeout(() => {
+      loadRun()
+    }, 100)
+  } catch (e) {
+    loadError.value = e instanceof Error ? e.message : String(e)
+  } finally {
+    creatingRun.value = false
   }
 }
 </script>

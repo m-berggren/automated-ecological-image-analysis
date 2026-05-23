@@ -42,7 +42,8 @@ DEFAULT_CONFIG = {
     # valid background reference (lighting/camera changed); the next frame
     # restarts from the global background or skips detection.
     'max_gap_seconds': 3600,
-    # Quality filtering.
+    # Quality filtering. A flagged frame is skipped entirely: no YOLO, no
+    # motion-branch crops, zero detections recorded.
     'skip_flash': True,
     'skip_foggy': True,
     'foggy_threshold': 50,

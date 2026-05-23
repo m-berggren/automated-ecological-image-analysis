@@ -2,7 +2,9 @@ from django.urls import path
 
 from .views import (
     DetectionBulkView,
+    DetectionExcludeTrainingView,
     DetectionExclusionView,
+    ImageExcludeTrainingView,
     InferenceRunAbortView,
     InferenceRunActiveView,
     InferenceRunCancelView,
@@ -12,6 +14,7 @@ from .views import (
     InferenceRunPauseView,
     InferenceRunRecomputeExclusionsView,
     InferenceRunResumeView,
+    InferenceRunReviewSettingsView,
     InferenceRunStartView,
     ModelVersionDetailView,
     ModelVersionListCreateView,
@@ -59,11 +62,26 @@ urlpatterns = [
         InferenceRunRecomputeExclusionsView.as_view(),
         name='run-recompute-exclusions',
     ),
+    path(
+        'runs/<int:pk>/review-settings/',
+        InferenceRunReviewSettingsView.as_view(),
+        name='run-review-settings',
+    ),
     path('detections/bulk/', DetectionBulkView.as_view(), name='detection-bulk'),
     path(
         'detections/<int:pk>/exclude/',
         DetectionExclusionView.as_view(),
         name='detection-exclude',
+    ),
+    path(
+        'detections/<int:pk>/exclude-training/',
+        DetectionExcludeTrainingView.as_view(),
+        name='detection-exclude-training',
+    ),
+    path(
+        'images/<int:pk>/exclude-training/',
+        ImageExcludeTrainingView.as_view(),
+        name='image-exclude-training',
     ),
     path('training/', TrainingJobListView.as_view(), name='training-list'),
     path(

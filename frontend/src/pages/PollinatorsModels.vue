@@ -54,22 +54,31 @@
             class="px-5 py-4 bg-primary/[0.22] border-b border-border flex items-baseline gap-3"
           >
             <h2 class="font-bold text-lg tracking-tight">{{ track.label }}</h2>
+            <InfoPopover v-if="TRACK_INFO[track.id]">{{ TRACK_INFO[track.id] }}</InfoPopover>
             <span class="text-xs text-muted-foreground">
               {{ track.versions.length }} {{ track.versions.length === 1 ? 'version' : 'versions' }}
             </span>
-            <span class="text-xs text-muted-foreground ml-auto">
+            <span class="text-xs text-muted-foreground ml-auto inline-flex items-center gap-1">
               metric: {{ track.metric_label }}
+              <InfoPopover>{{
+                METRIC_INFO[track.metric_label] ?? 'Headline metric for this model.'
+              }}</InfoPopover>
             </span>
           </header>
 
-          <table class="w-full text-sm">
+          <!-- table-fixed so column widths come from the header, not cell
+               content: the metric column no longer shifts when the artifacts
+               panel expands, and every track's table lines up identically. -->
+          <table class="w-full text-sm table-fixed">
             <thead class="text-xs text-muted-foreground bg-muted/30">
               <tr>
-                <th class="text-left font-medium px-5 py-2 w-10">Default</th>
+                <th class="text-left font-medium px-5 py-2 w-16">Default</th>
                 <th class="text-left font-medium px-3 py-2">Name</th>
-                <th class="text-left font-medium px-3 py-2">{{ track.metric_label }}</th>
-                <th class="text-left font-medium px-3 py-2">Trained</th>
-                <th class="px-3 py-2 w-10"></th>
+                <th class="text-right font-medium px-3 py-2 w-24">{{ track.metric_label }}</th>
+                <th class="text-right font-medium px-3 py-2 w-20">Samples</th>
+                <th class="text-right font-medium px-3 py-2 w-24">Duration</th>
+                <th class="text-left font-medium px-3 py-2 w-28">Trained</th>
+                <th class="px-3 py-2 w-12"></th>
               </tr>
             </thead>
             <tbody>
@@ -89,18 +98,56 @@
                     />
                   </td>
                   <td class="px-3 py-3 font-medium">
-                    {{ v.version_name }}
-                    <span
-                      v-if="v.is_active"
-                      class="ml-2 text-xs px-2 py-0.5 rounded-full bg-green-300 text-green-900 font-medium"
-                    >
-                      active
-                    </span>
+                    <template v-if="renamingId === v.id">
+                      <input
+                        v-model="renameValue"
+                        class="border border-border rounded px-2 py-1 text-sm w-48"
+                        :disabled="renameSaving"
+                        @keyup.enter="saveRename(v)"
+                        @keyup.esc="cancelRename"
+                        @click.stop
+                      />
+                      <button
+                        class="ml-2 text-xs text-primary hover:underline"
+                        @click.stop="saveRename(v)"
+                      >
+                        Save
+                      </button>
+                      <button
+                        class="ml-2 text-xs text-muted-foreground hover:underline"
+                        @click.stop="cancelRename"
+                      >
+                        Cancel
+                      </button>
+                    </template>
+                    <template v-else>
+                      <span>{{ v.version_name }}</span>
+                      <button
+                        v-if="canDeleteModels"
+                        class="ml-2 text-muted-foreground hover:text-primary align-middle"
+                        :title="`Rename ${v.version_name}`"
+                        @click.stop="startRename(v)"
+                      >
+                        <Pencil class="w-3.5 h-3.5 inline" />
+                      </button>
+                      <span
+                        v-if="v.is_active"
+                        class="ml-2 text-xs px-2 py-0.5 rounded-full bg-green-300 text-green-900 font-medium"
+                      >
+                        active
+                      </span>
+                    </template>
                   </td>
-                  <td class="px-3 py-3 font-mono text-xs">
+                  <td class="px-3 py-3 text-right font-mono text-xs">
                     {{ formatMetric(mainMetric(v, track.metric_label)) }}
                   </td>
-                  <td class="px-3 py-3 text-xs text-muted-foreground">
+                  <td class="px-3 py-3 text-right font-mono text-xs text-muted-foreground">
+                    {{ v.sample_count ? v.sample_count.toLocaleString() : '—' }}
+                  </td>
+                  <td class="px-3 py-3 text-right font-mono text-xs text-muted-foreground">
+                    {{ formatDuration(v.training_duration_seconds) }}
+                  </td>
+                  <td class="px-3 py-3 text-xs text-muted-foreground truncate">
                     {{ formatRelative(v.trained_at) }}
                   </td>
                   <td class="px-3 py-3 text-right text-muted-foreground">
@@ -124,9 +171,9 @@
                     </div>
                   </td>
                 </tr>
-                <tr v-if="expandedIds.has(v.id)" class="border-t border-border bg-muted/10">
-                  <td></td>
-                  <td colspan="4" class="px-3 py-4">
+                <tr v-if="expandedIds.has(v.id)" class="border-t border-border bg-muted/40">
+                  <td class="bg-muted/40"></td>
+                  <td colspan="6" class="px-3 py-4">
                     <div class="grid grid-cols-2 gap-x-8 gap-y-3 max-w-3xl">
                       <div>
                         <div
@@ -157,7 +204,7 @@
                     </div>
                     <div v-if="v.artifacts.length > 0" class="mt-4 pt-3 border-t border-border">
                       <button
-                        class="flex items-center gap-1.5 text-[11px] font-semibold uppercase tracking-wider text-muted-foreground hover:text-foreground"
+                        class="flex w-full items-center gap-1.5 text-left text-[11px] font-semibold uppercase tracking-wider text-muted-foreground hover:text-foreground"
                         @click="toggleArtifacts(v.id)"
                       >
                         <span>{{ expandedArtifactIds.has(v.id) ? '▾' : '▸' }}</span>
@@ -222,134 +269,13 @@
       </div>
     </div>
 
-    <!-- Upload model modal -->
-    <div
-      v-if="uploadOpen"
-      class="fixed inset-0 z-50 flex items-center justify-center bg-black/40 p-4"
-      @click.self="uploadOpen = false"
-    >
-      <!-- max-h-[90vh] + flex column keeps the footer (Cancel/Upload) glued
-           to the bottom no matter how big the body grows. The body scrolls
-           internally instead of pushing the buttons off-screen on smaller
-           laptops. -->
-      <div
-        class="bg-card border border-border rounded-xl shadow-xl w-full max-w-md max-h-[90vh] flex flex-col"
-      >
-        <header class="px-5 py-2 border-b border-border flex items-center justify-between shrink-0">
-          <h3 class="font-semibold">Upload existing model</h3>
-          <button class="text-muted-foreground hover:text-foreground" @click="uploadOpen = false">
-            ✕
-          </button>
-        </header>
-        <div class="px-5 py-3 space-y-2 text-sm overflow-y-auto">
-          <label class="block">
-            <span class="text-xs font-medium text-muted-foreground">Kind</span>
-            <select
-              v-model="uploadKind"
-              class="mt-1 w-full px-2 py-1.5 rounded border border-border bg-background"
-            >
-              <option v-for="opt in UPLOAD_KIND_OPTIONS" :key="opt.value" :value="opt.value">
-                {{ opt.label }}
-              </option>
-            </select>
-          </label>
-          <label class="block">
-            <span class="text-xs font-medium text-muted-foreground">
-              Version name
-              <span class="text-red-600">*</span>
-            </span>
-            <input
-              v-model="uploadVersionName"
-              type="text"
-              placeholder="e.g. yolo-v1"
-              class="mt-1 w-full px-2 py-1.5 rounded border border-border bg-background font-mono"
-            />
-            <span class="text-[11px] text-muted-foreground">
-              Used as the filename and must be unique.
-            </span>
-          </label>
-          <label class="block">
-            <span class="text-xs font-medium text-muted-foreground">Description</span>
-            <textarea
-              v-model="uploadDescription"
-              rows="2"
-              placeholder="Optional notes on dataset, training, etc."
-              class="mt-1 w-full px-2 py-1.5 rounded border border-border bg-background"
-            />
-          </label>
-          <div>
-            <span class="text-xs font-medium text-muted-foreground">
-              Source
-              <span class="text-red-600">*</span>
-            </span>
-            <UploadDropZone
-              class="mt-1"
-              compact
-              v-model:active-tab="uploadMode"
-              :tabs="modelUploadTabs"
-              :has-files="uploadHasFiles"
-              @select="onModelUploadSelect"
-            />
-            <p
-              v-if="uploadMode === 'file' && uploadFile"
-              class="mt-2 text-[11px] text-muted-foreground font-mono"
-            >
-              {{ uploadFile.name }} · {{ formatFileSize(uploadFile.size) }}
-            </p>
-            <!-- Folder preview. Plain text rows rather than nested boxes:
-                 enough info to know we picked the right folder, without
-                 the visual noise that dominated the dialog. Artifact list
-                 caps at ~5 rows with internal scroll for big folders. -->
-            <div
-              v-if="uploadMode === 'folder' && uploadFolderFiles.length"
-              class="mt-2 text-[11px] space-y-1"
-            >
-              <div>
-                <span class="text-muted-foreground">Weights: </span>
-                <span v-if="folderPreview.weightsLabel" class="font-mono">
-                  {{ folderPreview.weightsLabel }}
-                </span>
-                <span v-else class="text-red-600">
-                  not found (need weights/best.pt or weights/last.pt)
-                </span>
-              </div>
-              <div v-if="folderPreview.recognised.length">
-                <span class="text-muted-foreground">
-                  Artifacts ({{ folderPreview.recognised.length }}):
-                </span>
-                <div class="mt-0.5 max-h-32 overflow-y-auto font-mono leading-snug pl-2">
-                  <div v-for="name in folderPreview.recognised" :key="name">{{ name }}</div>
-                </div>
-              </div>
-              <div v-else class="text-muted-foreground">Artifacts: none recognised.</div>
-              <div v-if="folderPreview.skipped > 0" class="text-muted-foreground">
-                {{ folderPreview.skipped }} other file(s) will be ignored.
-              </div>
-            </div>
-          </div>
-          <p v-if="uploadError" class="text-xs text-red-600">{{ uploadError }}</p>
-        </div>
-        <footer
-          class="px-5 py-3 border-t border-border flex items-center justify-end gap-2 shrink-0"
-        >
-          <button
-            class="px-3 py-1.5 rounded-md text-sm font-medium text-muted-foreground hover:bg-muted"
-            :disabled="uploadSubmitting"
-            @click="uploadOpen = false"
-          >
-            Cancel
-          </button>
-          <button
-            class="px-3 py-1.5 rounded-md text-sm font-medium bg-primary text-primary-foreground hover:bg-primary/90 disabled:opacity-50 disabled:cursor-not-allowed"
-            :disabled="uploadSubmitting"
-            @click="submitUpload"
-          >
-            <span v-if="uploadSubmitting">Uploading…</span>
-            <span v-else>Upload</span>
-          </button>
-        </footer>
-      </div>
-    </div>
+    <ModelUploadDialog
+      v-model:open="uploadOpen"
+      module="pollinators"
+      :kind-options="UPLOAD_KIND_OPTIONS"
+      :structures="UPLOAD_STRUCTURE"
+      @uploaded="onModelUploaded"
+    />
   </div>
 </template>
 
@@ -357,8 +283,9 @@
 import { computed, onMounted, ref } from 'vue'
 import { useRoute } from 'vue-router'
 import PageHeader from '@/components/PageHeader.vue'
-import UploadDropZone, { type UploadTab } from '@/components/UploadDropZone.vue'
-import { Trash2 } from 'lucide-vue-next'
+import ModelUploadDialog from '@/components/ModelUploadDialog.vue'
+import InfoPopover from '@/components/InfoPopover.vue'
+import { Trash2, Pencil } from 'lucide-vue-next'
 import { api } from '@/api'
 import { confirm, alert } from '@/lib/confirm'
 import { useAuthStore } from '@/stores/auth'
@@ -368,6 +295,23 @@ import {
   type Track,
   type TrackVersion as Version,
 } from '@/lib/model-tracks'
+
+// Per-track help shown in the section-header info popover (keyed by track id).
+const TRACK_INFO: Record<string, string> = {
+  detector:
+    'YOLO object detector — finds insect bounding boxes anywhere in the frame. Runs on every image.',
+  binary_classifier:
+    'Insect-vs-background gate. Every motion crop runs through this first; non-insect crops are dropped before the group classifier.',
+  group_classifier:
+    'Assigns each surviving insect crop to one of: bumblebee, fly, butterfly, other.',
+}
+
+// Why each headline metric (keyed by metric_label), shown next to "metric:".
+const METRIC_INFO: Record<string, string> = {
+  mAP50:
+    'Mean average precision at IoU 0.5 — the standard detector quality score (precision/recall over boxes).',
+  f1: 'F1, not accuracy: the classes are imbalanced (mostly background / one dominant taxon), so accuracy is inflated by the majority class. F1 balances precision and recall on the classes that matter.',
+}
 
 interface VersionMock {
   id: number
@@ -461,200 +405,48 @@ function visibleParams(params: Record<string, unknown>): Array<[string, unknown]
   })
 }
 
-// --- Upload modal state ---
+// --- Upload modal ---
+// The dialog UI + folder/weights parsing + submit live in ModelUploadDialog;
+// here we just hold open-state, the kind options, and per-kind folder layouts.
 const uploadOpen = ref(false)
-const uploadKind = ref<string>('detector')
-const uploadVersionName = ref('')
-const uploadDescription = ref('')
-const uploadFile = ref<File | null>(null)
-const uploadSubmitting = ref(false)
-const uploadError = ref('')
-// 'file' = a single .pt/.pth weights file (legacy path).
-// 'folder' = a YOLO Ultralytics run folder; the backend picks weights/best.pt
-// (or last.pt) and ingests recognized siblings as ModelArtifact rows.
-const uploadMode = ref<'file' | 'folder'>('file')
-const uploadFolderFiles = ref<File[]>([])
-
-const modelUploadTabs: UploadTab[] = [
-  {
-    key: 'file',
-    label: 'Single weights file',
-    mode: 'single-file',
-    accept: '.pt,.pth,.bin',
-    placeholder: 'Drop a .pt / .pth file or click to browse',
-    helper: '.pt / .pth — metadata (img_size, arch, epoch) is auto-extracted if present.',
-  },
-  {
-    key: 'folder',
-    label: 'Training run folder',
-    mode: 'folder',
-    placeholder: 'Drop an Ultralytics run folder or click to browse',
-    helper: 'Server takes weights/best.pt and ingests recognised additional files.',
-  },
-]
-
-const uploadHasFiles = computed(() =>
-  uploadMode.value === 'file' ? !!uploadFile.value : uploadFolderFiles.value.length > 0,
-)
-
-function formatFileSize(bytes: number): string {
-  if (bytes < 1024) return `${bytes} B`
-  if (bytes < 1024 * 1024) return `${(bytes / 1024).toFixed(0)} KB`
-  return `${(bytes / 1024 / 1024).toFixed(1)} MB`
-}
-
-function onModelUploadSelect(files: File[], tabKey: string) {
-  if (tabKey === 'file') {
-    uploadFile.value = files[0] ?? null
-  } else if (tabKey === 'folder') {
-    uploadFolderFiles.value = files
-  }
-}
-
-// Names the backend recognises and ingests into ModelArtifact. Used by the
-// preview list so the user sees what will land in the DB before they submit.
-// Kept aligned with _ARTIFACT_NAME_MAP in apps/analysis/views.py — when one
-// changes, update the other.
-const KNOWN_ARTIFACT_NAMES = new Set([
-  'BoxF1_curve.png',
-  'BoxP_curve.png',
-  'BoxPR_curve.png',
-  'BoxR_curve.png',
-  'F1_curve.png',
-  'P_curve.png',
-  'PR_curve.png',
-  'R_curve.png',
-  'confusion_matrix.png',
-  'confusion_matrix_normalized.png',
-  'labels.jpg',
-  'labels_correlogram.jpg',
-  'results.csv',
-  'results.png',
-  'args.yaml',
-])
-const SAMPLE_PREFIXES = ['train_batch', 'val_batch']
-
-function basename(path: string): string {
-  return path.includes('/') ? path.slice(path.lastIndexOf('/') + 1) : path
-}
-
-function isRecognisedArtifact(name: string): boolean {
-  if (KNOWN_ARTIFACT_NAMES.has(name)) return true
-  return SAMPLE_PREFIXES.some((p) => name.startsWith(p))
-}
-
-interface FolderPreview {
-  weightsLabel: string | null
-  recognised: string[]
-  skipped: number
-}
-
-const folderPreview = computed<FolderPreview>(() => {
-  let weights: File | null = null
-  let weightsRank = 99
-  const recognised: string[] = []
-  let skipped = 0
-  for (const f of uploadFolderFiles.value) {
-    const rel = (f as File & { webkitRelativePath?: string }).webkitRelativePath || f.name
-    const tail = basename(rel)
-    // weights/best.pt outranks weights/last.pt; the segment match is on the
-    // immediate parent so a stray best.pt elsewhere in the tree is ignored.
-    const segs = rel.split('/')
-    const parent = segs.length >= 2 ? segs[segs.length - 2] : ''
-    if (parent === 'weights' && tail === 'best.pt' && weightsRank > 0) {
-      weights = f
-      weightsRank = 0
-    } else if (parent === 'weights' && tail === 'last.pt' && weightsRank > 1) {
-      weights = f
-      weightsRank = 1
-    } else if (isRecognisedArtifact(tail)) {
-      recognised.push(tail)
-    } else {
-      skipped++
-    }
-  }
-  return {
-    weightsLabel: weights
-      ? (weights as File & { webkitRelativePath?: string }).webkitRelativePath || weights.name
-      : null,
-    recognised: recognised.sort((a, b) => a.localeCompare(b)),
-    skipped,
-  }
-})
 
 const UPLOAD_KIND_OPTIONS = [
   { value: 'detector', label: 'YOLO detector' },
-  { value: 'binary_classifier', label: 'EfficientNet binary classifier' },
-  { value: 'group_classifier', label: 'InsectNet group classifier' },
+  { value: 'binary_classifier', label: 'Binary Classifier' },
+  { value: 'group_classifier', label: 'Group Classifier' },
 ]
 
+// Expected upload layout per kind, shown in the dialog's info popover. The
+// classifier trainers write only the checkpoint + a results.json (no plots),
+// with arch-specific filenames; the detector kind falls back to the dialog's
+// built-in Ultralytics layout.
+const UPLOAD_STRUCTURE: Record<string, string> = {
+  binary_classifier: [
+    'run/',
+    '├─ <arch>_binary_best.pth',
+    '└─ <arch>_binary_results.json',
+    '',
+    '<arch> = efficientnet | insectnet.',
+    'The trainer emits no plots.',
+  ].join('\n'),
+  group_classifier: [
+    'run/',
+    '├─ group_<arch>_best.pth',
+    '└─ group_<arch>_results.json',
+    '',
+    '<arch> = efficientnet | insectnet.',
+    'The trainer emits no plots.',
+  ].join('\n'),
+}
+
 function openUpload() {
-  uploadKind.value = 'detector'
-  uploadVersionName.value = ''
-  uploadDescription.value = ''
-  uploadFile.value = null
-  uploadFolderFiles.value = []
-  uploadMode.value = 'file'
-  uploadError.value = ''
   uploadOpen.value = true
 }
 
-async function submitUpload() {
-  uploadError.value = ''
-  if (!uploadVersionName.value.trim()) {
-    uploadError.value = 'Version name is required.'
-    return
-  }
-  const form = new FormData()
-  form.append('module', 'pollinators')
-  form.append('kind', uploadKind.value)
-  form.append('version_name', uploadVersionName.value.trim())
-  form.append('description', uploadDescription.value.trim())
-
-  if (uploadMode.value === 'file') {
-    if (!uploadFile.value) {
-      uploadError.value = 'Pick a .pt or .pth file.'
-      return
-    }
-    form.append('weights_file', uploadFile.value)
-  } else {
-    if (!uploadFolderFiles.value.length) {
-      uploadError.value = 'Pick a training run folder.'
-      return
-    }
-    if (!folderPreview.value.weightsLabel) {
-      uploadError.value = 'No weights/best.pt or weights/last.pt found in the selected folder.'
-      return
-    }
-    // Browsers (Firefox at least) strip '/' from FormData filenames as a
-    // path-traversal guard, so we can't smuggle the relative path through
-    // the filename slot. Send paths as a parallel JSON array in the same
-    // order as the file entries; the backend pairs by index.
-    const paths: string[] = []
-    for (const f of uploadFolderFiles.value) {
-      const rel = (f as File & { webkitRelativePath?: string }).webkitRelativePath || f.name
-      paths.push(rel)
-      form.append('artifacts', f)
-    }
-    form.append('artifact_paths', JSON.stringify(paths))
-  }
-
-  uploadSubmitting.value = true
-  try {
-    const res = await api('/api/analysis/models/', { method: 'POST', body: form })
-    if (!res.ok) {
-      const data = await res.json().catch(() => ({}))
-      throw new Error(data.detail || `HTTP ${res.status}`)
-    }
-    uploadOpen.value = false
-    // Reload to pick up the new version + any introspected parameters.
-    loading.value = true
-    await loadFromApi()
-  } catch (e) {
-    uploadError.value = e instanceof Error ? e.message : String(e)
-  } finally {
-    uploadSubmitting.value = false
-  }
+async function onModelUploaded() {
+  // Reload to pick up the new version + any introspected parameters.
+  loading.value = true
+  await loadFromApi()
 }
 
 const previewMode = computed<string | null>(() => {
@@ -693,6 +485,8 @@ async function loadPreview(_mode: string): Promise<Track[] | null> {
       is_active: v.is_active,
       metrics: v.metrics,
       parameters: v.parameters,
+      sample_count: 0,
+      training_duration_seconds: 0,
       trained_at: new Date(now + v.trained_at_offset_seconds * 1000).toISOString(),
       artifacts: [],
     })),
@@ -738,8 +532,8 @@ function mainMetric(v: Version, metricLabel: string): number | undefined {
   if (v.metrics[metricLabel] !== undefined) return v.metrics[metricLabel]
   return Object.values(v.metrics)[0]
 }
-function formatMetric(value: number | undefined): string {
-  if (value === undefined) return '—'
+function formatMetric(value: unknown): string {
+  if (typeof value !== 'number' || Number.isNaN(value)) return '—'
   return value.toFixed(2)
 }
 function formatRelative(iso: string): string {
@@ -748,6 +542,59 @@ function formatRelative(iso: string): string {
   if (diff < 3600) return `${Math.round(diff / 60)}m ago`
   if (diff < 86400) return `${Math.round(diff / 3600)}h ago`
   return `${Math.round(diff / 86400)}d ago`
+}
+
+function formatDuration(seconds: number): string {
+  if (!seconds || seconds <= 0) return '—'
+  const m = Math.floor(seconds / 60)
+  const s = Math.round(seconds % 60)
+  if (m === 0) return `${s}s`
+  if (m < 60) return s ? `${m}m ${s}s` : `${m}m`
+  return `${Math.floor(m / 60)}h ${m % 60}m`
+}
+
+const renamingId = ref<number | null>(null)
+const renameValue = ref('')
+const renameSaving = ref(false)
+
+function startRename(v: Version) {
+  renamingId.value = v.id
+  renameValue.value = v.version_name
+}
+
+function cancelRename() {
+  renamingId.value = null
+  renameValue.value = ''
+}
+
+async function saveRename(v: Version) {
+  const name = renameValue.value.trim()
+  if (!name || name === v.version_name) {
+    cancelRename()
+    return
+  }
+  if (previewMode.value) {
+    v.version_name = name
+    cancelRename()
+    return
+  }
+  renameSaving.value = true
+  try {
+    const res = await api(`/api/analysis/models/${v.id}/`, {
+      method: 'PATCH',
+      body: JSON.stringify({ version_name: name }),
+    })
+    if (!res.ok) {
+      const data = await res.json().catch(() => ({}))
+      throw new Error(data.version_name?.[0] || data.detail || `HTTP ${res.status}`)
+    }
+    v.version_name = name
+    cancelRename()
+  } catch (e) {
+    await alert({ title: 'Rename failed', message: e instanceof Error ? e.message : String(e) })
+  } finally {
+    renameSaving.value = false
+  }
 }
 
 async function setDefault(track: Track, v: Version) {
@@ -819,6 +666,10 @@ function formatParam(value: unknown): string {
     if (value < 0.01 && value > 0) return value.toExponential(1)
     return String(value)
   }
+  if (Array.isArray(value)) return value.join(', ')
+  // Nested objects (e.g. tile_config) would stringify to "[object Object]";
+  // render compact JSON so the values are actually readable.
+  if (value !== null && typeof value === 'object') return JSON.stringify(value)
   return String(value)
 }
 </script>

@@ -1,6 +1,29 @@
+"""Main file used for local testing/research purposes of the seed module ML pipeline."""
+
 import json
 import os
+from PIL import Image
+import sys
+import django
+
+sys.path.append(
+    os.path.dirname(
+        os.path.dirname(os.path.abspath(__file__))
+    )
+)
+
+os.environ.setdefault(
+    "DJANGO_SETTINGS_MODULE",
+    "config.settings.development"
+)
+
+django.setup()
+
 from collections import defaultdict
+from django.core.files import File
+
+from apps.datasets.models import ImageAsset
+from apps.analysis.models import InferenceRun, Detection
 
 from seed_src.inference.inference import run_sahi
 from seed_src.training.train import train_species_model
@@ -28,7 +51,7 @@ TRAINING_MODE = 'finetune'  # Set to 'fresh' to train from scratch, set to 'fine
 FINETUNE_WEIGHTS = {  # Per-species checkpoint to fine-tune from, only used if TRAIN_MODE == 'finetune'
     'cat': os.path.abspath(
         os.path.join('runs', 'obb', 'cat', 'weights', 'best.pt')
-    ),  # Might need to update these paths later
+    ),
     'peh': os.path.abspath(os.path.join('runs', 'obb', 'peh', 'weights', 'best.pt')),
     'phyca': os.path.abspath(
         os.path.join('runs', 'obb', 'phyca', 'weights', 'best.pt')
@@ -163,6 +186,13 @@ results = defaultdict(
     lambda: {'total_error': 0, 'total_gt': 0, 'images': 0, 'tp': 0, 'fp': 0, 'fn': 0}
 )
 
+
+run = InferenceRun.objects.create(
+    module='seeds',
+    name='Seed inference test',
+    status='completed',
+)
+
 # -------------------------
 # LOOP
 # -------------------------
@@ -177,6 +207,10 @@ for species in SPECIES_LIST:
 
     for img_name in os.listdir(species_img_dir):
         img_path = os.path.join(species_img_dir, img_name)
+
+        with Image.open(img_path) as im:
+            img_width, img_height = im.size
+
         gt_boxes = load_ground_truth(img_path)
 
         # Run inference using the specific species model
@@ -184,12 +218,36 @@ for species in SPECIES_LIST:
 
         # Prediction image output to see what the model catches
         output_filename = f'predicted_{img_name}'
+
+        predicted_path = os.path.join(
+            'seed_src/prediction_images/',
+            f'{img_name.split(".")[0]}.png'
+        )
+
         result.export_visuals(
             export_dir='seed_src/prediction_images/',
             file_name=img_name.split('.')[0],
-            hide_labels=True,  # Removes class names from image
-            hide_conf=True,  # Removes confidence scores from image
+            hide_labels=True,
+            hide_conf=True,
         )
+
+        #Save predicted images into django media storage so that they can be displayed in frontend.
+        with open(predicted_path, 'rb') as f:
+            image_asset = ImageAsset.objects.create(
+                module='seeds',
+                purpose='inference_output',
+                width=img_width,
+                height=img_height,
+            )
+
+            image_asset.file.save(
+                os.path.basename(predicted_path),
+                File(f),
+                save=True,
+            )
+
+        run.images.add(image_asset)
+
 
         preds = []
 
@@ -222,7 +280,6 @@ for species in SPECIES_LIST:
                 ]
 
             if poly is not None:
-                # Standardize poly to a flat list of floats [x1, y1, x2, y2, x3, y3, x4, y4]
                 if isinstance(poly[0], (list, tuple)):
                     flat_poly = [float(c) for point in poly for c in point]
                 else:
@@ -230,6 +287,30 @@ for species in SPECIES_LIST:
 
                 preds.append(
                     {'poly': flat_poly[:8], 'class': 0, 'conf': float(pred.score.value)}
+                )
+
+                xs = flat_poly[0::2]
+                ys = flat_poly[1::2]
+
+                x1 = min(xs)
+                x2 = max(xs)
+                y1 = min(ys)
+                y2 = max(ys)
+
+                # In the detection save block, store flat polygon alongside bbox
+                Detection.objects.create(
+                    inference_run=run,
+                    image=image_asset,
+                    confidence=float(pred.score.value),
+                    predicted_class=species,
+                    area=(x2 - x1) * (y2 - y1),
+                    bbox={
+                        "x1": x1,
+                        "y1": y1,
+                        "x2": x2,
+                        "y2": y2,
+                    },
+                    polygon=flat_poly[:8],
                 )
 
         tp, fp, fn = calculate_tp_fp_fn(preds, gt_boxes, iou_threshold=0.3)

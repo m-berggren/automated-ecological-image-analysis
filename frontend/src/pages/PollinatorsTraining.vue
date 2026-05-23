@@ -16,9 +16,15 @@
         <!-- Step 1: Pick model -->
         <div class="px-5 py-4 border-b border-border">
           <div
-            class="text-[11px] font-semibold uppercase tracking-wider text-muted-foreground mb-3"
+            class="text-[11px] font-semibold uppercase tracking-wider text-muted-foreground mb-3 flex items-center gap-1.5"
           >
             1. Pick a model to retrain
+            <InfoPopover>
+              This page only retrains existing models, continuing from an already trained base
+              version. Initial training of a brand-new model from scratch is GPU-intensive and is
+              done using one of the Jupyter Notebook files in ml-pipelines/notebooks/ on a GPU, not
+              here.
+            </InfoPopover>
           </div>
           <div class="space-y-2">
             <label
@@ -36,10 +42,10 @@
                 <div class="flex items-baseline gap-2 flex-wrap">
                   <span class="font-medium text-sm">{{ track.label }}</span>
                   <span
-                    v-if="activeVersion(track)"
+                    v-if="displayedVersion(track)"
                     class="text-xs px-2 py-0.5 rounded-full bg-green-300 text-green-900 font-medium"
                   >
-                    {{ activeVersion(track)!.version_name }}
+                    {{ displayedVersion(track)!.version_name }}
                   </span>
                   <span
                     v-if="track.active_job"
@@ -49,10 +55,10 @@
                   </span>
                 </div>
                 <p class="text-xs text-muted-foreground mt-0.5">{{ track.description }}</p>
-                <div v-if="activeVersion(track)" class="text-xs text-muted-foreground mt-1">
+                <div v-if="displayedVersion(track)" class="text-xs text-muted-foreground mt-1">
                   {{ track.metric_label }}
                   <span class="font-mono ml-1 text-foreground">
-                    {{ formatMetric(activeMainMetric(track)) }}
+                    {{ formatMetric(displayedMainMetric(track)) }}
                   </span>
                   · {{ track.data_pool.total_samples.toLocaleString() }} samples available
                   <span v-if="track.data_pool.new_since_active > 0" class="text-primary">
@@ -71,6 +77,21 @@
           >
             2. Choose training data
           </div>
+          <!-- Base model selector: which version to fine-tune from. Defaults
+               to the active version; changing it re-scopes the pool to that
+               model's lineage. -->
+          <div class="mb-3 flex items-center gap-2">
+            <label class="text-xs text-muted-foreground">Base model</label>
+            <select
+              v-model.number="selectedSourceId"
+              class="px-2 py-1 rounded border border-green-400 bg-green-300 text-green-900 text-sm font-medium focus:outline-none focus:ring-2 focus:ring-green-400"
+            >
+              <option v-for="v in selectedTrack.versions" :key="v.id" :value="v.id">
+                {{ v.version_name
+                }}{{ v.id === selectedTrack.active_version_id ? ' (active)' : '' }}
+              </option>
+            </select>
+          </div>
           <!-- Pool summary card -->
           <div class="rounded-lg border border-border bg-muted/20 p-4 space-y-3">
             <div class="flex items-start gap-3">
@@ -79,41 +100,34 @@
                 type="checkbox"
                 class="mt-1 accent-primary disabled:opacity-50"
                 :checked="useTrainingPool"
-                :disabled="!canUseTrainingPool"
                 @change="useTrainingPool = !useTrainingPool"
               />
               <div class="flex-1 min-w-0">
-                <label
-                  for="use-training-pool"
-                  class="text-sm font-medium block"
-                  :class="!canUseTrainingPool && 'text-muted-foreground'"
-                >
+                <label for="use-training-pool" class="text-sm font-medium block">
                   {{ totalPoolSamples.toLocaleString() }} samples in pool
                 </label>
                 <div class="text-xs text-muted-foreground">
                   {{ selectedTrack.data_pool.total_samples.toLocaleString() }} from review ·
-                  {{ uploadedFiles.length }} uploaded
-                  {{ uploadedFiles.length === 1 ? 'file' : 'files' }}
-                </div>
-                <!-- Always rendered so the card height stays constant across
-                     track selections; invisible when YOLO isn't selected. -->
-                <div
-                  class="text-xs text-amber-700 mt-1"
-                  :class="{ invisible: canUseTrainingPool }"
-                  :aria-hidden="canUseTrainingPool"
-                >
-                  Not usable for YOLO — it trains on full reviewed images, not uploaded crops or the
-                  aggregated pool.
+                  <template v-if="isDetector">
+                    {{ (detectorUpload.report?.image_count ?? 0).toLocaleString() }} from uploaded
+                    dataset
+                  </template>
+                  <template v-else>
+                    {{ uploadedFiles.length }} uploaded
+                    {{ uploadedFiles.length === 1 ? 'file' : 'files' }}
+                  </template>
                 </div>
               </div>
               <button
-                class="text-xs text-primary hover:underline shrink-0"
+                class="text-xm text-primary hover:underline shrink-0"
                 @click="openReviewDrawer"
               >
-                Browse pool →
+                Browse pool ->
               </button>
             </div>
-            <div class="flex flex-wrap gap-3 text-xs text-muted-foreground">
+            <!-- min-h reserves the class-breakdown line so the card keeps the
+                 same height when the pool is empty (no class rows to render). -->
+            <div class="flex flex-wrap items-center gap-3 text-xs text-muted-foreground min-h-5">
               <span
                 v-for="row in classRows(selectedTrack)"
                 :key="row.label"
@@ -133,41 +147,137 @@
             </div>
           </div>
 
+          <!-- Detector: upload a full YOLO dataset zip (validated server-side
+               and remapped to this model's classes). Classifiers keep the
+               crop/image pool dropzone below. -->
+          <template v-if="isDetector">
+            <!-- Label + info row mirrors the classifier dropzone's Files/Folder
+                 tab row, so the drop box lands at the same height and YOLO gets
+                 the same folder-layout help. -->
+            <div class="mt-3 flex items-center gap-2 text-xs text-muted-foreground">
+              <span>YOLO dataset (.zip)</span>
+              <InfoPopover>
+                <div class="font-medium mb-1">Expected zip layout</div>
+                <pre class="whitespace-pre text-[11px] leading-snug overflow-x-auto">{{
+                  detectorDataStructure
+                }}</pre>
+                <div class="mt-1.5 text-muted-foreground">
+                  An image with no label is treated as background; a label with no image is
+                  rejected. Classes are remapped to this model.
+                </div>
+              </InfoPopover>
+            </div>
+            <UploadDropZone
+              class="mt-2"
+              v-model:active-tab="detectorUploadTab"
+              :tabs="detectorUploadTabs"
+              :has-files="detectorUpload.status === 'ok'"
+              @select="onDetectorZipSelect"
+            >
+              <template #body>
+                <UploadCloud class="w-8 h-8 mx-auto text-muted-foreground" />
+                <div class="text-sm font-medium mt-2">
+                  <template v-if="detectorUpload.status === 'uploading'">Validating…</template>
+                  <template v-else-if="detectorUpload.status === 'ok'">
+                    Dataset accepted — drop a new .zip to replace
+                  </template>
+                  <template v-else>Drop a YOLO dataset .zip, or click to browse</template>
+                </div>
+                <div class="text-xs text-muted-foreground mt-1">
+                  Requires <code>images/</code>, <code>labels/</code>, and <code>data.yaml</code>.
+                  Classes are remapped to this model.
+                </div>
+              </template>
+            </UploadDropZone>
+
+            <!-- Validation report: green summary on success, red errors on
+                 failure. Distributed across train/val/test per the splits. -->
+            <div
+              v-if="detectorUpload.status === 'ok' && detectorUpload.report"
+              class="mt-2 rounded-md border border-green-200 bg-green-50 p-3 text-xs text-green-900"
+            >
+              <div class="flex items-center justify-between">
+                <span class="font-medium">
+                  {{ detectorUpload.report.image_count.toLocaleString() }} images ({{
+                    detectorUpload.report.background_count.toLocaleString()
+                  }}
+                  background)
+                </span>
+                <button
+                  class="text-muted-foreground hover:text-red-600"
+                  @click.stop="clearDetectorUpload"
+                >
+                  Clear
+                </button>
+              </div>
+              <div class="mt-1 flex flex-wrap gap-x-3 gap-y-0.5">
+                <span v-for="(count, cls) in detectorUpload.report.class_histogram" :key="cls">
+                  {{ count.toLocaleString() }} {{ cls }}
+                </span>
+              </div>
+            </div>
+            <div
+              v-else-if="detectorUpload.status === 'error'"
+              class="mt-2 rounded-md border border-red-200 bg-red-50 p-3 text-xs text-red-900"
+            >
+              <div class="font-medium mb-1">Dataset rejected:</div>
+              <ul class="list-disc pl-4 space-y-0.5">
+                <li v-for="(err, i) in detectorUpload.errors" :key="i">{{ err }}</li>
+              </ul>
+            </div>
+          </template>
+
           <!-- Add data drop zone. Tabs swap between file/folder modes;
                the box highlights green (theme primary) when files exist. -->
-          <UploadDropZone
-            class="mt-3"
-            v-model:active-tab="trainingUploadTab"
-            :tabs="trainingUploadTabs"
-            :has-files="uploadedFiles.length > 0"
-            @select="onTrainingUploadSelect"
-          >
-            <template #body>
-              <UploadCloud class="w-8 h-8 mx-auto text-muted-foreground" />
-              <div class="text-sm font-medium mt-2">
-                <template v-if="uploadedFiles.length">
-                  {{ uploadedFiles.length }} file{{ uploadedFiles.length === 1 ? '' : 's' }} added — drop more to extend
-                </template>
-                <template v-else>
-                  Drop a folder or images here, or click to browse
-                </template>
-              </div>
-              <div class="text-xs text-muted-foreground mt-1">
-                Adds to the training pool. Accepts .jpg, .png, .zip, or a folder of images.
-              </div>
-            </template>
-          </UploadDropZone>
+          <template v-else>
+            <UploadDropZone
+              class="mt-3"
+              v-model:active-tab="trainingUploadTab"
+              :tabs="trainingUploadTabs"
+              :has-files="uploadedFiles.length > 0"
+              @select="onTrainingUploadSelect"
+            >
+              <!-- Folder layout help, shown only when the Folder tab is active. -->
+              <template #tabs-after>
+                <InfoPopover v-if="trainingUploadTab === 'folder'">
+                  <div class="font-medium mb-1">Expected folder layout</div>
+                  <pre class="whitespace-pre text-[11px] leading-snug overflow-x-auto">{{
+                    classifierDataStructure
+                  }}</pre>
+                  <div class="mt-1.5 text-muted-foreground">
+                    One subfolder per class (exact names). Images in unlisted folders are ignored.
+                  </div>
+                </InfoPopover>
+              </template>
+              <template #body>
+                <UploadCloud class="w-8 h-8 mx-auto text-muted-foreground" />
+                <div class="text-sm font-medium mt-2">
+                  <template v-if="uploadedFiles.length">
+                    {{ uploadedFiles.length }} file{{ uploadedFiles.length === 1 ? '' : 's' }} added
+                    — drop more to extend
+                  </template>
+                  <template v-else> Drop a folder or images here, or click to browse </template>
+                </div>
+                <div class="text-xs text-muted-foreground mt-1">
+                  Adds to the training pool. Accepts .jpg, .png, .zip, or a folder of images.
+                </div>
+              </template>
+            </UploadDropZone>
 
-          <!-- View / clear link row. Shown only when files exist. Clicking
-               "View files" opens a modal so the form layout doesn't shift. -->
-          <div v-if="uploadedFiles.length" class="mt-2 text-xs flex items-center justify-end gap-3">
-            <button class="text-primary hover:underline" @click.stop="filesModalOpen = true">
-              View files →
-            </button>
-            <button class="text-muted-foreground hover:text-red-600" @click.stop="clearUploads">
-              Clear
-            </button>
-          </div>
+            <!-- View / clear link row. Shown only when files exist. Clicking
+                 "View files" opens a modal so the form layout doesn't shift. -->
+            <div
+              v-if="uploadedFiles.length"
+              class="mt-2 text-xs flex items-center justify-end gap-3"
+            >
+              <button class="text-primary hover:underline" @click.stop="filesModalOpen = true">
+                View files →
+              </button>
+              <button class="text-muted-foreground hover:text-red-600" @click.stop="clearUploads">
+                Clear
+              </button>
+            </div>
+          </template>
 
           <!-- Class filter (detector and group classifier only) -->
           <div v-if="trackHasClassFilter" class="mt-4 space-y-2 min-h-14">
@@ -276,6 +386,22 @@
               </label>
             </div>
 
+            <div class="space-y-1.5">
+              <div class="flex items-center gap-1.5 text-xs font-medium text-foreground">
+                <span>Model name</span>
+                <InfoPopover>
+                  Optional. Names the resulting model version. Auto-named (e.g. detector-v3) if left
+                  blank.
+                </InfoPopover>
+              </div>
+              <input
+                v-model="modelName"
+                type="text"
+                placeholder="auto"
+                class="px-2 py-1 rounded border border-border bg-background text-sm text-foreground"
+              />
+            </div>
+
             <div v-if="trackHasImgSize" class="space-y-1.5">
               <div class="flex items-center gap-1.5 text-xs font-medium text-foreground">
                 <span>Image size</span>
@@ -343,9 +469,7 @@
             </div>
             <div class="text-xs text-muted-foreground mb-2">
               epoch {{ entry.track.active_job!.current_epoch }} /
-              {{ entry.track.active_job!.total_epochs }} · loss
-              {{ entry.track.active_job!.loss.toFixed(3) }} · val acc
-              {{ (entry.track.active_job!.val_accuracy * 100).toFixed(1) }}%
+              {{ entry.track.active_job!.total_epochs }}
             </div>
             <div class="h-1.5 rounded-full bg-muted overflow-hidden max-w-md">
               <div
@@ -358,6 +482,35 @@
                 humanDuration(jobRemaining(entry.track.active_job!))
               }}
               remaining
+            </div>
+            <!-- Live training log, collapsed by default. -->
+            <button
+              v-if="(entry.track.active_job!.activity_log?.length ?? 0) > 0"
+              class="mt-2 text-xs text-primary hover:underline"
+              @click="toggleJobLog(entry.track.id)"
+            >
+              {{ expandedJobLog.has(entry.track.id) ? 'Hide' : 'Show' }} log ({{
+                entry.track.active_job!.activity_log!.length
+              }})
+            </button>
+            <div
+              v-if="expandedJobLog.has(entry.track.id)"
+              class="mt-2 max-h-60 overflow-auto rounded border border-border bg-neutral-900 text-neutral-100 p-3 text-[11px] font-mono leading-relaxed"
+            >
+              <div
+                v-for="(line, i) in entry.track.active_job!.activity_log"
+                :key="i"
+                class="whitespace-pre-wrap"
+                :class="
+                  line.level === 'error'
+                    ? 'text-red-400'
+                    : line.level === 'warning'
+                      ? 'text-amber-300'
+                      : ''
+                "
+              >
+                {{ line.message }}
+              </div>
             </div>
           </li>
         </ul>
@@ -457,12 +610,8 @@
 
     <!-- Review drawer -->
     <Transition name="drawer">
-      <div
-        v-if="reviewDrawerOpen"
-        class="fixed inset-0 z-50 flex"
-        @click.self="reviewDrawerOpen = false"
-      >
-        <div class="flex-1 bg-black/40" />
+      <div v-if="reviewDrawerOpen" class="fixed inset-0 z-50 flex">
+        <div class="flex-1 bg-black/40" @click="reviewDrawerOpen = false" />
         <aside class="w-[640px] max-w-full bg-card border-l border-border shadow-2xl flex flex-col">
           <header
             class="px-5 py-3 border-b border-border bg-primary/[0.22] flex items-center gap-3"
@@ -472,11 +621,12 @@
               {{ selectedTrack.label }} ·
               <span class="font-mono">{{ drawerIncludedCount }}</span>
               of
-              <span class="font-mono">{{ drawerThumbnails.length }}</span>
+              <span class="font-mono">{{ drawerVisibleCount }}</span>
               included
             </span>
             <button
-              class="ml-auto text-muted-foreground hover:text-foreground"
+              class="ml-auto -mr-2 p-2 rounded text-lg leading-none text-muted-foreground hover:text-foreground hover:bg-muted"
+              aria-label="Close"
               @click="reviewDrawerOpen = false"
             >
               ✕
@@ -518,48 +668,131 @@
             </span>
           </div>
           <div class="flex-1 overflow-auto p-4">
-            <div
-              v-if="!drawerThumbnails.length"
-              class="text-xs text-muted-foreground text-center py-12"
-            >
-              No samples available for this track yet.
-            </div>
-            <div v-else class="grid grid-cols-5 gap-2">
-              <label
-                v-for="thumb in drawerThumbnails"
-                :key="thumb.id"
-                class="aspect-square rounded border flex items-center justify-center text-2xl relative overflow-hidden cursor-pointer transition-opacity"
-                :class="
-                  excludedSampleIds.has(thumb.id)
-                    ? 'opacity-30 border-border'
-                    : 'border-border hover:border-primary/40'
-                "
-                :style="{
-                  backgroundColor: excludedSampleIds.has(thumb.id) ? 'transparent' : thumb.bg,
-                }"
-                :title="thumb.label"
+            <!-- Detector: per-image table. YOLO's training unit is the image, so
+                 a thumbnail grid would be misleading (the crops on disk are
+                 per-detection, not what YOLO consumes). -->
+            <template v-if="drawerIsDetector">
+              <div
+                v-if="!detectorTableRows.length"
+                class="text-xs text-muted-foreground text-center py-12"
               >
-                <input
-                  type="checkbox"
-                  :checked="!excludedSampleIds.has(thumb.id)"
-                  class="absolute top-1.5 left-1.5 z-10 accent-primary"
-                  @change="toggleSampleInclusion(thumb.id)"
-                />
-                <span class="opacity-50">{{ thumb.glyph }}</span>
-                <div
-                  class="absolute bottom-0 left-0 right-0 h-1.5"
-                  :style="{ backgroundColor: thumb.color }"
-                />
-              </label>
-            </div>
-            <p
-              v-if="drawerThumbnails.length"
-              class="text-xs text-muted-foreground mt-4 text-center"
-            >
-              Placeholder thumbnails. Real crops will replace these once the training-pool endpoint
-              is wired.
-            </p>
+                No fully-reviewed images available for this track yet.
+              </div>
+              <table v-else class="w-full text-xs">
+                <thead class="text-muted-foreground border-b border-border">
+                  <tr>
+                    <th class="text-left font-medium py-2 px-2">Include</th>
+                    <th class="text-left font-medium py-2 px-2">Image</th>
+                    <th class="text-right font-medium py-2 px-2">Detections</th>
+                    <th class="text-left font-medium py-2 px-2">Classes</th>
+                  </tr>
+                </thead>
+                <tbody>
+                  <tr
+                    v-for="row in pagedDetectorRows"
+                    :key="row.id"
+                    class="border-b border-border/40 hover:bg-muted/40"
+                    :class="excludedSampleIds.has(String(row.id)) ? 'opacity-40' : ''"
+                  >
+                    <td class="py-1.5 px-2">
+                      <input
+                        type="checkbox"
+                        :checked="!excludedSampleIds.has(String(row.id))"
+                        class="accent-primary"
+                        @change="toggleSampleInclusion(String(row.id))"
+                      />
+                    </td>
+                    <td class="py-1.5 px-2 font-mono truncate max-w-[260px]">
+                      {{ row.image_filename }}
+                    </td>
+                    <td class="py-1.5 px-2 text-right font-mono">{{ row.detection_count }}</td>
+                    <td class="py-1.5 px-2 text-muted-foreground">
+                      {{ (row.classes || []).join(', ') }}
+                    </td>
+                  </tr>
+                </tbody>
+              </table>
+            </template>
+
+            <!-- Binary / group: thumbnail grid with real crop images when the
+                 endpoint returns crop_url, falling back to the colored glyph
+                 card (e.g. when the crop file is missing). -->
+            <template v-else>
+              <div
+                v-if="!drawerThumbnails.length"
+                class="text-xs text-muted-foreground text-center py-12"
+              >
+                No samples available for this track yet.
+              </div>
+              <div v-else class="grid grid-cols-5 gap-2">
+                <label
+                  v-for="thumb in pagedThumbnails"
+                  :key="thumb.id"
+                  class="aspect-square rounded border flex items-center justify-center text-2xl relative overflow-hidden cursor-pointer transition-opacity"
+                  :class="
+                    excludedSampleIds.has(thumb.id)
+                      ? 'opacity-30 border-border'
+                      : 'border-border hover:border-primary/40'
+                  "
+                  :style="{
+                    backgroundColor:
+                      excludedSampleIds.has(thumb.id) || thumb.cropUrl ? 'transparent' : thumb.bg,
+                  }"
+                  :title="thumb.label"
+                >
+                  <input
+                    type="checkbox"
+                    :checked="!excludedSampleIds.has(thumb.id)"
+                    class="absolute top-1.5 left-1.5 z-10 accent-primary"
+                    @change="toggleSampleInclusion(thumb.id)"
+                  />
+                  <img
+                    v-if="thumb.cropUrl"
+                    :src="thumb.cropUrl"
+                    :alt="thumb.label"
+                    class="absolute inset-0 w-full h-full object-cover"
+                    loading="lazy"
+                  />
+                  <span v-else class="opacity-50">{{ thumb.glyph }}</span>
+                  <div
+                    class="absolute bottom-0 left-0 right-0 h-1.5"
+                    :style="{ backgroundColor: thumb.color }"
+                  />
+                </label>
+              </div>
+            </template>
           </div>
+          <!-- Pager: 100 per page over the loaded pool samples. -->
+          <footer
+            v-if="drawerTotalPages > 1"
+            class="px-5 py-2 border-t border-border flex items-center justify-between text-xs"
+          >
+            <span class="text-muted-foreground">
+              {{ (drawerPage - 1) * DRAWER_PAGE_SIZE + 1 }}–{{
+                Math.min(drawerPage * DRAWER_PAGE_SIZE, drawerVisibleCount)
+              }}
+              of {{ drawerVisibleCount }}
+            </span>
+            <span class="flex items-center gap-3">
+              <button
+                class="text-primary hover:underline disabled:opacity-40 disabled:no-underline disabled:cursor-not-allowed"
+                :disabled="drawerPage <= 1"
+                @click="drawerPage--"
+              >
+                ← Prev
+              </button>
+              <span class="text-muted-foreground"
+                >Page {{ drawerPage }} / {{ drawerTotalPages }}</span
+              >
+              <button
+                class="text-primary hover:underline disabled:opacity-40 disabled:no-underline disabled:cursor-not-allowed"
+                :disabled="drawerPage >= drawerTotalPages"
+                @click="drawerPage++"
+              >
+                Next →
+              </button>
+            </span>
+          </footer>
         </aside>
       </div>
     </Transition>
@@ -584,7 +817,8 @@
               </span>
             </h3>
             <button
-              class="ml-auto text-muted-foreground hover:text-foreground"
+              class="ml-auto -mr-2 p-2 rounded text-lg leading-none text-muted-foreground hover:text-foreground hover:bg-muted"
+              aria-label="Close"
               @click="filesModalOpen = false"
             >
               ✕
@@ -621,6 +855,7 @@ import TrainingCharts from '@/components/TrainingCharts.vue'
 import UploadDropZone, { type UploadTab } from '@/components/UploadDropZone.vue'
 import { UploadCloud } from 'lucide-vue-next'
 import { api } from '@/api'
+import { confirm } from '@/lib/confirm'
 import { tracksFromVersions, type BackendModelVersion } from '@/lib/model-tracks'
 
 interface ChartData {
@@ -641,6 +876,11 @@ interface Version {
   charts?: ChartData | null
 }
 
+interface ActivityLogEntry {
+  time: string
+  message: string
+  level: string
+}
 interface ActiveJob {
   id: number
   version_name: string
@@ -651,12 +891,35 @@ interface ActiveJob {
   total_epochs: number
   loss: number
   val_accuracy: number
+  activity_log?: ActivityLogEntry[]
+}
+
+// Per-detection sample (binary, group): id is the Detection PK, crop_url
+// points at Detection.crop. Per-image sample (detector): id is the
+// ImageAsset PK and crop_url is absent; image_filename + detection_count +
+// classes drive the detector table view.
+interface PoolSample {
+  id: number | string
+  class?: string
+  crop_url?: string | null
+  image_filename?: string
+  detection_count?: number
+  classes?: string[]
+  // Binary/group crops only: persisted reviewer flag. When true the crop is
+  // greyed (excluded from classifier training) but still shown so it can be
+  // re-included.
+  exclude_from_training?: boolean
 }
 
 interface DataPool {
   total_samples: number
   new_since_active: number
   by_class: Record<string, number>
+  // Optional per-sample listing. When the pool endpoint returns it, the
+  // review drawer uses these IDs verbatim for thumbnails and exclusions.
+  // When absent, the drawer falls back to class-count placeholders so the
+  // layout still renders.
+  samples?: PoolSample[]
 }
 
 interface Track {
@@ -702,6 +965,9 @@ const loadError = ref('')
 const tracks = ref<Track[]>([])
 const history = ref<HistoryEntry[]>([])
 const selectedTrackId = ref<string | null>(null)
+// The model version to fine-tune from. Defaults to the selected track's
+// active version; user-changeable via the Base model selector.
+const selectedSourceId = ref<number | null>(null)
 const formMessage = ref('')
 const expandedHistory = ref<Set<number>>(new Set())
 const uploadedFiles = ref<Array<{ name: string; size: number }>>([])
@@ -731,14 +997,84 @@ function onTrainingUploadSelect(files: File[]) {
   for (const f of files) addFile(f)
 }
 
+interface DetectorUploadReport {
+  ok: boolean
+  token: string | null
+  image_count: number
+  background_count: number
+  class_histogram: Record<string, number>
+  errors: string[]
+}
+
+const detectorUploadTab = ref('zip')
+const detectorUploadTabs: UploadTab[] = [
+  { key: 'zip', label: 'Zip', mode: 'files', accept: '.zip' },
+]
+const detectorUpload = ref<{
+  status: 'idle' | 'uploading' | 'ok' | 'error'
+  token: string | null
+  report: DetectorUploadReport | null
+  errors: string[]
+}>({ status: 'idle', token: null, report: null, errors: [] })
+
+function clearDetectorUpload() {
+  detectorUpload.value = { status: 'idle', token: null, report: null, errors: [] }
+}
+
+async function onDetectorZipSelect(files: File[]) {
+  const file = files.find((f) => f.name.toLowerCase().endsWith('.zip'))
+  if (!file) {
+    detectorUpload.value = {
+      status: 'error',
+      token: null,
+      report: null,
+      errors: ['Please select a .zip file.'],
+    }
+    return
+  }
+  const t = selectedTrack.value
+  if (!t || selectedSourceId.value == null) {
+    detectorUpload.value = {
+      status: 'error',
+      token: null,
+      report: null,
+      errors: ['Select a base model before uploading.'],
+    }
+    return
+  }
+  detectorUpload.value = { status: 'uploading', token: null, report: null, errors: [] }
+  const form = new FormData()
+  form.append('file', file)
+  form.append('from_model_version_id', String(selectedSourceId.value))
+  try {
+    const res = await api('/api/pollinator/training/detector-dataset/', {
+      method: 'POST',
+      body: form,
+    })
+    const data = await res.json()
+    if (res.ok && data.ok) {
+      detectorUpload.value = { status: 'ok', token: data.token, report: data, errors: [] }
+    } else {
+      detectorUpload.value = {
+        status: 'error',
+        token: null,
+        report: null,
+        errors: data.errors ?? [`HTTP ${res.status}`],
+      }
+    }
+  } catch (e) {
+    detectorUpload.value = { status: 'error', token: null, report: null, errors: [String(e)] }
+  }
+}
+
 const reviewDrawerOpen = ref(false)
 const drawerFilter = ref<string>('all')
 
 const settings = reactive({
-  train_split: 80,
-  val_split: 10,
+  train_split: 70,
+  val_split: 20,
   test_split: 10,
-  epochs: 5,
+  epochs: 10,
   stratified: true,
 })
 
@@ -752,10 +1088,9 @@ const POLLINATOR_PREDICTED_CLASSES = ['bumblebee', 'fly', 'butterfly', 'other']
 const IMG_SIZE_OPTIONS = [640, 960, 1280, 1536, 2048]
 
 const imgSize = ref(640)
+const modelName = ref('')
 const classFilter = reactive(new Set<string>(POLLINATOR_PREDICTED_CLASSES))
 // User-facing toggle for the aggregated training pool (reviewed + uploads).
-// Disabled and forced off for the YOLO detector, which trains on full
-// reviewed images rather than the mixed pool.
 const useTrainingPool = ref(true)
 
 function toggleClass(cls: string) {
@@ -780,7 +1115,43 @@ onMounted(async () => {
     }
   }
   await loadFromApi()
+  // Unconditional safety re-sync (mirrors the runs page): clears any active-job
+  // card whose job is no longer running, even if the per-job poll stalled.
+  reconcileHandle = window.setInterval(() => void reconcileActiveJobs(), 4000)
 })
+
+let reconcileHandle: number | null = null
+
+// Self-healing completion check: if a track shows an active job but the server
+// reports no running/pending job for it, the run finished — clear the card and
+// refresh the model list. Runs on a fixed interval independent of per-job polls.
+async function reconcileActiveJobs() {
+  if (previewMode.value) return
+  let res: Response
+  try {
+    res = await api('/api/analysis/training/?module=pollinators')
+  } catch {
+    return
+  }
+  if (!res.ok) return
+  const jobs: BackendTrainingJobListEntry[] = await res.json()
+  const runningTrackIds = new Set<string>()
+  for (const job of jobs) {
+    if (job.status === 'running' || job.status === 'pending') {
+      const tid = API_TO_UI_TRACK[String(job.config?.track ?? '')]
+      if (tid) runningTrackIds.add(tid)
+    }
+  }
+  let finished = false
+  for (const t of tracks.value) {
+    if (t.active_job && !runningTrackIds.has(t.id)) {
+      t.active_job = null
+      stopPolling(t.id)
+      finished = true
+    }
+  }
+  if (finished) await refreshModels()
+}
 
 interface VersionMock extends Omit<Version, 'trained_at'> {
   trained_at_offset_seconds: number
@@ -834,9 +1205,6 @@ async function loadFromApi() {
       return
     }
     const versions: BackendModelVersion[] = await res.json()
-    // Per-track data_pool counts come from a future /training/pool/ endpoint.
-    // Stubbed to zero for now; sample/duration/charts come from completed
-    // TrainingJob metadata once wired.
     tracks.value = tracksFromVersions(versions).map((t) => ({
       id: t.id,
       label: t.label,
@@ -846,8 +1214,7 @@ async function loadFromApi() {
       active_version_id: t.active_version_id,
       versions: t.versions.map((v) => ({
         ...v,
-        samples: 0,
-        training_duration_seconds: 0,
+        samples: v.sample_count,
         charts: null,
       })),
       data_pool: { total_samples: 0, new_since_active: 0, by_class: {} },
@@ -857,14 +1224,47 @@ async function loadFromApi() {
       selectedTrackId.value = tracks.value[0].id
     }
 
-    // Load training jobs in parallel — populates active_job per track
-    // (resuming polling for in-flight jobs) and the history list below.
-    await loadTrainingJobs(versions)
+    await Promise.all([loadTrainingJobs(versions), loadPools()])
   } catch (e) {
     loadError.value = e instanceof Error ? e.message : String(e)
   } finally {
     loading.value = false
   }
+}
+
+interface BackendPoolResponse {
+  track: string
+  available: number
+  consumed: number
+  new_since_active: number
+  by_class: Record<string, number>
+  samples?: PoolSample[]
+}
+
+// Pool endpoint is module-scoped and per-track. Failures per-track are
+// non-fatal: the track keeps its zeroed pool and the rest of the page works.
+async function loadPools() {
+  const apiTracks: Array<'detector' | 'binary' | 'group'> = ['detector', 'binary', 'group']
+  await Promise.all(
+    apiTracks.map(async (apiTrack) => {
+      try {
+        const res = await api(`/api/pollinator/training/pool/?track=${apiTrack}`)
+        if (!res.ok) return
+        const pool: BackendPoolResponse = await res.json()
+        const uiTrackId = API_TO_UI_TRACK[apiTrack]
+        const track = tracks.value.find((t) => t.id === uiTrackId)
+        if (!track) return
+        track.data_pool = {
+          total_samples: pool.available,
+          new_since_active: pool.new_since_active,
+          by_class: pool.by_class || {},
+          samples: pool.samples,
+        }
+      } catch {
+        // ignore — track keeps its zeroed pool
+      }
+    }),
+  )
 }
 
 // API ↔ UI track id mapping (backend uses short forms, UI uses ModelKind).
@@ -882,11 +1282,23 @@ interface BackendTrainingJobListEntry {
   config: Record<string, unknown>
   resulting_model: number | null
   image_count: number
+  sample_count: number
   current_epoch: number
   total_epochs: number
+  metrics: Record<string, unknown>
+  initiated_by: string
   started_at: string
   completed_at: string | null
   error_message?: string
+}
+
+// Per-track key probe order for extracting a single headline metric out of
+// the free-form TrainingJob.metrics JSON. Detector returns nested
+// {val:{...}, test:{...}}; classifier returns are flatter (acc / macro_f1).
+const METRIC_KEYS_BY_API_TRACK: Record<string, string[]> = {
+  detector: ['val.recall', 'val.mAP50', 'test.recall', 'test.mAP50', 'recall', 'mAP50'],
+  binary: ['accuracy', 'val_acc', 'acc', 'macro_f1'],
+  group: ['accuracy', 'val_acc', 'acc', 'macro_f1'],
 }
 
 async function loadTrainingJobs(versions: BackendModelVersion[]) {
@@ -912,6 +1324,8 @@ async function loadTrainingJobs(versions: BackendModelVersion[]) {
             (new Date(job.completed_at).getTime() - new Date(job.started_at).getTime()) / 1000,
           )
         : null
+    const metricKeys = METRIC_KEYS_BY_API_TRACK[apiTrack] ?? []
+    const metric = metricKeys.length ? pickMetric(job.metrics || {}, metricKeys) : 0
     return {
       id: job.id,
       track_id: trackId,
@@ -919,14 +1333,14 @@ async function loadTrainingJobs(versions: BackendModelVersion[]) {
       version_name:
         (job.resulting_model !== null && versionNameById.get(job.resulting_model)) ||
         `${apiTrack || 'job'}-#${job.id}`,
-      samples_used: job.image_count,
+      samples_used: job.sample_count ?? job.image_count,
       epochs_total: job.total_epochs,
       started_at: job.started_at,
       duration_seconds: duration,
       status: job.status as HistoryEntry['status'],
       main_metric_label: tracks.value.find((t) => t.id === trackId)?.metric_label ?? '',
-      main_metric_value: null,
-      initiated_by: '',
+      main_metric_value: metric || null,
+      initiated_by: job.initiated_by || '',
     }
   })
 
@@ -967,16 +1381,84 @@ const trackHasClassFilter = computed(
 const trackHasImgSize = computed(() => selectedTrack.value?.id === 'detector')
 // YOLO can't consume the aggregated pool (it includes uploaded crops without
 // bbox labels). Force the checkbox off and disabled for the detector track.
-const canUseTrainingPool = computed(() => selectedTrack.value?.id !== 'detector')
-watch(canUseTrainingPool, (allowed) => {
-  if (!allowed) useTrainingPool.value = false
+const isDetector = computed(() => selectedTrack.value?.id === 'detector')
+
+// YOLO dataset .zip layout the detector upload validates, shown in the info
+// popover next to the dataset label.
+const detectorDataStructure = [
+  'dataset.zip',
+  '├─ images/ *.jpg | *.png',
+  '├─ labels/ *.txt',
+  '└─ data.yaml',
+].join('\n')
+
+// Class-folder layout the classifier trainers expect, shown in the folder-tab
+// info popover. Binary merges the four insect folders vs background; group is
+// one folder per taxon. Folder names are exact (see train_binary/train_group).
+const classifierDataStructure = computed(() => {
+  if (selectedTrack.value?.id === 'binary_classifier') {
+    return [
+      'folder/',
+      '├─ bumblebee/ *.jpg  ┐',
+      '├─ fly/              │ → insect',
+      '├─ butterfly/        │',
+      '├─ other/            ┘',
+      '└─ background/ *.jpg   → background',
+    ].join('\n')
+  }
+  return ['folder/', '├─ bumblebee/ *.jpg', '├─ fly/', '├─ butterfly/', '└─ other/'].join('\n')
 })
+// On track change, default the base model to that track's active version.
+// A staged upload is tied to a specific source model, so drop it too.
+watch(selectedTrackId, () => {
+  clearDetectorUpload()
+  const t = selectedTrack.value
+  selectedSourceId.value = t?.active_version_id ?? t?.versions[0]?.id ?? null
+})
+
+// Changing the base model re-scopes the pool to that model's lineage and
+// invalidates any uploaded dataset (validated against the prior source).
+watch(selectedSourceId, (id) => {
+  clearDetectorUpload()
+  if (id != null) loadPoolForSelected()
+})
+
+async function loadPoolForSelected() {
+  const t = selectedTrack.value
+  if (!t || selectedSourceId.value == null || previewMode.value) return
+  const apiTrack = UI_TO_API_TRACK[t.id]
+  if (!apiTrack) return
+  try {
+    const res = await api(
+      `/api/pollinator/training/pool/?track=${apiTrack}&from_model_version_id=${selectedSourceId.value}`,
+    )
+    if (!res.ok) return
+    const pool: BackendPoolResponse = await res.json()
+    t.data_pool = {
+      total_samples: pool.available,
+      new_since_active: pool.new_since_active,
+      by_class: pool.by_class || {},
+      samples: pool.samples,
+    }
+  } catch {
+    // ignore — keep the previously loaded pool
+  }
+}
 
 const splitTotal = computed(() => settings.train_split + settings.val_split + settings.test_split)
 
 const activeJobs = computed(() =>
   tracks.value.filter((t) => t.active_job !== null).map((track) => ({ track })),
 )
+
+// Which active-job logs are expanded (keyed by track id). Collapsed by default.
+const expandedJobLog = ref<Set<string>>(new Set())
+function toggleJobLog(trackId: string) {
+  const next = new Set(expandedJobLog.value)
+  if (next.has(trackId)) next.delete(trackId)
+  else next.add(trackId)
+  expandedJobLog.value = next
+}
 
 // Any pollinator track currently has a running/pending job. Used to gate the
 // Start button across tracks — concurrent training would contend for the
@@ -987,8 +1469,8 @@ const canSubmit = computed(() => {
   if (!selectedTrack.value) return false
   if (anyJobActive.value) return false
   if (splitTotal.value !== 100) return false
-  // Incremental retraining requires a source model to continue from.
-  if (selectedTrack.value.active_version_id == null) return false
+  // Incremental retraining requires a base model to continue from.
+  if (selectedSourceId.value == null) return false
   return true
 })
 
@@ -1003,27 +1485,38 @@ const submitBlockReason = computed<string>(() => {
   if (splitTotal.value !== 100) {
     return `Splits sum to ${splitTotal.value}% (must equal 100).`
   }
-  if (selectedTrack.value.active_version_id == null) {
-    return `${selectedTrack.value.label} has no active version to retrain from.`
+  if (selectedSourceId.value == null) {
+    return `${selectedTrack.value.label} has no model version to retrain from.`
   }
   return ''
 })
 
 const totalPoolSamples = computed(() => {
   if (!selectedTrack.value) return 0
-  return selectedTrack.value.data_pool.total_samples + uploadedFiles.value.length
+  const reviewed = selectedTrack.value.data_pool.total_samples
+  if (isDetector.value) return reviewed + (detectorUpload.value.report?.image_count ?? 0)
+  return reviewed + uploadedFiles.value.length
 })
 
 function activeVersion(t: Track): Version | null {
   return t.versions.find((v) => v.is_active) ?? null
 }
-function activeMainMetric(t: Track): number | undefined {
-  const v = activeVersion(t)
+// The version the step-1 card reflects: the base model chosen in step 2 for
+// the selected track, otherwise that track's active version.
+function displayedVersion(t: Track): Version | null {
+  if (t.id === selectedTrackId.value && selectedSourceId.value != null) {
+    const chosen = t.versions.find((v) => v.id === selectedSourceId.value)
+    if (chosen) return chosen
+  }
+  return activeVersion(t)
+}
+function displayedMainMetric(t: Track): number | undefined {
+  const v = displayedVersion(t)
   if (!v) return undefined
   return v.metrics[t.metric_label] ?? Object.values(v.metrics)[0]
 }
-function formatMetric(value: number | undefined): string {
-  if (value === undefined) return '—'
+function formatMetric(value: unknown): string {
+  if (typeof value !== 'number' || Number.isNaN(value)) return '—'
   return value.toFixed(2)
 }
 function classRows(t: Track) {
@@ -1100,6 +1593,7 @@ interface BackendTrainingJob {
   metrics: Record<string, unknown>
   resulting_model: number | null
   error_message?: string
+  activity_log?: ActivityLogEntry[]
 }
 
 // Read a scalar metric out of the backend's free-form metrics JSON. Shape
@@ -1140,6 +1634,7 @@ function jobToActiveJob(job: BackendTrainingJob, track: Track): ActiveJob {
     total_epochs: job.total_epochs,
     loss: pickMetric(job.metrics, ['loss', 'val.loss']),
     val_accuracy: pickMetric(job.metrics, ['acc', 'val_acc', 'macro_f1', 'val.mAP50']),
+    activity_log: job.activity_log ?? [],
   }
 }
 
@@ -1208,14 +1703,50 @@ async function refreshModels() {
   }
 }
 
-function cancelJob(track: Track) {
-  // Client-side dismissal only. Backend has no cancel endpoint yet; the
-  // job keeps running and produces a ModelVersion on completion.
-  track.active_job = null
-  stopPolling(track.id)
+async function cancelJob(track: Track) {
+  const job = track.active_job
+  if (!job) return
+  const label = job.version_name || `${track.label} training`
+  const ok = await confirm({
+    title: 'Cancel running job',
+    message:
+      `Cancel "${label}"? ` +
+      `The training worker will stop at the next epoch boundary and no new ` +
+      `model version will be created.`,
+    confirmLabel: 'Cancel job',
+    cancelLabel: 'Keep training',
+    variant: 'danger',
+  })
+  if (!ok) return
+  try {
+    const res = await api(`/api/analysis/training/${job.id}/cancel/`, {
+      method: 'POST',
+    })
+    if (!res.ok) {
+      formMessage.value = (await res.text()) || `HTTP ${res.status}`
+      return
+    }
+    track.active_job = null
+    stopPolling(track.id)
+    formMessage.value = `Cancellation sent for ${track.label}.`
+  } catch (e) {
+    formMessage.value = e instanceof Error ? e.message : String(e)
+  }
 }
 
+// Close the review drawer on Escape. A window listener avoids needing the
+// drawer to hold focus.
+function onDrawerKeydown(e: KeyboardEvent) {
+  if (e.key === 'Escape' && reviewDrawerOpen.value) {
+    e.preventDefault()
+    reviewDrawerOpen.value = false
+  }
+}
+onMounted(() => window.addEventListener('keydown', onDrawerKeydown))
+
 onUnmounted(() => {
+  window.removeEventListener('keydown', onDrawerKeydown)
+  if (reconcileHandle !== null) clearInterval(reconcileHandle)
   for (const id of pollIntervals.values()) clearInterval(id)
   pollIntervals.clear()
 })
@@ -1265,36 +1796,122 @@ function formatFileSize(bytes: number): string {
 
 function openReviewDrawer() {
   if (!selectedTrack.value) return
+  // Seed the exclusion set from the persisted per-crop flag so deselected
+  // crops come back greyed. Detector samples are images and have no per-crop
+  // flag (excluded images are filtered out of the pool upstream), so its
+  // exclusions stay session-only.
+  excludedSampleIds.clear()
+  if (selectedTrack.value.id !== 'detector') {
+    for (const s of selectedTrack.value.data_pool.samples ?? []) {
+      if (s.exclude_from_training) excludedSampleIds.add(String(s.id))
+    }
+  }
   drawerFilter.value = 'all'
+  drawerPage.value = 1
   reviewDrawerOpen.value = true
 }
 
-// Per-run exclusion set. Click a sample card in the drawer to exclude it
-// from this training job; default is everything included. Backed by a
-// reactive Set so toggles re-render the grid.
-//
-// TODO(backend): wire this into the POST payload as `detection_ids` (or
-// `image_ids` for the detector track) once /api/pollinator/training/pool/
-// exposes real per-sample IDs. Today the drawer renders placeholder
-// thumbnails with synthetic IDs, so the toggle is visual only.
+// Exclusion set keyed by the sample IDs the drawer rendered. For crop tracks
+// (binary/group) it mirrors the persisted Detection.exclude_from_training
+// flag; for the detector track it's session-only. `startTraining` forwards it
+// as `excluded_sample_ids`.
 const excludedSampleIds = reactive(new Set<string>())
+
+// Persist a crop's exclusion to the DB. Fire-and-forget: the optimistic set
+// update already greyed the tile; a failed write just won't survive reload.
+async function persistCropExclusion(detectionId: string, excluded: boolean) {
+  try {
+    await api(`/api/analysis/detections/${detectionId}/exclude-training/`, {
+      method: 'POST',
+      body: JSON.stringify({ excluded }),
+    })
+  } catch {
+    // Non-fatal; leave the optimistic UI state as-is.
+  }
+}
+
+// Mirror the exclusion onto the local sample so reopening the drawer (which
+// reseeds excludedSampleIds from data_pool.samples) reflects the change
+// without a full pool refetch.
+function setLocalSampleExcluded(id: string, excluded: boolean) {
+  const samples = selectedTrack.value?.data_pool.samples
+  if (!samples) return
+  const sample = samples.find((s) => String(s.id) === id)
+  if (sample) sample.exclude_from_training = excluded
+}
 
 function toggleSampleInclusion(id: string) {
   if (excludedSampleIds.has(id)) excludedSampleIds.delete(id)
   else excludedSampleIds.add(id)
+  if (!drawerIsDetector.value) {
+    const excluded = excludedSampleIds.has(id)
+    setLocalSampleExcluded(id, excluded)
+    void persistCropExclusion(id, excluded)
+  }
 }
 
 function selectAllSamples() {
+  if (!drawerIsDetector.value) {
+    for (const id of [...excludedSampleIds]) {
+      setLocalSampleExcluded(id, false)
+      void persistCropExclusion(id, false)
+    }
+  }
   excludedSampleIds.clear()
 }
 
 function deselectAllSamples() {
-  for (const t of drawerThumbnails.value) excludedSampleIds.add(t.id)
+  if (drawerIsDetector.value) {
+    for (const r of detectorTableRows.value) excludedSampleIds.add(String(r.id))
+  } else {
+    for (const t of drawerThumbnails.value) {
+      if (!excludedSampleIds.has(t.id)) {
+        setLocalSampleExcluded(t.id, true)
+        void persistCropExclusion(t.id, true)
+      }
+      excludedSampleIds.add(t.id)
+    }
+  }
 }
 
-const drawerIncludedCount = computed(
-  () => drawerThumbnails.value.filter((t) => !excludedSampleIds.has(t.id)).length,
+const drawerIsDetector = computed(() => selectedTrack.value?.id === 'detector')
+
+const detectorTableRows = computed<PoolSample[]>(() => {
+  if (!selectedTrack.value) return []
+  const samples = selectedTrack.value.data_pool.samples ?? []
+  const filter = drawerFilter.value
+  if (filter === 'all') return samples
+  return samples.filter((s) => (s.classes ?? []).includes(filter))
+})
+
+const drawerIncludedCount = computed(() => {
+  if (drawerIsDetector.value) {
+    return detectorTableRows.value.filter((r) => !excludedSampleIds.has(String(r.id))).length
+  }
+  return drawerThumbnails.value.filter((t) => !excludedSampleIds.has(t.id)).length
+})
+
+const drawerVisibleCount = computed(() =>
+  drawerIsDetector.value ? detectorTableRows.value.length : drawerThumbnails.value.length,
 )
+
+const DRAWER_PAGE_SIZE = 100
+const drawerPage = ref(1)
+const drawerTotalPages = computed(() =>
+  Math.max(1, Math.ceil(drawerVisibleCount.value / DRAWER_PAGE_SIZE)),
+)
+const pagedDetectorRows = computed<PoolSample[]>(() => {
+  const start = (drawerPage.value - 1) * DRAWER_PAGE_SIZE
+  return detectorTableRows.value.slice(start, start + DRAWER_PAGE_SIZE)
+})
+const pagedThumbnails = computed<DrawerThumbnail[]>(() => {
+  const start = (drawerPage.value - 1) * DRAWER_PAGE_SIZE
+  return drawerThumbnails.value.slice(start, start + DRAWER_PAGE_SIZE)
+})
+// Reset to page 1 whenever the visible set changes (filter switch, reopen).
+watch(drawerFilter, () => {
+  drawerPage.value = 1
+})
 
 const drawerClasses = computed(() => {
   if (!selectedTrack.value) return [{ value: 'all', label: 'All' }]
@@ -1308,28 +1925,44 @@ const drawerClasses = computed(() => {
   ]
 })
 
-const drawerThumbnails = computed(() => {
+interface DrawerThumbnail {
+  id: string
+  label: string
+  glyph: string
+  color: string
+  bg: string
+  cropUrl?: string | null
+}
+
+function thumbnailFor(id: string, cls: string, cropUrl?: string | null): DrawerThumbnail {
+  const color = CLASS_COLORS[cls] ?? '#9aa3ab'
+  return {
+    id,
+    label: cls,
+    glyph: CLASS_GLYPHS[cls] ?? '?',
+    color,
+    bg: color + '14',
+    cropUrl: cropUrl ?? null,
+  }
+}
+
+const drawerThumbnails = computed<DrawerThumbnail[]>(() => {
   if (!selectedTrack.value) return []
-  const balance = selectedTrack.value.data_pool.by_class
+  const pool = selectedTrack.value.data_pool
   const filter = drawerFilter.value
-  const result: Array<{
-    id: string
-    label: string
-    glyph: string
-    color: string
-    bg: string
-  }> = []
-  for (const [cls, count] of Object.entries(balance)) {
+  if (pool.samples) {
+    return pool.samples
+      .filter((s) => filter === 'all' || s.class === filter)
+      .map((s) => thumbnailFor(String(s.id), s.class ?? '?', s.crop_url))
+  }
+  // No per-sample listing yet: synthesise placeholder cards from class
+  // counts so the drawer layout still renders.
+  const result: DrawerThumbnail[] = []
+  for (const [cls, count] of Object.entries(pool.by_class)) {
     if (filter !== 'all' && filter !== cls) continue
     const visible = Math.min(count, 30)
     for (let i = 0; i < visible; i++) {
-      result.push({
-        id: `${cls}-${i}`,
-        label: cls,
-        glyph: CLASS_GLYPHS[cls] ?? '?',
-        color: CLASS_COLORS[cls] ?? '#9aa3ab',
-        bg: (CLASS_COLORS[cls] ?? '#9aa3ab') + '14',
-      })
+      result.push(thumbnailFor(`${cls}-${i}`, cls))
     }
   }
   return result
@@ -1361,8 +1994,8 @@ async function startTraining() {
     formMessage.value = `Unknown track: ${t.id}`
     return
   }
-  if (t.active_version_id == null) {
-    formMessage.value = `${t.label} has no active version to retrain from.`
+  if (selectedSourceId.value == null) {
+    formMessage.value = `${t.label} has no model version to retrain from.`
     return
   }
 
@@ -1374,7 +2007,7 @@ async function startTraining() {
         name: `${t.id} retrain (${new Date().toISOString().slice(0, 10)})`,
         config: {
           track: apiTrack,
-          from_model_version_id: t.active_version_id,
+          from_model_version_id: selectedSourceId.value,
           epochs: settings.epochs,
           train_split: settings.train_split,
           val_split: settings.val_split,
@@ -1382,6 +2015,13 @@ async function startTraining() {
           stratified: settings.stratified,
           ...(trackHasClassFilter.value ? { class_filter: Array.from(classFilter) } : {}),
           ...(trackHasImgSize.value ? { img_size: imgSize.value } : {}),
+          ...(isDetector.value && detectorUpload.value.token
+            ? { uploaded_detector_token: detectorUpload.value.token }
+            : {}),
+          ...(modelName.value.trim() ? { version_name: modelName.value.trim() } : {}),
+          ...(t.data_pool.samples && excludedSampleIds.size > 0
+            ? { excluded_sample_ids: Array.from(excludedSampleIds) }
+            : {}),
         },
       }),
     })
