@@ -27,15 +27,12 @@ def bootstrap_species_dataset(species: str) -> Path:
     species = species.lower()
     species_dir = BASE_DATA / f'{species}_model'
 
-    if species_dir.exists():
-        logger.info(f'Dataset folder for {species} already exists, skipping bootstrap')
-        return species_dir / f'{species}.yaml'
-
-    logger.info(f'Bootstrapping dataset folder for {species}')
-
+    # Always create dirs if missing
     (species_dir / 'train_sliced').mkdir(parents=True, exist_ok=True)
     (species_dir / 'val' / 'images').mkdir(parents=True, exist_ok=True)
+    (species_dir / 'val' / 'labels').mkdir(parents=True, exist_ok=True)
 
+    # Always write YAML (overwrites if exists, fixing stale relative paths)
     yaml_path = species_dir / f'{species}.yaml'
     yaml_path.write_text(
         f'path: {species_dir}\n'
@@ -46,7 +43,7 @@ def bootstrap_species_dataset(species: str) -> Path:
         f'  0: {species}\n'
     )
 
-    logger.info(f'Dataset folder created at {species_dir}')
+    logger.info(f'Dataset folder ready at {species_dir}')
     return yaml_path
 
 

@@ -11,6 +11,11 @@ from apps.datasets.models import Module
 from apps.seeds.services import bootstrap_species_dataset
 from apps.seeds.training import spawn_training_job
 
+from django.conf import settings
+
+def _base_data() -> Path:
+    return Path(settings.BASE_DIR) / 'data' / 'seed'
+
 class SeedTrainingDataUploadView(APIView):
     """POST /api/seeds/training/upload-data/ to upload training images."""
     permission_classes = [IsAuthenticated]
@@ -27,19 +32,21 @@ class SeedTrainingDataUploadView(APIView):
             return Response({'error': 'No files provided.'}, status=400)
 
         species_dir = _base_data() / f'{species.lower()}_model'
-        train_img_dir = species_dir / 'train_sliced'
+        train_img_dir = species_dir / 'train_sliced' / 'images'
         train_lbl_dir = species_dir / 'train_sliced' / 'labels'
-        val_img_dir   = species_dir / 'val_sliced'
-        val_lbl_dir   = species_dir / 'val_sliced' / 'labels'
+        val_img_dir   = species_dir / 'val' / 'images'
+        val_lbl_dir   = species_dir / 'val' / 'labels'
+
+        print(f'Upload endpoint hit — species: {species}, files: {len(files)}')
+        print(f'Saving to train_img_dir: {train_img_dir}')
+        print(f'Saving to val_img_dir: {val_img_dir}')
 
         for d in [train_img_dir, train_lbl_dir, val_img_dir, val_lbl_dir]:
             d.mkdir(parents=True, exist_ok=True)
 
-        # Separate images and labels
         image_files = [f for f in files if not f.name.endswith('.txt')]
         label_files  = {f.name.replace('.txt', ''): f for f in files if f.name.endswith('.txt')}
 
-        # Shuffle and split images
         random.shuffle(image_files)
         n_val = max(1, int(len(image_files) * val_split))
         val_imgs   = image_files[:n_val]
@@ -63,6 +70,8 @@ class SeedTrainingDataUploadView(APIView):
             if stem in label_files:
                 save_file(label_files[stem], val_lbl_dir)
 
+        print(f'Saved {len(train_imgs)} train images, {len(val_imgs)} val images')
+
         return Response({
             'train_images': len(train_imgs),
             'val_images': len(val_imgs),
@@ -71,7 +80,7 @@ class SeedTrainingDataUploadView(APIView):
                 if f.name.rsplit('.', 1)[0] in label_files
             ),
             'total': len(image_files),
-    })
+        })
 
 class SeedTrainingJobCreateView(APIView):
     """POST /api/seeds/training/start/ to bootstrap dataset folder and queue a training job."""
@@ -91,11 +100,10 @@ class SeedTrainingJobCreateView(APIView):
             return Response({'error': 'source_model_id is required for incremental training.'}, status=400)
 
         # Bootstrap dataset folder for new species
-        if training_mode == 'scratch':
-            try:
-                bootstrap_species_dataset(species)
-            except Exception as e:
-                return Response({'error': f'Failed to create dataset folder: {e}'}, status=500)
+        try:
+            bootstrap_species_dataset(species)
+        except Exception as e:
+            return Response({'error': f'Failed to create dataset folder: {e}'}, status=500)
 
         job = TrainingJob.objects.create(
             module=Module.SEEDS,

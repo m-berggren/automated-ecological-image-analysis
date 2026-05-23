@@ -17,6 +17,10 @@ def train_species_model(
     lr0: float | None = None,
     lrf: float | None = None,
 ):
+
+    print(f'train_species_model called! species={species_name} callback={progress_callback is not None}')
+    import sys
+    sys.stdout.flush()
     run_name = run_name or species_name
     weights = finetune_from if finetune_from else pretrained_weights_path
     model = YOLO(weights)

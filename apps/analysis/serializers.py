@@ -60,6 +60,7 @@ class ModelVersionSerializer(serializers.ModelSerializer):
             'is_active',
             'metrics',
             'parameters',
+            'sample_count',
             'created_at',
             'artifacts',
         )

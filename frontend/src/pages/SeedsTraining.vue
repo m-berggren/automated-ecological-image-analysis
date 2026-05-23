@@ -142,7 +142,7 @@
             </div>
             <div v-else class="space-y-2">
               <label
-                v-for="version in sortedVersions"
+                v-for="version in activeVersions"
                 :key="version.id"
                 class="flex items-start gap-3 p-3 rounded-lg border cursor-pointer transition-colors"
                 :class="
@@ -179,7 +179,7 @@
                     <span class="font-mono text-foreground">{{
                       formatMetric(version.metrics?.f1)
                     }}</span>
-                    · {{ version.samples.toLocaleString() }} samples
+                    · {{ version.sample_count.toLocaleString() }} samples
                   </div>
                 </div>
               </label>
@@ -210,9 +210,8 @@
             </template>
 
             <!-- Retrain -->
-
             <template v-else>
-              <div class="text-sm font-medium">Extending model {{ selectedVersionId }}</div>
+              <div class="text-sm font-medium">Extending model {{ allVersions.find(v => v.id === selectedVersionId)?.version_name || selectedVersionId }}</div>
 
               <div class="text-xs text-muted-foreground">
                 Upload additional samples (will be merged with existing dataset)
@@ -417,21 +416,30 @@
               <div class="flex items-center gap-2 flex-wrap">
                 <span class="font-medium text-sm">{{ job.versionName }}</span>
                 <span class="text-xs text-muted-foreground italic">{{ job.trackLabel }}</span>
+                <span
+                  class="text-xs px-2 py-0.5 rounded-full font-medium"
+                  :class="job.trainingMode === 'incremental'
+                    ? 'bg-purple-100 text-purple-800'
+                    : 'bg-blue-100 text-blue-800'"
+                >
+                  {{ job.trainingMode === 'incremental' ? 'incremental' : 'scratch' }}
+                </span>
               </div>
               <span
                 class="text-xs px-2 py-0.5 rounded-full font-medium"
                 :class="{
-                  'bg-blue-100 text-blue-800':   job.status === 'running',
+                  'bg-blue-100 text-blue-800':   job.status === 'running' && !job.isEvaluating,
+                  'bg-purple-100 text-purple-800': job.isEvaluating,
                   'bg-amber-100 text-amber-800': job.status === 'pending',
                   'bg-green-100 text-green-800': job.status === 'completed',
                   'bg-red-100 text-red-800':     job.status === 'failed',
                 }"
               >
-                {{
-                  job.status === 'running'
-                    ? `Epoch ${job.currentEpoch} / ${job.totalEpochs}`
-                    : job.status
-                }}
+                <span v-if="job.isEvaluating">Evaluating…</span>
+                <span v-else-if="job.status === 'running'">
+                  Epoch {{ job.currentEpoch }} / {{ job.totalEpochs }}
+                </span>
+                <span v-else>{{ job.status }}</span>
               </span>
             </div>
 
@@ -563,6 +571,10 @@ const sortedVersions = computed(() => {
   })
 })
 
+const activeVersions = computed(() => {
+  return allVersions.value.filter(v => v.is_active === true)
+})
+
 function onTrainingUploadSelect(files: File[]) {
   for (const f of files) addFile(f)
 }
@@ -646,7 +658,7 @@ const allVersions = computed(() =>
     (t.versions ?? []).map((v: any) => ({
       ...v,
       track_label: t.label,
-      samples: v.sample_count ?? 0
+      sample_count: v.sample_count ?? 0
     }))
   )
 )
@@ -691,6 +703,11 @@ const jobRows = computed(() => {
       id: j.id,
       versionName: j.version_name,
       trackLabel: t.label,
+      isEvaluating: j.status === 'running' && (
+        ((j.current_epoch ?? 0) >= (j.total_epochs ?? 90) && (j.total_epochs ?? 0) > 0)
+        || (j.current_epoch === 0 && j.total_epochs === 0 && j.hasStartedTraining)
+      ),
+      trainingMode: j.config?.training_mode ?? 'scratch',
       status: j.status ?? 'pending',
       currentEpoch: j.current_epoch ?? 0,
       totalEpochs: j.total_epochs ?? 90,
@@ -716,6 +733,7 @@ const jobRows = computed(() => {
       id: h.id,
       versionName: h.version_name,
       trackLabel: h.track_label,
+      trainingMode: h.training_mode ?? 'scratch',
       status: h.status,
       currentEpoch: h.epochs_total,
       totalEpochs: h.epochs_total,
@@ -766,6 +784,7 @@ function startPolling(jobId: number) {
             current_epoch: job.current_epoch ?? 0,
             total_epochs: job.total_epochs ?? 90,
             status: job.status,
+            hasStartedTraining: t.active_job.hasStartedTraining || (job.current_epoch ?? 0) > 0,
             errorMessage: job.error_message ?? null,
             completed_at: job.completed_at ?? null,
           }
@@ -780,7 +799,9 @@ function startPolling(jobId: number) {
             ? 'Training complete!'
             : `Training failed: ${job.error_message}`
         // Only reload after job finishes to get the new ModelVersion
-        await loadFromApi()
+        setTimeout(async () => {
+          await loadFromApi()
+        }, 2000)
       }
     } catch {}
   }, 3000)
@@ -839,7 +860,7 @@ async function loadFromApi() {
     const species = (v.parameters?.species ?? v.version_name.split('-')[0]).toLowerCase()
     const track = speciesMap.get(species)
     if (track) {
-      track.versions.push({ ...v, samples: v.sample_count ?? 0 })
+      track.versions.push({ ...v, sample_count: v.sample_count ?? 0 })
     }
   }
 
@@ -848,17 +869,27 @@ async function loadFromApi() {
   const jobsRes = await api('/api/analysis/training/?module=seeds')
   if (jobsRes.ok) {
     const jobs: any[] = await jobsRes.json()
-    const activeJobs = jobs.filter(
-      (j) => j.status === 'running' || j.status === 'pending'
-    )
 
-    for (const job of activeJobs) {
-      const species = job.config?.species?.toLowerCase()
+    const completedJobs = jobs.filter(j => j.status === 'completed').sort((a, b) => a.id - b.id)
+    const speciesCount = new Map<string, number>()
+    const versionNumbers = new Map<number, number>()
+
+    for (const j of completedJobs) {
+      const species = (j.config?.species ?? '').toLowerCase()
+      const n = (speciesCount.get(species) ?? 0) + 1
+      speciesCount.set(species, n)
+      versionNumbers.set(j.id, n)
+    }
+
+    // Active jobs
+    for (const job of jobs.filter((j) => j.status === 'running' || j.status === 'pending')) {
+      const species = (job.config?.species ?? '').toLowerCase()
       const track = tracks.value.find((t) => t.id.toLowerCase() === species)
       if (track) {
+        const nextNum = (speciesCount.get(species) ?? 0) + 1
         track.active_job = {
           id: job.id,
-          version_name: `${species.toUpperCase()}-${String(job.id).padStart(2, '0')}`,
+          version_name: `${species.toUpperCase()}-${String(nextNum).padStart(2, '0')}`,
           started_at: job.started_at,
           current_epoch: job.current_epoch,
           total_epochs: job.total_epochs,
@@ -866,29 +897,33 @@ async function loadFromApi() {
           loss: job.metrics?.loss ?? 0,
           errorMessage: job.error_message ?? null,
           completed_at: job.completed_at ?? null,
+          config: job.config,
         }
-        startPolling(job.id)
+        if (!pollHandle) startPolling(job.id)
       }
     }
 
+    // History (completed + failed), newest first
     trainingHistory.value = jobs
       .filter((j) => j.status === 'completed' || j.status === 'failed')
-      .map((j) => ({
-        id: j.id,
-        version_name: `${(j.config?.species ?? '').toUpperCase()}-${String(j.id).padStart(2, '0')}`,
-        track_label: j.config?.species?.toUpperCase() ?? '?',
-        status: j.status,
-        epochs_total: j.total_epochs,
-        duration_seconds:
-          j.completed_at && j.started_at
-            ? Math.round(
-                (new Date(j.completed_at).getTime() -
-                  new Date(j.started_at).getTime()) /
-                  1000
-              )
-            : null,
-        error_message: j.error_message || null,
-      }))
+      .sort((a, b) => b.id - a.id)
+      .map((j) => {
+        const species = (j.config?.species ?? '').toLowerCase()
+        const versionNum = versionNumbers.get(j.id)
+        return {
+          id: j.id,
+          version_name: `${species.toUpperCase()}-${String(versionNum).padStart(2, '0')}`,
+          track_label: species.toUpperCase() || '?',
+          status: j.status,
+          training_mode: j.config?.training_mode ?? 'scratch',
+          epochs_total: j.total_epochs,
+          duration_seconds:
+            j.completed_at && j.started_at
+              ? Math.round((new Date(j.completed_at).getTime() - new Date(j.started_at).getTime()) / 1000)
+              : null,
+          error_message: j.error_message || null,
+        }
+      })
   }
 }
 
@@ -901,44 +936,35 @@ async function startTraining() {
   }
 
   const payload =
-  trainingMode.value === 'scratch'
-    ? {
-        species: selectedSeed.value!.toLowerCase(),
-        training_mode: 'scratch',
-        epochs: settings.epochs,
-        val_split: settings.val_split / 100,
-      }
-    : {
-        species: allVersions.value
-          .find((v) => v.id === selectedVersionId.value)
-          ?.track_label.toLowerCase(),
-        training_mode: 'incremental',
-        epochs: settings.epochs,
-        source_model_id: selectedVersionId.value,
-      }
+    trainingMode.value === 'scratch'
+      ? {
+          species: selectedSeed.value!.toLowerCase(),
+          training_mode: 'scratch',
+          epochs: settings.epochs,
+          val_split: settings.val_split / 100,
+        }
+      : {
+          species: allVersions.value.find((v) => v.id === selectedVersionId.value)?.track_label.toLowerCase(),
+          training_mode: 'incremental',
+          epochs: settings.epochs,
+          source_model_id: selectedVersionId.value,
+        }
 
   try {
-    // 1. Upload training files (for scratch mode only)
     if (trainingMode.value === 'scratch' && actualFiles.value.length) {
       formMessage.value = 'Uploading training data...'
       const formData = new FormData()
       formData.append('species', payload.species!)
       formData.append('val_split', String(settings.val_split / 100))
+      for (const file of actualFiles.value) formData.append('files', file)
 
-      for (const file of actualFiles.value) {
-        formData.append('files', file)
-      }
-      const uploadRes = await api('/api/seeds/training/upload-data/', {
-        method: 'POST',
-        body: formData,
-      })
+      const uploadRes = await api('/api/seeds/training/upload-data/', { method: 'POST', body: formData })
       if (!uploadRes.ok) {
         formMessage.value = (await uploadRes.text()) || 'Upload failed'
         return
       }
     }
 
-    // 2. Start training
     formMessage.value = 'Starting training job...'
     const res = await api('/api/seeds/training/start/', {
       method: 'POST',
@@ -949,32 +975,13 @@ async function startTraining() {
       return
     }
     const job = await res.json()
+
+    // Reload to get the correct version number from the full jobs list
+    await loadFromApi()
     formMessage.value = `Job #${job.id} started — training ${(payload.species ?? '').toUpperCase()}`
-
-    const species = payload.species?.toLowerCase()
-    const track = tracks.value.find((t) => t.id.toLowerCase() === species)
-    if (track) {
-      track.active_job = {
-        id: job.id,
-        version_name: `${species.toUpperCase()}-${String(job.id).padStart(2, '0')}`,
-        started_at: job.started_at ?? new Date().toISOString(),
-        current_epoch: 0,
-        total_epochs: 90,
-        status: 'pending',
-        loss: 0,
-        errorMessage: null,
-      }
-    }
-
-    startPolling(job.id)
     currentPage.value = 1
   } catch (e) {
     formMessage.value = e instanceof Error ? e.message : String(e)
   }
 }
-
-onUnmounted(() => {
-  clearInterval(ticker)
-  if (pollHandle) clearInterval(pollHandle)
-})
 </script>

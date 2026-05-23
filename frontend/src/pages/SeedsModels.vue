@@ -150,6 +150,17 @@
                       </template>
                       · {{ v.sample_count.toLocaleString() }} samples
                     </div>
+                    <div class="mt-3 pt-3 border-t border-border">
+                      <button
+                        class="text-[11px] font-semibold uppercase tracking-wider text-muted-foreground hover:text-foreground"
+                        @click="toggleCharts(v.id)"
+                      >
+                        {{ chartsExpanded.has(v.id) ? '▾' : '▸' }} Charts
+                      </button>
+                      <div v-if="chartsExpanded.has(v.id)" class="mt-3">
+                        <TrainingCharts :charts="v.charts ?? null" />
+                      </div>
+                    </div>
                   </td>
                 </tr>
               </template>
@@ -250,6 +261,7 @@ async function loadFromApi() {
       return
     }
     const versions: any[] = await res.json()
+    console.log('versions from API:', versions.map(v => ({ id: v.id, name: v.version_name, active: v.is_active })))
 
     const speciesMap = new Map<string, Track>()
 
