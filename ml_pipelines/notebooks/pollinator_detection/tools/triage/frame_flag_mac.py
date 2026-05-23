@@ -352,6 +352,7 @@ def render_image(
     max_w,
     max_h,
     cache,
+    is_last=False,
 ):
     canvas_w, canvas_h = max_w, max_h
     top_h = 74
@@ -390,14 +391,17 @@ def render_image(
     )
 
     folder_txt = f'[{folder_idx + 1}/{folder_total}] {folder}'
-    image_txt = f'[{img_idx + 1}/{img_total}] {path.name}'
+    last_tag = '  ★ LAST IMAGE ★' if is_last else ''
+    image_txt = f'[{img_idx + 1}/{img_total}] {path.name}{last_tag}'
 
     status = 'PAUSED' if paused else 'PLAYING'
     if marked:
         status += ' | MARKED'
 
-    put_text(canvas, folder_txt, (12, 26), 0.50, (220, 220, 220), 1)
-    put_text(canvas, image_txt, (12, 55), 0.58, (245, 245, 245), 1)
+    folder_color = (80, 220, 255) if is_last else (220, 220, 220)
+    image_color  = (80, 220, 255) if is_last else (245, 245, 245)
+    put_text(canvas, folder_txt, (12, 26), 0.50, folder_color, 1)
+    put_text(canvas, image_txt,  (12, 55), 0.58, image_color,  1)
 
     put_text(
         canvas,
@@ -407,6 +411,21 @@ def render_image(
         (60, 220, 255) if marked else (160, 220, 160),
         2,
     )
+
+    # Banner at the bottom of the top bar when on the last image
+    if is_last:
+        banner = '── END OF FOLDER  |  n = next folder    b = prev folder    Esc = quit ──'
+        put_text(
+            canvas, banner,
+            (canvas_w // 2 - 370, top_h - 6),
+            0.45, (255, 255, 255), 1,
+        )
+        cv2.rectangle(canvas, (0, top_h - 18), (canvas_w, top_h - 1), (0, 130, 200), -1)
+        put_text(
+            canvas, banner,
+            (canvas_w // 2 - 370, top_h - 5),
+            0.45, (255, 255, 255), 1,
+        )
 
     help_txt = (
         'm=mark  u=unmark  space/h=play/pause  a/d=prev/next  '
@@ -466,6 +485,8 @@ def show_folder(
     print('=====================================')
 
     while True:
+        is_last = (idx == len(imgs) - 1)
+
         if dirty:
             frame = render_image(
                 imgs[idx],
@@ -479,6 +500,7 @@ def show_folder(
                 args.max_width,
                 args.max_height,
                 cache,
+                is_last=is_last,
             )
             cv2.imshow(WINDOW, frame)
             dirty = False
@@ -546,9 +568,15 @@ def show_folder(
             dirty = True
 
         if not paused and time.monotonic() >= next_deadline:
-            idx = (idx + 1) % len(imgs)
-            next_deadline = time.monotonic() + max(0.01, args.interval)
-            dirty = True
+            if is_last:
+                # End of folder reached during playback — pause and show banner
+                paused = True
+                dirty = True
+                print(f'End of folder: {folder}  (n = next folder)')
+            else:
+                idx += 1
+                next_deadline = time.monotonic() + max(0.01, args.interval)
+                dirty = True
 
 
 def unique_folder_name(parent, name):
@@ -623,12 +651,17 @@ def export_marked_images_with_context(
                 if src_key in copied_sources:
                     continue
 
-                dst = target_folder / src.name
+                if src_key in marked_paths:
+                    dst_name = src.stem + '_MARKED' + src.suffix
+                else:
+                    dst_name = src.name
+
+                dst = target_folder / dst_name
 
                 if dst.exists():
                     duplicate_folder = unique_folder_name(target_folder, '_duplicates')
                     duplicate_folder.mkdir(parents=True, exist_ok=True)
-                    dst = duplicate_folder / src.name
+                    dst = duplicate_folder / dst_name
 
                 shutil.copy2(src, dst)
                 copied_sources.add(src_key)
