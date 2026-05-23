@@ -6,9 +6,11 @@ import logging
 import os
 import tempfile
 import threading
+from io import BytesIO
 from pathlib import Path
 
 from django.core.files import File
+from django.core.files.base import ContentFile
 from django.utils import timezone
 from PIL import Image, ImageDraw
 
@@ -276,14 +278,20 @@ def generate_export_bundle(run_id: int):
                 base_name = os.path.basename(img.file.name)
                 export_name = f'export_{base_name}'
 
-                with tempfile.NamedTemporaryFile(suffix='.jpg') as tmp:
-                    pil_img.save(tmp.name, format='JPEG', quality=90)
+                buffer = BytesIO()
+                pil_img.save(buffer, format='JPEG', quality=90)
+                buffer.seek(0)
 
-                    export_asset = ImageAsset.objects.create(
-                        module='seeds', purpose='export', upload=run.upload
-                    )
-                    with open(tmp.name, 'rb') as f:
-                        export_asset.file.save(export_name, File(f))
+                export_asset = ImageAsset.objects.create(
+                    module='seeds',
+                    purpose='export',
+                    upload=run.upload,
+                )
+
+                export_asset.file.save(
+                    export_name,
+                    ContentFile(buffer.read()),
+                )
 
         final_active = meta.get('manual_active_count', final_active_boxes)
 
