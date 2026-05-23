@@ -1,40 +1,89 @@
 <template>
-  <PageHeader :title="headerTitle" subtitle="Select a healthy active seed as the reference seed" />
-  <SeedsStepper current="set-reference" :runId="run?.id" />
+  <PageHeader :title="headerTitle" subtitle="Review seed status classifications and calculations" />
 
-  <!-- Loading -->
+  <SeedsStepper current="review" :runId="run?.id" />
+
   <div v-if="loading" class="flex-1 flex items-center justify-center text-sm text-muted-foreground">
-    Loading...
+    Loading classification results...
   </div>
 
-  <!-- Error -->
   <div v-else-if="loadError" class="flex-1 flex items-center justify-center text-sm text-red-600">
     {{ loadError }}
   </div>
 
-  <!-- Main layout -->
-  <div v-else-if="images.length" class="flex-1 flex flex-col min-h-0 bg-background">
-    <!-- Instructions -->
-    <section class="border-b border-border bg-surface px-6 py-5">
-      <div class="w-full flex items-center justify-between gap-4">
+  <div v-else-if="currentImage" class="flex-1 flex flex-col min-h-0 bg-background">
+    <section class="border-b border-border bg-surface px-6 py-4">
+      <div
+        class="max-w-7xl mx-auto flex flex-col lg:flex-row lg:items-center lg:justify-between gap-6"
+      >
         <div>
-          <h2 class="text-lg font-semibold">Select a reference seed</h2>
-
-          <p class="mt-2 text-sm text-muted-foreground leading-relaxed">
-            Click on one healthy active seed in the image. This seed will be used as the reference
-            example for determining which detected seeds are active versus aborted.
+          <h2 class="text-base font-semibold flex items-center gap-2">
+            Image Review
+            <span class="text-sm font-normal text-muted-foreground">
+              ({{ currentImageIndex + 1 }} of {{ totalImagesCount }})
+            </span>
+          </h2>
+          <p class="text-xs text-muted-foreground mt-0.5 font-mono">
+            {{ currentImage.filename }}
           </p>
+        </div>
 
-          <div class="mt-4 flex flex-wrap items-center gap-3 text-sm">
-            <div class="px-3 py-1 rounded-full bg-muted text-muted-foreground">
-              {{ currentDetections.length }} detected seeds
+        <div
+          class="grid grid-cols-2 md:grid-cols-3 gap-4 bg-muted/20 p-3 rounded-xl border border-border flex-1 max-w-2xl"
+        >
+          <div class="px-2 border-r border-border/60">
+            <span
+              class="text-[10px] text-muted-foreground block font-bold uppercase tracking-wider"
+            >
+              Mean Confidence
+            </span>
+            <div class="text-base font-mono font-bold text-foreground mt-0.5">
+              {{ (initialOverallConfidenceScore * 100).toFixed(1) }}%
+            </div>
+          </div>
+
+          <div class="px-2 border-r border-border/60">
+            <span
+              class="text-[10px] text-muted-foreground block font-bold uppercase tracking-wider"
+            >
+              Approximate Range
+            </span>
+            <div class="text-base font-mono font-bold text-foreground mt-0.5">
+              {{ initialSeedRangeMin }} – {{ initialSeedRangeMax }}
+              <span class="text-[10px] text-muted-foreground font-normal">seeds</span>
+            </div>
+          </div>
+
+          <div
+            class="px-2 col-span-2 md:col-span-1 flex items-center justify-between gap-2 bg-background/50 p-1.5 rounded-lg border border-border/40"
+          >
+            <div>
+              <span
+                class="text-[10px] text-muted-foreground block font-medium uppercase tracking-tight"
+              >
+                Active Seeds
+              </span>
+              <div class="text-xs text-muted-foreground font-mono">
+                <span class="font-bold text-foreground">{{ initialAutomatedActiveCount }}</span>
+              </div>
             </div>
 
-            <div
-              v-if="selectedReference"
-              class="px-3 py-1 rounded-full bg-green-100 text-green-700"
-            >
-              Reference seed selected
+            <div class="flex items-center gap-1">
+              <input
+                id="manual-count"
+                type="number"
+                min="0"
+                v-model.number="manualActiveCount"
+                class="w-14 px-1 py-1 rounded border border-border bg-background text-xs text-center font-bold focus:outline-none focus:ring-2 focus:ring-primary"
+              />
+              <button
+                type="button"
+                class="px-2 py-1 bg-primary text-primary-foreground rounded text-[10px] font-medium hover:bg-primary/90 transition-colors shadow-sm"
+                @click="saveCurrentPageCount"
+                :disabled="savingCount"
+              >
+                {{ savingCount ? '...' : 'Save' }}
+              </button>
             </div>
           </div>
         </div>
@@ -44,15 +93,15 @@
             type="button"
             class="p-2 rounded-md border border-border bg-surface hover:bg-muted transition-colors disabled:opacity-40 disabled:cursor-not-allowed text-xs font-medium"
             :disabled="currentImageIndex === 0"
-            @click="currentImageIndex--"
+            @click="navigateImage(-1)"
           >
             ← Prev
           </button>
           <button
             type="button"
             class="p-2 rounded-md border border-border bg-surface hover:bg-muted transition-colors disabled:opacity-40 disabled:cursor-not-allowed text-xs font-medium"
-            :disabled="currentImageIndex === images.length - 1"
-            @click="currentImageIndex++"
+            :disabled="currentImageIndex === totalImagesCount - 1"
+            @click="navigateImage(1)"
           >
             Next →
           </button>
@@ -60,111 +109,110 @@
       </div>
     </section>
 
-    <!-- IMAGE AREA -->
-    <section class="flex-1 overflow-auto p-6">
-      <div class="mx-auto max-w-5xl">
-        <!-- IMAGE WRAPPER -->
-         <div class="relative w-full overflow-hidden rounded-2xl border border-border bg-black/5 shadow-sm">
+    <div
+      class="bg-muted/20 px-6 py-2 border-b border-border flex items-center gap-4 text-xs font-medium"
+    >
+      <span class="text-muted-foreground">Legend:</span>
+      <span class="flex items-center gap-1.5">
+        <span class="w-3 h-3 rounded-full bg-green-500 block border border-green-600"></span> Active
+        Seed
+      </span>
+      <span class="flex items-center gap-1.5">
+        <span class="w-3 h-3 rounded-full bg-red-500 block border border-red-600"></span> Aborted /
+        Inactive Seed
+      </span>
+      <span class="text-muted-foreground font-normal italic ml-auto hidden sm:inline">
+        Click on a bounding box to toggle its status manually.
+      </span>
+    </div>
 
-          <div class="absolute top-4 right-4 z-10 flex items-center bg-surface border border-border rounded-lg shadow-md overflow-hidden text-sm">
-            <button @click="zoomOut" class="px-3 py-2 hover:bg-muted font-bold text-lg leading-none">−</button>
-            <button @click="resetZoom" class="px-3 py-2 hover:bg-muted border-x border-border font-medium">{{ Math.round(zoom * 100) }}%</button>
-            <button @click="zoomIn" class="px-3 py-2 hover:bg-muted font-bold text-lg leading-none">+</button>
-          </div>
+    <section class="flex-1 overflow-auto p-6">
+      <div
+        class="relative w-full overflow-hidden rounded-2xl border border-border bg-black/5 shadow-sm"
+      >
         <div
-          class="relative w-full h-[65vh] overflow-auto""
+          class="absolute top-4 right-4 z-10 flex items-center bg-surface border border-border rounded-lg shadow-md overflow-hidden text-sm"
         >
+          <button @click="zoomOut" class="px-3 py-2 hover:bg-muted font-bold text-lg leading-none">
+            −
+          </button>
+          <button
+            @click="resetZoom"
+            class="px-3 py-2 hover:bg-muted border-x border-border font-medium"
+          >
+            {{ Math.round(zoom * 100) }}%
+          </button>
+          <button @click="zoomIn" class="px-3 py-2 hover:bg-muted font-bold text-lg leading-none">
+            +
+          </button>
+        </div>
+        <div class="relative w-full h-[65vh] overflow-auto">
           <div
             class="relative w-full transition-transform duration-200"
             :style="{ transform: `scale(${zoom})`, transformOrigin: 'top left' }"
           >
+            <img
+              :src="currentImage.image_url"
+              :alt="currentImage.filename"
+              class="w-full h-auto select-none block"
+              draggable="false"
+            />
+
             <svg
-              ref="svgRef"
-              class="absolute inset-0 w-full h-full"
               :viewBox="`0 0 ${currentImage.width} ${currentImage.height}`"
               preserveAspectRatio="none"
-              style="pointer-events: none"
+              class="absolute inset-0 w-full h-full pointer-events-none select-none"
             >
               <polygon
                 v-for="detection in currentDetections"
                 :key="detection.id"
-                :points="polyPoints(detection)"
-                fill="transparent"
-                :stroke="selectedReferenceId === detection.id ? '#22c55e' : '#60a5fa'"
-                :stroke-width="selectedReferenceId === detection.id ? 12 : 2"
-                style="pointer-events: all; cursor: pointer"
-                :class="selectedReferenceId === detection.id ? 'ring-highlight' : ''"
-                @click="selectReference(detection.id)"
+                :points="getPolygonPoints(detection)"
+                stroke-width="12"
+                class="pointer-events-auto cursor-pointer transition-all duration-150 fill-transparent hover:fill-current/10"
+                :class="
+                  isActiveSeed(detection)
+                    ? 'stroke-green-500 text-green-500 hover:stroke-green-400'
+                    : 'stroke-red-500 text-red-500 hover:stroke-red-400'
+                "
+                @click="toggleSeedStatus(detection.id)"
+                :title="`Confidence: ${(detection.confidence * 100).toFixed(1)}%`"
               />
             </svg>
-
-            <img
-              :src="currentImage.image_url"
-              :alt="currentImage.filename"
-              class="w-full h-auto block select-none"
-              draggable="false"
-            />
           </div>
         </div>
       </div>
-      </div>
     </section>
 
-    <!-- Footer -->
-    <footer class="border-t border-border bg-surface px-6 py-4">
-      <div class="flex items-center justify-between gap-4">
-        <!-- Left -->
+    <footer class="border-t border-border bg-surface px-6 py-4 mt-auto">
+      <div class="max-w-7xl mx-auto flex items-center justify-between gap-4">
         <div class="text-sm text-muted-foreground">
-          <template v-if="selectedReference">
-            Selected reference seed:
-            <span class="font-medium text-foreground"> #{{ selectedReference.id }} </span>
-          </template>
-
-          <template v-else> Select one healthy seed to continue. </template>
+          Review metrics can be exported as unified datasets in the final step.
         </div>
 
-        <!-- Right -->
         <div class="flex items-center gap-3">
           <button
-            v-if="selectedReference"
             type="button"
-            class="px-4 py-2 rounded-md border border-border hover:bg-muted transition-colors"
-            @click="clearReference"
+            class="px-4 py-2 rounded-md border border-border hover:bg-muted text-sm font-medium transition-colors"
+            @click="goBack"
           >
-            Reselect
+            Back
           </button>
 
           <button
             type="button"
-            class="px-4 py-2 rounded-md bg-primary text-primary-foreground hover:bg-primary/90 disabled:opacity-50 disabled:cursor-not-allowed"
-            :disabled="!allImagesHaveReference"
-            @click="proceed"
+            class="px-5 py-2 rounded-md bg-primary text-primary-foreground hover:bg-primary/90 text-sm font-medium transition-colors shadow-sm"
+            @click="navigateToExport"
           >
-            {{ isCalculating ? 'Calculating...' : 'Continue' }}
+            Export
           </button>
         </div>
       </div>
     </footer>
-    <Transition name="toast">
-      <div
-        v-if="toast"
-        class="fixed bottom-6 left-1/2 -translate-x-1/2 z-50 px-5 py-3 rounded-xl shadow-lg text-sm font-medium text-white"
-        :style="
-          toast.type === 'success'
-            ? 'background-color: hsl(128, 45%, 24%)'
-            : 'background-color: hsl(0, 72%, 51%)'
-        "
-      >
-        {{ toast.message }}
-      </div>
-    </Transition>
   </div>
 </template>
 
 <script setup lang="ts">
-// Replace your script setup with this
-
-import { computed, onMounted, ref } from 'vue'
+import { computed, onMounted, ref, watch } from 'vue'
 import { useRoute, useRouter } from 'vue-router'
 import PageHeader from '@/components/PageHeader.vue'
 import SeedsStepper from '@/components/SeedsStepper.vue'
@@ -173,9 +221,12 @@ import { api } from '@/api'
 interface Detection {
   id: number
   confidence: number
-  class: string
+  predicted_class: string
+  area: number
+  reviewer_status: 'unreviewed' | 'confirmed' | 'rejected'
+  source_image_filename: string
   polygon?: number[]
-  bbox?: { x1: number; y1: number; x2: number; y2: number }
+  bbox?: any
   poly?: number[]
 }
 
@@ -183,15 +234,20 @@ interface ReviewImage {
   id: number
   filename: string
   image_url: string
-  width: number
-  height: number
+}
+
+interface ClassificationBundle {
+  run: { id: number; name: string; status: string; detection_count: number }
+  images_list: ReviewImage[]
   detections: Detection[]
 }
 
-interface ReviewBundle {
-  run: { id: number; name: string; status: string }
-  images: ReviewImage[]
-  reference_seeds: Record<string, number> // image_id -> detection_id
+interface BaselineMetrics {
+  automatedActiveCount: number
+  overallConfidenceScore: number
+  seedRangeMin: number
+  seedRangeMax: number
+  savedManualCount: number | null
 }
 
 const route = useRoute()
@@ -200,39 +256,70 @@ const router = useRouter()
 const loading = ref(true)
 const loadError = ref('')
 const zoom = ref(1)
+const savingCount = ref(false)
 
-const run = ref<ReviewBundle['run'] | null>(null)
-const images = ref<ReviewImage[]>([])
+const run = ref<ClassificationBundle['run'] | null>(null)
+const imagesList = ref<ReviewImage[]>([])
 const currentImageIndex = ref(0)
-const isCalculating = ref(false)
 
-// Per-image reference map: imageId (string) -> detectionId
-const referenceMap = ref<Record<string, number>>({})
+const imageDetectionsMap = ref<Record<string, Detection[]>>({})
+const initialMetricsLookupMap = ref<Record<string, BaselineMetrics>>({})
+const manualActiveCount = ref<number>(0)
+const initialAutomatedActiveCount = ref<number>(0)
+const initialOverallConfidenceScore = ref<number>(0)
+const initialSeedRangeMin = ref<number>(0)
+const initialSeedRangeMax = ref<number>(0)
 
-// Toast state
-const toast = ref<{ message: string; type: 'success' | 'error' } | null>(null)
-let toastTimer: ReturnType<typeof setTimeout> | null = null
+const isPreviewMode = computed(() => {
+  const hasRunId = route.params.id && route.params.id !== 'undefined'
+  if (hasRunId) return false
 
-const currentImage = computed(() => images.value[currentImageIndex.value] ?? null)
-const currentDetections = computed(() => currentImage.value?.detections ?? [])
+  return route.query.preview === 'default' || import.meta.env.DEV
+})
 
-const currentImageId = computed(() => currentImage.value?.id?.toString() ?? null)
+const currentImage = computed<ReviewImage | null>(() => {
+  return imagesList.value[currentImageIndex.value] || null
+})
 
-// The selected detection id for the currently visible image
-const selectedReferenceId = computed(() =>
-  currentImageId.value ? (referenceMap.value[currentImageId.value] ?? null) : null,
-)
-
-const selectedReference = computed(
-  () => currentDetections.value.find((d) => d.id === selectedReferenceId.value) ?? null,
-)
-
-const allImagesHaveReference = computed(() =>
-  images.value.every((img) => referenceMap.value[img.id.toString()] != null),
-)
+const totalImagesCount = computed(() => imagesList.value.length)
 
 const headerTitle = computed(() =>
-  run.value ? `Seed Reference Review · ${run.value.name}` : 'Seed Reference Review',
+  run.value
+    ? `Seed Classification Review · ${run.value.name || `Run #${run.value.id}`}`
+    : 'Seed Classification Review',
+)
+
+const currentDetections = computed<Detection[]>(() => {
+  if (!currentImage.value) return []
+  return imageDetectionsMap.value[currentImage.value.filename] || []
+})
+
+// Retrieves the initial seed count metrics from the permanent map and keeps manual input synced
+watch(
+  currentImage,
+  (newImage) => {
+    if (!newImage) return
+
+    // Fetch current number of detections to set the manual input counter value correctly
+    const currentList = imageDetectionsMap.value[newImage.filename] || []
+
+    manualActiveCount.value = currentList.filter((d) => isActiveSeed(d)).length
+
+    // Fetch initial model metrics from permanent lookup map
+    const baseline = initialMetricsLookupMap.value[newImage.filename]
+    if (baseline) {
+      initialAutomatedActiveCount.value = baseline.automatedActiveCount
+      initialOverallConfidenceScore.value = baseline.overallConfidenceScore
+      initialSeedRangeMin.value = baseline.seedRangeMin
+      initialSeedRangeMax.value = baseline.seedRangeMax
+    }
+    if (baseline.savedManualCount !== null) {
+      manualActiveCount.value = baseline.savedManualCount
+    } else {
+      manualActiveCount.value = currentList.filter((d) => isActiveSeed(d)).length
+    }
+  },
+  { immediate: true },
 )
 
 function zoomIn() {
@@ -245,78 +332,103 @@ function resetZoom() {
   zoom.value = 1
 }
 
-function showToast(message: string, type: 'success' | 'error' = 'success') {
-  if (toastTimer) clearTimeout(toastTimer)
-  toast.value = { message, type }
-  toastTimer = setTimeout(() => {
-    toast.value = null
-  }, 3000)
+function isActiveSeed(detection: Detection): boolean {
+  const statusString = detection.predicted_class || (detection as any).viability_status || ''
+  return statusString.toLowerCase() === 'active'
 }
 
-function polyPoints(detection: Detection): string {
-  const poly = detection.polygon
-  if (!poly || poly.length < 8) {
-    const { x1, y1, x2, y2 } = detection.bbox
-    return `${x1},${y1} ${x2},${y1} ${x2},${y2} ${x1},${y2}`
-  }
-  const points: string[] = []
-  for (let i = 0; i < poly.length; i += 2) {
-    points.push(`${poly[i]},${poly[i + 1]}`)
-  }
-  return points.join(' ')
-}
+// Updates bounding box state and input values
+function toggleSeedStatus(detectionId: number) {
+  if (!currentImage.value) return
+  const filename = currentImage.value.filename
+  const detectionsList = imageDetectionsMap.value[filename] || []
+  const target = detectionsList.find((d) => d.id === detectionId)
 
-async function selectReference(detectionId: number) {
-  if (!currentImageId.value) return
+  if (target) {
+    const currentClass = (target.predicted_class || '').toLowerCase()
 
-  // Optimistically update UI immediately
-  referenceMap.value = { ...referenceMap.value, [currentImageId.value]: detectionId }
+    if (currentClass === 'active') {
+      target.predicted_class = 'aborted'
+      target.reviewer_status = 'confirmed'
+      manualActiveCount.value = Math.max(0, manualActiveCount.value - 1)
+    } else {
+      target.predicted_class = 'active'
+      target.reviewer_status = 'confirmed'
+      manualActiveCount.value++
+    }
 
-  const id = route.params.id
-  try {
-    const response = await api(`/api/seeds/runs/${id}/reference-seed/`, {
-      method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({
-        reference_detection_id: detectionId,
-        image_id: currentImage.value?.id,
-      }),
-    })
-
-    if (!response.ok) throw new Error(`HTTP ${response.status}`)
-
-    showToast('Reference seed saved for this image.')
-  } catch (error) {
-    // Revert on failure
-    const reverted = { ...referenceMap.value }
-    delete reverted[currentImageId.value]
-    referenceMap.value = reverted
-    showToast('Failed to save reference seed.', 'error')
-    console.error(error)
+    console.log(`Box #${detectionId} successfully toggled to: ${target.predicted_class}`)
   }
 }
 
-function clearReference() {
-  if (!currentImageId.value) return
-  const updated = { ...referenceMap.value }
-  delete updated[currentImageId.value]
-  referenceMap.value = updated
+function getPolygonPoints(detection: Detection): string {
+  const p =
+    detection.polygon || (detection.bbox && detection.bbox.poly) || detection.bbox || detection.poly
+  if (!p || p.length < 8) return ''
+  return `${p[0]},${p[1]} ${p[2]},${p[3]} ${p[4]},${p[5]} ${p[6]},${p[7]}`
 }
 
-async function loadFromApi() {
-  const id = route.params.id
+onMounted(async () => {
+  await initializeReviewBundle()
+})
+
+// Initialize the run session data structure
+async function initializeReviewBundle() {
+  const id = route.params.id as string
+
+  loading.value = true
+
   try {
     const response = await api(`/api/seeds/runs/${id}/reference-review/`)
+
     if (!response.ok) {
-      loadError.value = `HTTP ${response.status}`
+      loadError.value = `HTTP Server Configuration Load Error`
       return
     }
 
-    const data: ReviewBundle = await response.json()
+    const data = await response.json()
     run.value = data.run
-    images.value = data.images
-    // Restore any previously saved selections
-    referenceMap.value = data.reference_seeds ?? {}
+    imagesList.value = data.images
+
+    const prodMap: Record<string, Detection[]> = {}
+
+    imagesList.value.forEach((img: any) => {
+      const detections = img.detections || []
+      const filteredDetections = detections.map((d: any) => ({
+        ...d,
+        predicted_class: d.class || d.predicted_class || 'aborted',
+        poly: d.polygon || d.poly || [],
+      }))
+
+      prodMap[img.filename] = filteredDetections
+
+      const initialActive = filteredDetections.filter((d: any) => isActiveSeed(d))
+
+      initialMetricsLookupMap.value[img.filename] = {
+        automatedActiveCount: initialActive.length,
+        overallConfidenceScore: img.overall_confidence || 0,
+        seedRangeMin: img.seed_range_min || 0,
+        seedRangeMax: img.seed_range_max || 0,
+        savedManualCount: img.manual_active_count !== undefined ? img.manual_active_count : null,
+      }
+    })
+
+    imageDetectionsMap.value = prodMap
+    currentImageIndex.value = 0
+
+    if (imagesList.value.length > 0) {
+      const firstImg = imagesList.value[0]
+      const baseline = initialMetricsLookupMap.value[firstImg.filename]
+      if (baseline) {
+        initialAutomatedActiveCount.value = baseline.automatedActiveCount
+        initialOverallConfidenceScore.value = baseline.overallConfidenceScore
+        initialSeedRangeMin.value = baseline.seedRangeMin
+        initialSeedRangeMax.value = baseline.seedRangeMax
+        manualActiveCount.value = prodMap[firstImg.filename].filter((d: any) =>
+          isActiveSeed(d),
+        ).length
+      }
+    }
   } catch (error) {
     loadError.value = error instanceof Error ? error.message : String(error)
   } finally {
@@ -324,39 +436,81 @@ async function loadFromApi() {
   }
 }
 
-async function proceed() {
-  const id = route.params.id
-  isCalculating.value = true
+// Saves edits on current image
+async function saveCurrentPageCount() {
+  if (!currentImage.value || !run.value) return
+  savingCount.value = true
 
   try {
-    const response = await api(`/api/seeds/runs/${id}/calculate/`, {
-      method: 'POST',
-    })
+    const confirmedDetections = currentDetections.value
+    const activeIds = confirmedDetections.filter((d) => isActiveSeed(d)).map((d) => d.id)
+    const abortedIds = confirmedDetections.filter((d) => !isActiveSeed(d)).map((d) => d.id)
 
-    if (!response.ok) throw new Error(`HTTP ${response.status}`)
+    const apiPromises = []
 
-    router.push({ name: 'seed-count-review', params: { id } })
+    if (activeIds.length > 0) {
+      apiPromises.push(
+        api(`/api/analysis/detections/bulk/`, {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ ids: activeIds, reviewer_status: 'confirmed' }),
+        }),
+      )
+    }
+
+    if (abortedIds.length > 0) {
+      apiPromises.push(
+        api(`/api/analysis/detections/bulk/`, {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ ids: abortedIds, reviewer_status: 'rejected' }),
+        }),
+      )
+    }
+
+    apiPromises.push(
+      api(`/api/seeds/images/${currentImage.value.id}/manual-count/`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ manual_count: manualActiveCount.value }),
+      }),
+    )
+
+    if (initialMetricsLookupMap.value[currentImage.value.filename]) {
+      initialMetricsLookupMap.value[currentImage.value.filename].savedManualCount =
+        manualActiveCount.value
+    }
+
+    // Await all queued requests
+    if (apiPromises.length > 0) {
+      const responses = await Promise.all(apiPromises)
+
+      for (const res of responses) {
+        if (!res.ok) throw new Error(`HTTP ${res.status}: Failed to update database`)
+      }
+    }
+
+    alert('Active counts updated.')
   } catch (error) {
-    showToast('Failed to calculate seed statuses.', 'error')
     console.error(error)
+    alert('Failed to execute bulk counts persistence transactions.')
   } finally {
-    isCalculating.value = false
+    savingCount.value = false
   }
 }
 
-onMounted(loadFromApi)
-</script>
+function navigateImage(direction: number) {
+  const nextIndex = currentImageIndex.value + direction
+  if (nextIndex >= 0 && nextIndex < totalImagesCount.value) {
+    currentImageIndex.value = nextIndex
+  }
+}
 
-<style scoped>
-.toast-enter-active,
-.toast-leave-active {
-  transition:
-    opacity 0.3s,
-    transform 0.3s;
+function goBack() {
+  router.push({ path: `/seeds/runs/${route.params.id}/set-reference` })
 }
-.toast-enter-from,
-.toast-leave-to {
-  opacity: 0;
-  transform: translateX(-50%) translateY(8px);
+
+function navigateToExport() {
+  router.push({ path: `/seeds/runs/${route.params.id}/export` })
 }
-</style>
+</script>
