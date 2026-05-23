@@ -490,19 +490,24 @@
             >
               ‹
             </button>
-            <button
-              v-for="page in totalPages"
-              :key="page"
-              @click="currentPage = page"
-              class="px-2 py-1 rounded border transition-colors"
-              :class="
-                page === currentPage
-                  ? 'border-primary bg-primary/5 text-foreground'
-                  : 'border-border hover:bg-muted'
-              "
-            >
-              {{ page }}
-            </button>
+
+            <!-- Dynamic page buttons with ellipsis -->
+            <template v-for="page in displayedPages" :key="page">
+              <button
+                v-if="page !== '...'"
+                @click="currentPage = page"
+                class="px-2 py-1 rounded border transition-colors"
+                :class="
+                  page === currentPage
+                    ? 'border-primary bg-primary/5 text-foreground'
+                    : 'border-border hover:bg-muted'
+                "
+              >
+                {{ page }}
+              </button>
+              <span v-else class="px-1 text-muted-foreground">...</span>
+            </template>
+
             <button
               @click="currentPage++"
               :disabled="currentPage === totalPages"
@@ -547,6 +552,31 @@ let ticker: ReturnType<typeof setInterval>
 const currentPage = ref(1)
 const pageSize = 4
 const totalPages = computed(() => Math.ceil(jobRows.value.length / pageSize))
+
+const displayedPages = computed(() => {
+  const delta = 2 // Number of pages to show on each side of current page
+  const range = []
+  const rangeWithDots = []
+  let l
+  for (let i = 1; i <= totalPages.value; i++) {
+    if (i === 1 || i === totalPages.value || (i >= currentPage.value - delta && i <= currentPage.value + delta)) {
+      range.push(i)
+    }
+  }
+  for (const i of range) {
+    if (l) {
+      if (i - l === 2) {
+        rangeWithDots.push(l + 1)
+      } else if (i - l !== 1) {
+        rangeWithDots.push('...')
+      }
+    }
+    rangeWithDots.push(i)
+    l = i
+  }
+  return rangeWithDots
+})
+
 const trainingUploadTab = ref('files')
 const trainingUploadTabs: UploadTab[] = [
   {
@@ -858,6 +888,19 @@ async function loadFromApi() {
 
   for (const v of versions) {
     const species = (v.parameters?.species ?? v.version_name.split('-')[0]).toLowerCase()
+
+    // Create track for manually added seed types
+    if (!speciesMap.has(species)) {
+      speciesMap.set(species, {
+        id: species.toUpperCase(),
+        label: species.toUpperCase(),
+        species: species,
+        versions: [],
+        active_job: null,
+        data_pool: { total_samples: 0, new_since_active: 0 },
+      })
+    }
+
     const track = speciesMap.get(species)
     if (track) {
       track.versions.push({ ...v, sample_count: v.sample_count ?? 0 })

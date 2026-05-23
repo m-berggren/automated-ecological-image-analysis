@@ -185,7 +185,7 @@ def run_training_job(job: TrainingJob) -> None:
         progress_cb(0, 0, 'Running post-training evaluation...', 'info')
         try:
             from ml_pipelines.seed_src.utils.helpers import load_model
-            from ml_pipelines.seed_src.inference.inference import run_sahi
+            from ml_pipelines.seed_src.inference.inference import run_inference
             from ml_pipelines.seed_src.utils.metrics import calculate_tp_fp_fn, calculate_precision_recall_f1_score
 
             eval_model = load_model(weights_path)
@@ -216,7 +216,7 @@ def run_training_job(job: TrainingJob) -> None:
                                 ]
                                 gt_boxes.append(pixel_coords)
 
-                    result = run_sahi(str(img_file), eval_model)
+                    result = run_inference(str(img_file), eval_model)
                     preds = []
                     for pred in result.object_prediction_list:
                         b = pred.bbox
