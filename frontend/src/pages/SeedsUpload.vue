@@ -280,13 +280,16 @@
 
           <div class="flex items-center gap-2">
             <button
-              class="text-xs px-2 py-0.5 rounded border border-border hover:bg-muted"
-              @click="onRetry(item.id)"
+              v-if="formatError(item.error).includes('Validation failed')"
+              class="text-xs px-2 py-0.5 rounded border border-primary text-primary hover:bg-green-50 transition-colors"
+              title="Bypass seed species verification checks"
+              @click="promptForceUpload(item.id)"
             >
-              Retry
+              Upload Anyway
             </button>
             <button
               class="text-xs px-2 py-0.5 rounded border border-red-200 text-red-600 hover:bg-red-50 transition-colors"
+              title="Remove image from uploads"
               @click="onRemove(item.id)"
             >
               Remove
@@ -302,6 +305,46 @@
       {{ error }}
     </p>
   </div>
+  <div
+    v-if="forcingId"
+    class="fixed inset-0 z-50 flex items-center justify-center bg-black/40 backdrop-blur-sm p-4"
+  >
+    <div
+      class="bg-surface border border-border rounded-xl shadow-xl max-w-md w-full p-6 space-y-4 text-left animate-in fade-in zoom-in-95 duration-200"
+    >
+      <h3 class="text-lg font-semibold text-foreground flex items-center gap-2">
+        <AlertTriangle class="w-5 h-5 text-amber-500" />
+        Force Upload Image
+      </h3>
+
+      <div class="space-y-3 text-sm text-muted-foreground leading-relaxed">
+        <p>
+          You are about to bypass the automated OCR label verification. Only proceed if you are sure
+          that this image contains
+          <strong class="text-foreground">{{ selectedSeed }}</strong> seeds.
+        </p>
+        <p>
+          Running the detection pipeline on incorrectly labeled images will likely produce incorrect
+          predictions. Are you absolutely sure you want to continue?
+        </p>
+      </div>
+
+      <div class="flex justify-end gap-3 pt-4 border-t border-border mt-2">
+        <button
+          @click="cancelForceUpload"
+          class="px-4 py-2 text-sm font-medium border border-border rounded-md hover:bg-muted transition-colors"
+        >
+          Cancel
+        </button>
+        <button
+          @click="confirmForceUpload"
+          class="px-4 py-2 text-sm font-medium bg-amber-600 text-white rounded-md hover:bg-amber-700 transition-colors shadow-sm"
+        >
+          Yes, force upload
+        </button>
+      </div>
+    </div>
+  </div>
 </template>
 
 <script setup lang="ts">
@@ -309,7 +352,7 @@ import { computed, onMounted, ref } from 'vue'
 import { useRouter } from 'vue-router'
 import { RouterLink } from 'vue-router'
 
-import { UploadCloud, XCircle } from 'lucide-vue-next'
+import { UploadCloud, XCircle, AlertTriangle } from 'lucide-vue-next'
 
 import PageHeader from '@/components/PageHeader.vue'
 import SeedsStepper from '@/components/SeedsStepper.vue'
@@ -431,16 +474,41 @@ onMounted(async () => {
   } catch {}
 })
 
-function onRetry(id: string) {
-  uploader.value?.retry(id)
-}
-
 function onRemove(id: string) {
   if (!uploader.value) return
   const idx = uploader.value.items.findIndex((item) => item.id === id)
   if (idx > -1) {
     uploader.value.items.splice(idx, 1)
   }
+}
+
+const forcingId = ref<string | null>(null)
+
+function promptForceUpload(id: string) {
+  forcingId.value = id
+}
+
+function cancelForceUpload() {
+  forcingId.value = null
+}
+
+function confirmForceUpload() {
+  if (!uploader.value || !selectedSeed.value || !forcingId.value) return
+
+  const idx = uploader.value.items.findIndex((item) => item.id === forcingId.value)
+  if (idx > -1) {
+    const item = uploader.value.items[idx]
+    uploader.value.items.splice(idx, 1)
+
+    const forcedFilename = `${selectedSeed.value}_forced_${item.file.name}`
+    const newFile = new File([item.file], forcedFilename, {
+      type: item.file.type,
+    })
+
+    uploader.value.enqueue([newFile])
+  }
+
+  forcingId.value = null
 }
 
 function formatError(err?: string) {
