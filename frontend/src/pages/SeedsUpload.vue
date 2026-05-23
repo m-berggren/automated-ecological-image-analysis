@@ -233,7 +233,9 @@
       v-if="uploader && uploader.items.length"
       class="rounded-xl border border-border bg-surface"
     >
-      <header class="flex items-center justify-between px-5 py-3 border-b border-border">
+      <header
+        class="flex flex-col sm:flex-row sm:items-center justify-between gap-4 px-5 py-3 border-b border-border"
+      >
         <div class="text-sm">
           <span class="font-medium">{{ doneCount }}</span>
           <span class="text-muted-foreground"> of </span>
@@ -249,14 +251,24 @@
           <span v-if="failedCount" class="ml-3 text-red-600"> {{ failedCount }} failed </span>
         </div>
 
-        <button
-          :disabled="!doneCount || starting || uploadingCount > 0"
-          class="px-3 py-1.5 rounded-md text-sm font-medium bg-primary text-primary-foreground hover:bg-primary/90 disabled:opacity-50 disabled:cursor-not-allowed"
-          @click="startDetection"
-        >
-          <span v-if="!starting"> Start detection </span>
-          <span v-else> Starting… </span>
-        </button>
+        <div class="flex items-center gap-3 shrink-0">
+          <button
+            :disabled="starting || cancellingUpload"
+            class="px-3 py-1.5 rounded-md text-sm font-medium border border-border bg-background hover:bg-muted text-foreground transition-colors disabled:opacity-50 disabled:cursor-not-allowed"
+            @click="cancelUpload"
+          >
+            {{ cancellingUpload ? 'Cancelling...' : 'Cancel upload' }}
+          </button>
+
+          <button
+            :disabled="!doneCount || starting || uploadingCount > 0 || failedCount > 0"
+            class="px-3 py-1.5 rounded-md text-sm font-medium bg-primary text-primary-foreground hover:bg-primary/90 disabled:opacity-50 disabled:cursor-not-allowed"
+            @click="startDetection"
+          >
+            <span v-if="!starting"> Start detection </span>
+            <span v-else> Starting… </span>
+          </button>
+        </div>
       </header>
 
       <ul v-if="recentFailures.length" class="max-h-60 overflow-auto divide-y divide-border">
@@ -381,6 +393,7 @@ const router = useRouter()
 const creatingUpload = ref(false)
 const starting = ref(false)
 const dragOver = ref(false)
+const cancellingUpload = ref(false)
 
 const error = ref('')
 const uploadId = ref<number | null>(null)
@@ -602,6 +615,27 @@ function onDrop(event: DragEvent) {
 function onDragLeave(event: DragEvent) {
   if (!(event.currentTarget as HTMLElement).contains(event.relatedTarget as Node)) {
     dragOver.value = false
+  }
+}
+
+async function cancelUpload() {
+  if (!runId.value) return
+
+  cancellingUpload.value = true
+  try {
+    // Kill the run and discard the images
+    await api(`/api/analysis/runs/${runId.value}/cancel/`, { method: 'POST' })
+  } catch (e) {
+    console.error('Failed to cancel run on server:', e)
+  } finally {
+    if (uploader.value) {
+      uploader.value.items = [] // Clear items to stop processing
+    }
+    uploader.value = null
+    uploadId.value = null
+    runId.value = null
+    error.value = ''
+    cancellingUpload.value = false
   }
 }
 
