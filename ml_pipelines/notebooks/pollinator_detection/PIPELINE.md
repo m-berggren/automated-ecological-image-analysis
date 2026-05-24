@@ -144,33 +144,39 @@ any classifier exists.
 
 ### Method B — inference-based crop selection (incremental retraining)
 
-Once a classifier exists, new labelled data can be gathered more efficiently by using
-the classifier's own uncertainty to prioritise which crops to label.
+Once a classifier exists and its confidence scores are reliable, new labelled data can
+be gathered more efficiently by using the classifier's own uncertainty to prioritise
+which crops to label.
 
-**Full path (large runs — thousands of crops):**
+> **Prerequisite: trustworthy model.** `prepare_retrain.ipynb` skips crops the model is
+> confident about and only queues uncertain ones for review. If confidence scores are
+> not reliable (early-stage or poorly-performing models), this filtering is not useful —
+> use Method A (label everything from scratch with `crop_labeler.py`) until the model
+> is accurate enough to trust.
+
+**Full path (model is trustworthy, large runs):**
 ```
 Camera folder (raw JPG images)
       ↓  infer_cropbased.ipynb  (MODE = 'infer', classifiers loaded)
          → full inference: preprocessing + classification
          → crop_results/{run_name}/{camera}/crops/*.jpg  +  results.csv
-      ↓  infer_cropbased.ipynb  Cell 8 — organise by class
-         → crop_results/{run_name}/{camera}/crops/{predicted_class}/*.jpg
-      ↓  prepare_retrain.ipynb  (optional filter step)
-         → selects only low-confidence crops
-         → copies to outputs/training/retrain_review/{class}/
-      ↓  tools/labeling/relabel.py  --labeled retrain_review/  --dest annotated_crops/
-         → human confirms or corrects each crop
-         → confirmed crops copied to annotated_crops/{class}/
-         → progress saved in reviewed.txt so session can be resumed
+      ↓  prepare_retrain.ipynb
+         → selects only low-confidence crops (below CONF_THRESHOLD_LOW)
+         → high-confidence crops enter retrain unchanged, no human review
+         → copies uncertain crops to outputs/training/retrain_review/{class}/
+      ↓  tools/labeling/crop_labeler.py
+           --results retrain_review/  --output annotated_crops/
+         → human confirms or corrects each uncertain crop
+         → crops moved to annotated_crops/{class}/
 ```
 
-**Short path (small runs — up to ~300 crops):**
+**When model is not yet trustworthy — label everything (Method A):**
 ```
-      ↓  infer_cropbased.ipynb  Cell 8
-      ↓  tools/labeling/relabel.py  --labeled crops/  --dest annotated_crops/
+      ↓  infer_cropbased.ipynb
+      ↓  tools/labeling/crop_labeler.py
+           --results crop_results/run_XX/  --output annotated_crops/
+         → label all crops; ignore predicted confidence
 ```
-
-Skip `prepare_retrain.ipynb` when the total crop count is manageable to review directly.
 
 ### Method C — web images (group classifier augmentation only)
 
@@ -441,20 +447,25 @@ The full iterative improvement cycle looks like this:
    → preprocessing + current classifiers
    → writes crop_results/{run_name}/{camera}/crops/  +  results.csv
         ↓
-4. infer_cropbased.ipynb  Cell 8  — organise crops by predicted class
-   → crop_results/{run_name}/{camera}/crops/{predicted_class}/*.jpg
-        ↓
-5. evaluate.ipynb
+4. evaluate.ipynb
    → compare against CVAT ground truth
    → if accuracy is acceptable, no retraining needed → done
         ↓
-6a. [small run] tools/labeling/relabel.py  --labeled crops/  --dest annotated_crops/
-    → review all predicted crops, correct wrong ones
-    → confirmed crops land in annotated_crops/{class}/
-    → resume any time; reviewed.txt tracks progress
+6a. [model not yet trustworthy — label everything]
+    tools/labeling/crop_labeler.py
+      --results crop_results/run_XX/  --output annotated_crops/
+    → label every crop with source-frame context
+    → predicted class shown as default; move files as you confirm/correct
+    → progress JSON per camera; quit and resume any time
 
-6b. [large run] prepare_retrain.ipynb  →  relabel.py  --labeled retrain_review/  --dest annotated_crops/
-    → pre-filter to low-confidence crops, then review just those
+6b. [model is trustworthy — active-learning loop]
+    prepare_retrain.ipynb
+      → pre-filters to low-confidence crops (CONF_THRESHOLD_LOW)
+      → high-confidence crops skipped; enter retrain with predicted label unchanged
+      → output: retrain_review/{class}/
+    tools/labeling/crop_labeler.py
+      --results retrain_review/  --output annotated_crops/
+    → review only the uncertain fraction
         ↓
 7. retrain_cropbased.ipynb
    → fine-tunes binary + 5-class classifiers

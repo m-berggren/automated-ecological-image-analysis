@@ -126,7 +126,8 @@ pollinator-classification/
 → Open `experiments/evaluation/evaluate.ipynb`, point to a completed run, run all cells
 
 **Label new crops for retraining**
-→ `experiments/training/prepare_retrain.ipynb` → copies uncertain crops → `tools/labeling/crop_labeler.py` labels them
+→ `tools/labeling/crop_labeler.py` — primary labeling tool; shows source frame context, labels all crops
+→ `experiments/training/prepare_retrain.ipynb` — future use once model is trustworthy; pre-filters to low-confidence crops only before labeling
 
 **Retrain classifiers with new data**
 → Merge labeled crops into `data/training/annotated_crops/` → `experiments/training/retrain_cropbased.ipynb`

@@ -243,24 +243,35 @@ Best weights are copied to `models/yolo_best.pt` on completion.
 Reads `results.csv` from a completed inference run and extracts low-confidence crops
 for human review — instead of labeling the entire crop set.
 
+> **Requires a trustworthy model.** This notebook filters by confidence score:
+> crops above `CONF_THRESHOLD_HIGH` are skipped (assumed correct) and go directly
+> into retraining without human review; only uncertain predictions are queued.
+> If the model's confidence scores are not yet reliable, this filtering is
+> meaningless — skip this notebook and label everything with `crop_labeler.py` instead.
+> Once the model has been retrained on a fully human-labeled dataset and its confidence
+> scores are well-calibrated, this notebook becomes useful for efficient incremental
+> improvement rounds.
+
 **Key config (Cell 2):**
 
 | Variable | Default | Description |
 |----------|---------|-------------|
 | `INFER_RESULTS` | `CROP_RESULTS_ROOT` | Path to an inference run folder (or the whole `crop_results/` root to scan all runs) |
 | `CONF_THRESHOLD_LOW` | `0.70` | Crops with confidence **below** this are flagged as uncertain and queued for review |
-| `CONF_THRESHOLD_HIGH` | `0.95` | Crops with confidence **above** this are skipped as already confident |
+| `CONF_THRESHOLD_HIGH` | `0.95` | Crops with confidence **above** this are skipped — assumed correct, not reviewed |
 | `INCLUDE_BACKGROUND` | `True` | Include background crops (useful as hard negatives) |
 | `INCLUDE_CLASSES` | all 5 | List of class names to include in the review set |
-| `FORCE_ALL` | `False` | Ignore confidence thresholds and queue every crop |
+| `FORCE_ALL` | `False` | Ignore confidence thresholds and queue every crop (equivalent to full manual labeling) |
 | `MAX_PER_CLASS` | `200` | Cap crops per class to keep the review session manageable (`None` = no limit) |
 
 Output goes to `outputs/training/retrain_review/{class}/`.
-Hand this to `tools/labeling/crop_labeler.py` or `tools/labeling/relabel.py` for labeling,
+Hand this to `tools/labeling/crop_labeler.py` for labeling,
 then move confirmed crops to `data/training/annotated_crops/`.
 
-**When to skip this notebook:** If the inference run produced fewer than ~300 crops total,
-go straight to `relabel.py` — the filtering step adds overhead not worth it at small scale.
+**Note on high-confidence crops:** crops above `CONF_THRESHOLD_HIGH` are excluded from
+the review set — they enter retraining with their predicted label unchanged.
+To lower the bar for what gets reviewed, reduce `CONF_THRESHOLD_HIGH`;
+to review everything regardless of confidence, set `FORCE_ALL = True`.
 
 ---
 
