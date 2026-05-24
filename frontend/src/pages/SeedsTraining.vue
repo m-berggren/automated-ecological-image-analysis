@@ -268,8 +268,11 @@
                   :class="labelFiles.length === imageFiles.length ? 'text-green-600' : 'text-amber-600'"
                 >
                   {{ labelFiles.length }} labels
-                  <span v-if="labelFiles.length !== imageFiles.length">
-                    ⚠ Not all images have a matching label file (.txt)
+                  <span v-if="imageFiles.length === 0 && labelFiles.length > 0">
+                    ⚠ Labels found but no images - each label needs a matching image
+                  </span>
+                  <span v-else-if="labelFiles.length !== imageFiles.length">
+                    ⚠ {{ Math.abs(imageFiles.length - labelFiles.length) }} file(s) missing {{ imageFiles.length > labelFiles.length ? 'labels' : 'images' }}
                   </span>
                   <span v-else>✓</span>
                 </span>
@@ -382,11 +385,11 @@
           </span>
 
           <button
-            :disabled="(trainingMode === 'scratch' ? !selectedSeed : !selectedVersionId) || hasActiveJob"
+            :disabled="(trainingMode === 'scratch' ? !selectedSeed : !selectedVersionId) || hasActiveJob || (trainingMode === 'scratch' && uploadedFiles.length > 0 && !canStartTraining)"
             class="px-4 py-2 rounded-md text-sm font-medium bg-primary text-primary-foreground disabled:opacity-50"
             @click="startTraining"
           >
-            {{ hasActiveJob ? 'A job is already running' : 'Start training' }}
+            {{ hasActiveJob ? 'A job is already running' : (trainingMode === 'scratch' && uploadedFiles.length > 0 && !canStartTraining ? 'Fix file mismatch to start' : 'Start training') }}
           </button>
         </div>
       </section>
@@ -592,13 +595,15 @@ const trainingUploadTabs: UploadTab[] = [
   },
 ]
 
-const sortedVersions = computed(() => {
-  return [...allVersions.value].sort((a, b) => {
-    if (a.is_active !== b.is_active) {
-      return Number(b.is_active) - Number(a.is_active)
-    }
-    return b.id - a.id
-  })
+const canStartTraining = computed(() => {
+  // For scratch training
+  if (trainingMode.value === 'scratch' && uploadedFiles.value.length > 0) {
+    // Must have both images and labels, and counts must match
+    return imageFiles.value.length > 0 &&
+           labelFiles.value.length === imageFiles.value.length
+  }
+  // For incremental training or no files uploaded
+  return true
 })
 
 const activeVersions = computed(() => {
@@ -697,6 +702,13 @@ const allVersions = computed(() =>
 watch(trainingMode, () => {
   selectedSeed.value = null
   selectedVersionId.value = null
+
+  // Set different default epochs based on training mode
+  if (trainingMode.value === 'incremental') {
+    settings.epochs = 45
+  } else {
+    settings.epochs = 90
+  }
 })
 
 function addSeed() {
@@ -994,11 +1006,12 @@ async function startTraining() {
         }
 
   try {
-    if (trainingMode.value === 'scratch' && actualFiles.value.length) {
-      formMessage.value = 'Uploading training data...'
+    if (actualFiles.value.length) {
+      formMessage.value = trainingMode.value === 'scratch' ? 'Uploading training data...' : 'Uploading additional training data...'
       const formData = new FormData()
       formData.append('species', payload.species!)
       formData.append('val_split', String(settings.val_split / 100))
+      formData.append('training_mode', trainingMode.value)
       for (const file of actualFiles.value) formData.append('files', file)
 
       const uploadRes = await api('/api/seeds/training/upload-data/', { method: 'POST', body: formData })
