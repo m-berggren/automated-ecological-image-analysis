@@ -20,6 +20,10 @@ dependencies = [
     "ultralytics>=8.4.48",
     "easyocr>=1.7.2",
     "pandas>=3.0.3",
+    "scikit-learn>=1.8.0",
+    "matplotlib>=3.10.9",
+    "grad-cam>=1.5.5",
+    "seaborn>=0.13.2",
 ]
 
 [tool.ruff]
