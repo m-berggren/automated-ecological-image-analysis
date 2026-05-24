@@ -2,29 +2,20 @@
 
 import json
 import os
-from PIL import Image
 import sys
+
 import django
+from PIL import Image
 
-sys.path.append(
-    os.path.dirname(
-        os.path.dirname(os.path.abspath(__file__))
-    )
-)
+sys.path.append(os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 
-os.environ.setdefault(
-    "DJANGO_SETTINGS_MODULE",
-    "config.settings.development"
-)
+os.environ.setdefault('DJANGO_SETTINGS_MODULE', 'config.settings.development')
 
 django.setup()
 
 from collections import defaultdict
+
 from django.core.files import File
-
-from apps.datasets.models import ImageAsset
-from apps.analysis.models import InferenceRun, Detection
-
 from seed_src.inference.inference import run_sahi
 from seed_src.training.train import train_species_model
 from seed_src.utils.helpers import (
@@ -40,6 +31,9 @@ from seed_src.utils.metrics import (
     calculate_tp_fp_fn,
 )
 
+from apps.analysis.models import Detection, InferenceRun
+from apps.datasets.models import ImageAsset
+
 # -------------------------
 # SETTINGS
 # -------------------------
@@ -49,9 +43,7 @@ PREPARE_LABELS = True  # Set to True to run the label update on newly added labe
 RETRAIN = False  # Set to True to train a new model from scratch, False to use existing weights
 TRAINING_MODE = 'finetune'  # Set to 'fresh' to train from scratch, set to 'finetune' for incremental training
 FINETUNE_WEIGHTS = {  # Per-species checkpoint to fine-tune from, only used if TRAIN_MODE == 'finetune'
-    'cat': os.path.abspath(
-        os.path.join('runs', 'obb', 'cat', 'weights', 'best.pt')
-    ),
+    'cat': os.path.abspath(os.path.join('runs', 'obb', 'cat', 'weights', 'best.pt')),
     'peh': os.path.abspath(os.path.join('runs', 'obb', 'peh', 'weights', 'best.pt')),
     'phyca': os.path.abspath(
         os.path.join('runs', 'obb', 'phyca', 'weights', 'best.pt')
@@ -151,8 +143,9 @@ for species in SPECIES_LIST:
             print(
                 f'No model found at {expected_path}. Train a new model for {species}.'
             )
-
-    print(f'Using model: {best_model_paths[species]}')
+            del best_model_paths[species]
+        else:
+            print(f'Using model: {best_model_paths[species]}')
 
 
 # -------------------------
@@ -202,6 +195,10 @@ for species in SPECIES_LIST:
     if not os.path.exists(species_img_dir):
         continue
 
+    if species not in models:
+        print(f'  - Skipping inference for {species} (no model loaded).')
+        continue
+
     # Select the model specialized for this species
     current_model = models[species]
 
@@ -220,8 +217,7 @@ for species in SPECIES_LIST:
         output_filename = f'predicted_{img_name}'
 
         predicted_path = os.path.join(
-            'seed_src/prediction_images/',
-            f'{img_name.split(".")[0]}.png'
+            'seed_src/prediction_images/', f'{img_name.split(".")[0]}.png'
         )
 
         result.export_visuals(
@@ -231,7 +227,7 @@ for species in SPECIES_LIST:
             hide_conf=True,
         )
 
-        #Save predicted images into django media storage so that they can be displayed in frontend.
+        # Save predicted images into django media storage so that they can be displayed in frontend.
         with open(predicted_path, 'rb') as f:
             image_asset = ImageAsset.objects.create(
                 module='seeds',
@@ -247,7 +243,6 @@ for species in SPECIES_LIST:
             )
 
         run.images.add(image_asset)
-
 
         preds = []
 
@@ -305,10 +300,10 @@ for species in SPECIES_LIST:
                     predicted_class=species,
                     area=(x2 - x1) * (y2 - y1),
                     bbox={
-                        "x1": x1,
-                        "y1": y1,
-                        "x2": x2,
-                        "y2": y2,
+                        'x1': x1,
+                        'y1': y1,
+                        'x2': x2,
+                        'y2': y2,
                     },
                     polygon=flat_poly[:8],
                 )
