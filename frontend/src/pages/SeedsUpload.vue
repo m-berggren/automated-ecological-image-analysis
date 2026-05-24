@@ -85,10 +85,17 @@
 
         <!-- Empty state -->
         <div
-          v-if="!activeModelVersions.length"
+          v-if="!selectedSeed"
+          class="rounded-lg border border-border bg-muted/20 p-4 text-sm text-muted-foreground"
+        >
+          Select a seed type above to see available models
+        </div>
+
+        <div
+          v-else-if="!activeModelVersions.length"
           class="rounded-lg border border-border bg-muted/20 p-4 text-sm"
         >
-          <span class="text-muted-foreground"> No active models yet. </span>
+          <span class="text-muted-foreground"> No active models found for {{ selectedSeed }}. </span>
 
           <RouterLink to="/seeds/training" class="ml-1 text-primary hover:underline font-medium">
             Go to the training page
@@ -125,12 +132,10 @@
                 </span>
 
                 <span class="text-xs text-muted-foreground italic">
-                  {{ model.kind }}
+                  {{ model.version_name?.split('-')[0] }}
                 </span>
 
-                <span
-                  class="text-xs px-2 py-0.5 rounded-full bg-green-300 text-green-900 font-medium"
-                >
+                <span class="text-xs px-2 py-0.5 rounded-full bg-green-300 text-green-900 font-medium">
                   Active
                 </span>
               </div>
@@ -418,9 +423,11 @@ const config = ref<PipelineConfig>({
 // Filter models to match the selected seed species
 const activeModelVersions = computed(() => {
   if (!selectedSeed.value) return []
-  return modelVersions.value.filter(
-    (m) => m.module === 'seeds' && m.is_active && m.kind === selectedSeed.value,
-  )
+  return modelVersions.value.filter((m) => {
+    // Extract species from version_name
+    const modelSpecies = m.version_name?.split('-')[0]
+    return m.module === 'seeds' && m.is_active && modelSpecies === selectedSeed.value
+  })
 })
 
 const uploadingCount = computed(() => {
@@ -466,13 +473,13 @@ onMounted(async () => {
       modelVersions.value = await res.json()
 
       // Extract unique species from available models
-      const uniqueKinds = Array.from(
-        new Set(modelVersions.value.map((m) => m.kind).filter(Boolean)),
+      const uniqueSpecies = Array.from(
+        new Set(modelVersions.value.map((m) => m.version_name?.split('-')[0]).filter(Boolean))
       )
 
       // Build the UI buttons
-      seedTypes.value = uniqueKinds.map((kind) => ({
-        id: kind,
+      seedTypes.value = uniqueSpecies.map((species) => ({
+        id: species,
         species: '',
         isCustom: false,
       }))
