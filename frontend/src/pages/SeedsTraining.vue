@@ -428,6 +428,18 @@
                   {{ job.trainingMode === 'incremental' ? 'incremental' : 'scratch' }}
                 </span>
               </div>
+
+            <div class="flex items-center gap-2">
+                <!-- Cancel button for running/pending jobs -->
+                <button
+                  v-if="job.status === 'running' || job.status === 'pending'"
+                  @click="cancelTrainingJob(job.id)"
+                  class="text-xs px-2 py-1 rounded border border-red-300 text-red-600 hover:bg-red-50 transition-colors"
+                  :disabled="cancellingJobId === job.id"
+                >
+                  {{ cancellingJobId === job.id ? 'Cancelling...' : 'Cancel' }}
+                </button>
+
               <span
                 class="text-xs px-2 py-0.5 rounded-full font-medium"
                 :class="{
@@ -445,6 +457,7 @@
                 <span v-else>{{ job.status }}</span>
               </span>
             </div>
+          </div>
 
             <!-- Progress bar -->
             <div v-if="job.status === 'running'" class="w-full h-1.5 rounded-full bg-muted overflow-hidden">
@@ -550,6 +563,7 @@ const trainingMode = ref<'scratch' | 'incremental'>('scratch')
 const uploadedFiles = ref<{ name: string; size: number }[]>([])
 const formMessage = ref('')
 const now = ref(Date.now())
+const cancellingJobId = ref<number | null>(null)
 let ticker: ReturnType<typeof setInterval>
 
 const currentPage = ref(1)
@@ -652,6 +666,42 @@ const hasActiveJob = computed(() =>
     (t) => t.active_job && (t.active_job.status === 'running' || t.active_job.status === 'pending')
   )
 )
+
+async function cancelTrainingJob(jobId: number) {
+  if (!confirm('Are you sure you want to cancel this training job? This cannot be undone.')) {
+    return
+  }
+
+  cancellingJobId.value = jobId
+  try {
+    const res = await api(`/api/analysis/training/${jobId}/cancel/`, {
+      method: 'POST',
+    })
+
+    if (res.ok) {
+      formMessage.value = 'Training job cancelled'
+      // Clear the active job from tracks
+      for (const t of tracks.value) {
+        if (t.active_job?.id === jobId) {
+          t.active_job = null
+        }
+      }
+      if (pollHandle) {
+        clearInterval(pollHandle)
+        pollHandle = null
+      }
+      // Reload to get updated status
+      await loadFromApi()
+    } else {
+      const error = await res.text()
+      formMessage.value = `Failed to cancel: ${error}`
+    }
+  } catch (e) {
+    formMessage.value = e instanceof Error ? e.message : String(e)
+  } finally {
+    cancellingJobId.value = null
+  }
+}
 
 const settings = reactive({
   epochs: 90,

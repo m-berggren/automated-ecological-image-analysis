@@ -1,5 +1,5 @@
-path: data/seed/peh_model
-train: train_sliced/images
+path: /Users/claudiasevilla/Desktop/automated-ecological-image-analysis/data/seed/peh_model
+train: train_sliced
 val: val/images
 
 names:
