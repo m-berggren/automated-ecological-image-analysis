@@ -175,7 +175,7 @@ When `BINARY_BACKBONE = 'both'`, backbone-specific copies (`binary_efficientnet_
 | `EPOCHS_S2` | `0` | Epochs for group classifier Stage 2 fine-tune on field only (0 = skip) |
 | `LR_S1` | `1e-3` | Learning rate for Stage 1 |
 | `LR_S2` | `1e-4` | Learning rate for Stage 2 |
-| `BG_RATIO` | `3` | Background : insect sampling ratio (balanced per camera plot) |
+| `BG_RATIO` | `3` | Background : insect sampling ratio. Background sampling is balanced across camera plots — each plot contributes an equal quota. Camera-overflow folders (`_101_WSCT`, `_102_WSCT`, …) are the same physical camera hitting the 9 999-image folder limit and are automatically merged into one plot key. |
 | `USE_WEB_FOR_BINARY` | `True` | Add iNaturalist web images as extra insect data for binary |
 | `WEB_DIR` | `data/web_images/` | Folder produced by `download_web_images.py` |
 
@@ -198,7 +198,7 @@ or `models/5group_insectnet.pth` depending on the chosen backbone.
 | `EPOCHS_S1` | `20` | Stage 1 epochs (web + field combined) |
 | `EPOCHS_S2` | `0` | Stage 2 fine-tune on field only (0 = skip) |
 | `LR_S1` / `LR_S2` | `1e-3` / `1e-4` | Learning rates for each stage |
-| `BG_RATIO` | `3` | Background : insect sampling ratio |
+| `BG_RATIO` | `3` | Background : insect sampling ratio. Background sampling is balanced across camera plots — each plot contributes an equal quota. Camera-overflow folders (`_101_WSCT`, `_102_WSCT`, …) are the same physical camera hitting the 9 999-image folder limit and are automatically merged into one plot key. |
 | `WEB_DIR` | `None` | Set to `BASE_DIR / 'data' / 'web_images'` to use web images |
 
 ---
@@ -294,6 +294,7 @@ optionally freezes the backbone, and continues training on the updated `annotate
 | `LR_FINETUNE` | `1e-4` | Lower LR than scratch training to avoid overwriting learned features |
 | `FREEZE_BACKBONE` | `False` | `True` = update head only (safer for small datasets); `False` = full network |
 | `USE_WEB_FOR_BINARY` | `True` | Add web images as extra insect data for binary |
+| `BG_RATIO` | `3` | Background : insect sampling ratio. Background sampling is balanced across camera plots — each plot contributes an equal quota. Camera-overflow folders (`_101_WSCT`, `_102_WSCT`, …) are the same physical camera hitting the 9 999-image folder limit and are automatically merged into one plot key. |
 
 Best weights overwrite `models/binary_best.pth` and `models/5group_efficientnet.pth` on completion.
 The old weights are backed up to `outputs/training/model_runs/` before overwriting.
