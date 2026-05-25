@@ -1,6 +1,12 @@
-import os
 import multiprocessing
-multiprocessing.set_start_method('fork', force=True)
+import os
+import sys
+
+# Enable Windows to run and not just Unix systems
+if sys.platform == 'win32':
+    multiprocessing.set_start_method('spawn', force=True)
+else:
+    multiprocessing.set_start_method('fork', force=True)
 
 from ultralytics import YOLO
 
@@ -18,14 +24,18 @@ def train_species_model(
     lrf: float | None = None,
 ):
 
-    print(f'train_species_model called! species={species_name} callback={progress_callback is not None}')
+    print(
+        f'train_species_model called! species={species_name} callback={progress_callback is not None}'
+    )
     import sys
+
     sys.stdout.flush()
     run_name = run_name or species_name
     weights = finetune_from if finetune_from else pretrained_weights_path
     model = YOLO(weights)
 
     if progress_callback:
+
         def on_fit_epoch_end(trainer):
             progress_callback(
                 processed=trainer.epoch + 1,
@@ -33,6 +43,7 @@ def train_species_model(
                 message=f'Epoch {trainer.epoch + 1}/{trainer.epochs}',
                 level='info',
             )
+
         model.add_callback('on_fit_epoch_end', on_fit_epoch_end)
 
     train_kwargs = dict(
