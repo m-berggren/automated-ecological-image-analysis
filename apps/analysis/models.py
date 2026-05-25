@@ -368,7 +368,7 @@ class Detection(models.Model):
             'the ML pipeline in ml-pipelines/pollinator/workflows.'
         ),
     )
-    polygon = models.JSONField()
+    polygon = models.JSONField(null=True, blank=True)
 
     confidence = models.FloatField()
     predicted_class = models.CharField(max_length=50)
