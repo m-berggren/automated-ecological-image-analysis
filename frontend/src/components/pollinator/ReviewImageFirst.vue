@@ -142,6 +142,12 @@
                   vector-effect="non-scaling-stroke"
                   class="pointer-events-none"
                 />
+                <ROIOverlay
+                  :bbox="props.roiBbox ?? null"
+                  :image-w="activeImage.naturalW"
+                  :image-h="activeImage.naturalH"
+                  :color="settings.roiColor"
+                />
               </g>
             </svg>
             <div
@@ -193,7 +199,7 @@
          opens the crop popup; clicking the row body selects the crop. -->
     <aside
       v-if="!cropsCollapsed"
-      class="w-52 shrink-0 border-l border-border bg-surface flex flex-col min-h-0"
+      class="w-56 shrink-0 border-l border-border bg-surface flex flex-col min-h-0"
     >
       <div class="shrink-0 flex items-center px-3 py-1.5 border-b border-border text-xs">
         <span class="font-semibold uppercase tracking-wider text-muted-foreground"> Crops </span>
@@ -250,26 +256,30 @@
               <div class="min-w-0 flex-1 text-xs space-y-0.5 font-mono">
                 <div class="flex items-center gap-2">
                   <Tooltip text="YOLO detector branch: object detection score.">
-                    <span class="text-muted-foreground w-16 text-[10px] cursor-help">YOLO</span>
+                    <span class="text-muted-foreground w-12 text-[10px] cursor-help">YOLO</span>
                   </Tooltip>
                   <span class="w-10 tabular-nums">
                     {{ d.yolo_confidence != null ? d.yolo_confidence.toFixed(2) : '—' }}
                   </span>
                   <Tooltip :text="classFullName(d.yolo_class)">
-                    <span class="font-medium cursor-help">{{ classAbbr(d.yolo_class) }}</span>
+                    <span class="font-medium cursor-help shrink-0 whitespace-nowrap">{{
+                      classAbbr(d.yolo_class)
+                    }}</span>
                   </Tooltip>
                 </div>
                 <div class="flex items-center gap-2">
                   <Tooltip
                     text="4-Group classifier: probability for the assigned class (fly / bumblebee / butterfly / other)."
                   >
-                    <span class="text-muted-foreground w-16 text-[10px] cursor-help">4-Group</span>
+                    <span class="text-muted-foreground w-12 text-[10px] cursor-help">4-Group</span>
                   </Tooltip>
                   <span class="w-10 tabular-nums">
                     {{ d.insectnet_confidence != null ? d.insectnet_confidence.toFixed(2) : '—' }}
                   </span>
                   <Tooltip :text="classFullName(d.insectnet_class)">
-                    <span class="font-medium cursor-help">{{ classAbbr(d.insectnet_class) }}</span>
+                    <span class="font-medium cursor-help shrink-0 whitespace-nowrap">{{
+                      classAbbr(d.insectnet_class)
+                    }}</span>
                   </Tooltip>
                 </div>
               </div>
@@ -288,12 +298,16 @@ import type { Detection, PollinatorClass } from '@/types/pollinator'
 import Tooltip from '@/components/Tooltip.vue'
 import InfoPopover from '@/components/InfoPopover.vue'
 import ImageThumbnailRail, { type RailItem } from '@/components/pollinator/ImageThumbnailRail.vue'
+import ROIOverlay from '@/components/ROIOverlay.vue'
 import { usePollinatorSettingsStore } from '@/stores/pollinatorSettings'
 
 const props = defineProps<{
   detections: Detection[]
   selectedId: number | null
   bulkIds?: Set<number>
+  // Run ROI in source-image pixels, already normalized by the parent. Drawn
+  // over the active image so the image-first layout matches crop-first/Export.
+  roiBbox?: [number, number, number, number] | null
 }>()
 
 // User-level bbox colors (persisted, shared across runs). The pickers live in

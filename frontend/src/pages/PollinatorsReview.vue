@@ -67,6 +67,7 @@
       :detections="filteredDetections"
       :selected-id="selectedId"
       :bulk-ids="bulkIds"
+      :roi-bbox="roiBbox"
       @update:selected-id="selectedId = $event"
       @drag-select="onImageFirstDragSelect"
       @delete-image="onDeleteImage"
@@ -167,8 +168,8 @@
                 run.
               </InfoPopover>
             </div>
-            <div class="grid grid-cols-[auto_1fr_auto] items-center gap-x-2 gap-y-1 text-xs">
-              <label for="img-yolo-min" class="text-muted-foreground">YOLO ≥</label>
+            <div class="grid grid-cols-[auto_1fr_auto] items-center gap-x-1 gap-y-1 text-xs">
+              <label for="img-yolo-min" class="text-muted-foreground" title="YOLO detector confidence threshold"><span class="min-[1200px]:hidden">Y ≥</span><span class="hidden min-[1200px]:inline">YOLO ≥</span></label>
               <input
                 id="img-yolo-min"
                 type="range"
@@ -178,8 +179,8 @@
                 v-model.number="yoloMinConf"
                 class="w-full accent-primary"
               />
-              <span class="font-mono w-10 text-right">{{ yoloMinConf.toFixed(2) }}</span>
-              <label for="img-group-min" class="text-muted-foreground">Group ≥</label>
+              <span class="font-mono w-9 text-right">{{ yoloMinConf.toFixed(2) }}</span>
+              <label for="img-group-min" class="text-muted-foreground" title="Group classifier confidence threshold"><span class="min-[1200px]:hidden">G ≥</span><span class="hidden min-[1200px]:inline">Group ≥</span></label>
               <input
                 id="img-group-min"
                 type="range"
@@ -189,34 +190,40 @@
                 v-model.number="groupMinConf"
                 class="w-full accent-primary"
               />
-              <span class="font-mono w-10 text-right">{{ groupMinConf.toFixed(2) }}</span>
+              <span class="font-mono w-9 text-right">{{ groupMinConf.toFixed(2) }}</span>
             </div>
 
-            <!-- Run-scoped controls live with the thresholds they relate to. -->
-            <div class="flex items-center gap-1.5 pt-15 text-xs">
-              <button
-                role="switch"
-                :aria-checked="exportAutoSelect"
-                :disabled="!run"
-                class="inline-flex items-center gap-1.5 cursor-pointer focus:outline-none disabled:opacity-50 disabled:cursor-not-allowed"
-                @click="toggleAutoSelect"
-              >
-                <span
-                  class="relative inline-block w-8 h-4 rounded-full transition-colors shrink-0"
-                  :class="exportAutoSelect ? 'bg-primary' : 'bg-muted-foreground/30'"
+            <!-- Run-scoped controls live with the thresholds they relate to.
+                 flex-wrap keeps the toggle + its info icon together as one
+                 unit and drops the reset link to its own line when the column
+                 is too narrow for both. pt-4 spaces it down from the sliders. -->
+            <div class="flex flex-wrap items-center gap-x-3 gap-y-2 pt-4 text-xs">
+              <div class="flex items-center gap-1.5">
+                <button
+                  role="switch"
+                  :aria-checked="exportAutoSelect"
+                  :disabled="!run"
+                  class="inline-flex items-center gap-1.5 cursor-pointer focus:outline-none disabled:opacity-50 disabled:cursor-not-allowed"
+                  @click="toggleAutoSelect"
                 >
                   <span
-                    class="absolute top-0.5 left-0.5 w-3 h-3 rounded-full bg-white shadow transition-transform"
-                    :class="exportAutoSelect ? 'translate-x-4' : ''"
-                  />
-                </span>
-                <span class="font-medium">Suggest exports</span>
-              </button>
-              <InfoPopover>
-                When on, accepted crops that clear both thresholds get a blue ring on the Export
-                page marking them as auto-picked. It's a visual cue — they were already in the CSV
-                because they're accepted; this just highlights the high-confidence ones.
-              </InfoPopover>
+                    class="relative inline-block w-8 h-4 rounded-full transition-colors shrink-0"
+                    :class="exportAutoSelect ? 'bg-primary' : 'bg-muted-foreground/30'"
+                  >
+                    <span
+                      class="absolute top-0.5 left-0.5 w-3 h-3 rounded-full bg-white shadow transition-transform"
+                      :class="exportAutoSelect ? 'translate-x-4' : ''"
+                    />
+                  </span>
+                  <span class="font-medium">Suggest exports</span>
+                </button>
+                <InfoPopover>
+                  When on, every unreviewed detection that clears both confidence thresholds is
+                  auto-confirmed and sent to the Export page, shown with a blue ring to mark it as
+                  machine-picked (manual confirmations stay green). Turning it off reverts those
+                  auto-confirmations; your manual decisions are untouched.
+                </InfoPopover>
+              </div>
               <Tooltip
                 class="ml-auto"
                 text="Set both thresholds back to the confidence values this run was configured with on the upload page."
@@ -365,8 +372,8 @@
              score in a branch (e.g. preprocessing-only crops lack a YOLO
              score) pass that branch's filter unaffected, so the slider
              only hides things its branch actually scored. -->
-          <div class="grid grid-cols-[auto_1fr_auto] items-center gap-x-2 gap-y-1 text-xs">
-            <label for="yolo-min" class="text-muted-foreground">YOLO ≥</label>
+          <div class="grid grid-cols-[auto_1fr_auto] items-center gap-x-1 gap-y-1 text-xs">
+            <label for="yolo-min" class="text-muted-foreground" title="YOLO detector confidence threshold"><span class="min-[1200px]:hidden">Y ≥</span><span class="hidden min-[1200px]:inline">YOLO ≥</span></label>
             <input
               id="yolo-min"
               type="range"
@@ -376,8 +383,8 @@
               v-model.number="yoloMinConf"
               class="w-full accent-primary"
             />
-            <span class="font-mono w-10 text-right">{{ yoloMinConf.toFixed(2) }}</span>
-            <label for="group-min" class="text-muted-foreground">Group ≥</label>
+            <span class="font-mono w-9 text-right">{{ yoloMinConf.toFixed(2) }}</span>
+            <label for="group-min" class="text-muted-foreground" title="Group classifier confidence threshold"><span class="min-[1200px]:hidden">G ≥</span><span class="hidden min-[1200px]:inline">Group ≥</span></label>
             <input
               id="group-min"
               type="range"
@@ -387,7 +394,7 @@
               v-model.number="groupMinConf"
               class="w-full accent-primary"
             />
-            <span class="font-mono w-10 text-right">{{ groupMinConf.toFixed(2) }}</span>
+            <span class="font-mono w-9 text-right">{{ groupMinConf.toFixed(2) }}</span>
           </div>
           <!-- Search + below-threshold toggle. Same row when the section
                is wide enough; stacks when not (search on top, button
@@ -671,7 +678,12 @@
                   stroke-dasharray="8 4"
                   class="pointer-events-none"
                 />
-                <ROIOverlay :bbox="roiBbox" :image-w="sourceImage.w" :image-h="sourceImage.h" />
+                <ROIOverlay
+                  :bbox="roiBbox"
+                  :image-w="sourceImage.w"
+                  :image-h="sourceImage.h"
+                  :color="settings.roiColor"
+                />
               </svg>
               <span
                 v-else
@@ -935,6 +947,7 @@
             :bbox="roiBbox"
             :image-w="sourceImage.w"
             :image-h="sourceImage.h"
+            :color="settings.roiColor"
             non-scaling-stroke
           />
         </g>
@@ -964,6 +977,7 @@ import ROIOverlay from '@/components/ROIOverlay.vue'
 import { api } from '@/api'
 import {
   effectiveReviewSettings,
+  normalizeRoiBbox,
   type Detection,
   type PollinatorClass,
   type ReviewerStatus,
@@ -1022,10 +1036,40 @@ let reviewSettingsTimer: ReturnType<typeof setTimeout> | null = null
 let pendingReviewSettings: ReviewSettings = {}
 let pendingReviewSettingsRunId: number | null = null
 
+// True while an auto-select round-trip + reload is in flight, so the toggle
+// can't be double-fired and the UI can show a busy state.
+const applyingAutoSelect = ref(false)
+
+// Drive the "Suggest exports" toggle: the backend persists auto_select,
+// reverts prior auto-accepts, and (when enabled) confirms every unreviewed
+// detection above both thresholds. Reload afterwards so the grid reflects
+// the new reviewer_status / auto_accepted stamps. detections.value is reset
+// first because the composable's load() appends pages onto the current list.
+async function runAutoSelect(enabled: boolean) {
+  const r = run.value
+  if (!r || applyingAutoSelect.value) return
+  applyingAutoSelect.value = true
+  try {
+    const res = await api(`/api/pollinator/runs/${r.id}/auto-select/`, {
+      method: 'POST',
+      body: JSON.stringify({ enabled }),
+    })
+    if (!res.ok) throw new Error(`Auto-select: HTTP ${res.status}`)
+    r.review_settings = { ...(r.review_settings ?? {}), auto_select: enabled }
+    detections.value = []
+    await load()
+  } catch (e) {
+    console.error(e)
+  } finally {
+    applyingAutoSelect.value = false
+  }
+}
+
 // Send whatever's queued right now and clear the timer. Called both by the
 // debounce and on unmount, so a save can't be lost by navigating away
-// inside the debounce window.
-function flushReviewSettings() {
+// inside the debounce window. recompute=false on unmount so we don't kick
+// off a reload into a dead component.
+async function flushReviewSettings(recompute = true) {
   if (reviewSettingsTimer != null) {
     clearTimeout(reviewSettingsTimer)
     reviewSettingsTimer = null
@@ -1035,10 +1079,16 @@ function flushReviewSettings() {
   const body = pendingReviewSettings
   pendingReviewSettings = {}
   pendingReviewSettingsRunId = null
-  void api(`/api/analysis/runs/${id}/review-settings/`, {
+  const hadThreshold = 'yolo_threshold' in body || 'group_threshold' in body
+  const res = await api(`/api/analysis/runs/${id}/review-settings/`, {
     method: 'POST',
     body: JSON.stringify(body),
   })
+  // A threshold change while auto-select is on must re-derive the
+  // auto-accepted set against the new bounds.
+  if (recompute && res.ok && hadThreshold && effectiveReviewSettings(run.value).autoSelect) {
+    await runAutoSelect(true)
+  }
 }
 
 function patchReviewSettings(partial: ReviewSettings) {
@@ -1063,7 +1113,11 @@ const groupMinConf = computed<number>({
 })
 const exportAutoSelect = computed(() => effectiveReviewSettings(run.value).autoSelect)
 function toggleAutoSelect() {
-  patchReviewSettings({ auto_select: !effectiveReviewSettings(run.value).autoSelect })
+  // Flush any pending threshold edits first so the backend recompute reads
+  // the thresholds the reviewer just set, then apply/revert auto-accept.
+  void flushReviewSettings(false).then(() =>
+    runAutoSelect(!effectiveReviewSettings(run.value).autoSelect),
+  )
 }
 
 function passesSliders(d: Detection): boolean {
@@ -1607,10 +1661,9 @@ const siblingOverlays = computed<SiblingOverlay[]>(() => {
   return out
 })
 
-const roiBbox = computed<[number, number, number, number] | null>(() => {
-  const r = run.value?.config?.preprocessing?.roi_bbox
-  return r && r.length === 4 ? r : null
-})
+const roiBbox = computed<[number, number, number, number] | null>(() =>
+  normalizeRoiBbox(run.value?.config?.preprocessing?.roi_bbox),
+)
 
 // Fullscreen zoom modal. State lives in viewBox units; the SVG <g> is
 // translated then scaled, so the wheel-around-cursor math has to convert
@@ -2542,7 +2595,8 @@ onUnmounted(() => {
   document.body.style.cursor = ''
   document.body.style.userSelect = ''
   // Persist any threshold/toggle change still sitting in the debounce
-  // window so navigating away can't drop it.
-  flushReviewSettings()
+  // window so navigating away can't drop it. recompute=false: don't reload
+  // into a component that's being torn down.
+  void flushReviewSettings(false)
 })
 </script>

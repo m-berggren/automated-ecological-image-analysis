@@ -216,6 +216,7 @@ class BaseDetectionReadSerializer(serializers.ModelSerializer):
             'predicted_class',
             'reviewer_status',
             'reviewer_label',
+            'auto_accepted',
             'excluded_from_export',
             'source_image_filename',
             'source_image_url',
@@ -279,8 +280,17 @@ class DetectionReviewSerializer(serializers.Serializer):
             instance.reviewer_label = ''
         instance.reviewed_by = self.context['request'].user
         instance.reviewed_at = timezone.now()
+        # A manual reviewer action always overrides a prior auto-accept, so
+        # this row is no longer "machine-picked" for the Export colour cue.
+        instance.auto_accepted = False
         instance.save(
-            update_fields=['status', 'reviewer_label', 'reviewed_by', 'reviewed_at'],
+            update_fields=[
+                'status',
+                'reviewer_label',
+                'reviewed_by',
+                'reviewed_at',
+                'auto_accepted',
+            ],
         )
         return instance
 

@@ -463,7 +463,10 @@ interface PipelineConfig {
   start_at_image: number
   preprocessing: {
     use_roi: boolean
-    roi_bbox: null | RoiBBox
+    // Persisted as [x, y, width, height] in source-image pixels — the shape
+    // both the backend burn-in and ROIOverlay expect. ROIDrawer emits an
+    // {x,y,width,height} object, converted at assignment below.
+    roi_bbox: null | [number, number, number, number]
     crop_pad_frac: number
     background_sample_size: number
     min_contour_area: number
@@ -742,7 +745,7 @@ async function startDetection() {
         error.value = 'ROI selection was cancelled.'
         return
       }
-      config.value.preprocessing.roi_bbox = bbox
+      config.value.preprocessing.roi_bbox = [bbox.x, bbox.y, bbox.width, bbox.height]
     } else {
       config.value.preprocessing.roi_bbox = null
     }
