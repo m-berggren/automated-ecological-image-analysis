@@ -54,30 +54,34 @@ python3 tools/labeling/crop_labeler.py \
 Keys: `b` = background · `1` = bumblebee · `2` = fly · `3` = butterfly · `4` = other ·
 `u` = unsure · `Q` = quit & save.
 
-### Review inference results — correct predictions & build training data
+### Label crops after inference — primary workflow
 
-After running `infer_cropbased.ipynb` with `MODE = 'infer'` and Cell 8 (organise crops
-by class), use `relabel.py` in **review mode**:
-
-```bash
-python3 tools/labeling/relabel.py \
-    --labeled path/to/crop_results/run_01/camera_A/crops \
-    --dest    path/to/data/training/annotated_crops
-```
-
-Progress is saved in `reviewed.txt` — quit and resume at any time without re-reviewing.
-
-To fix labels already in `annotated_crops/`, use **correct mode** (no `--dest`):
+After running `infer_cropbased.ipynb`, use `crop_labeler.py` to review and label crops.
+It shows the original source frame with bounding boxes so you can verify each detection
+in context, and records progress in a JSON file so you can quit and resume at any time.
 
 ```bash
-python3 tools/labeling/relabel.py --labeled path/to/data/training/annotated_crops
+python3 tools/labeling/crop_labeler.py \
+    --results path/to/outputs/inference/crop_results/run_01 \
+    --output  path/to/data/training/annotated_crops
 ```
 
-### Fix uncertain predictions — active-learning loop
+Crops are **moved** (not copied) into `annotated_crops/{class}/` as you label them.
+The predicted class from `results.csv` is shown as a default label for each crop.
 
-If an inference run produced too many crops to review manually, use
-`experiments/training/prepare_retrain.ipynb` to pre-filter by confidence threshold before labeling.
-See [§ prepare_retrain vs relabel](#prepare_retrain-vs-relabel) for when each fits.
+### Fix uncertain predictions — active-learning loop (future use)
+
+`experiments/training/prepare_retrain.ipynb` pre-filters crops by confidence threshold
+before labeling — only uncertain predictions (below `CONF_THRESHOLD_LOW`) are queued
+for review; high-confidence ones are skipped entirely.
+
+**This workflow requires a trustworthy model.** When confidence scores are unreliable
+(e.g. early-stage or poorly-performing models), confidence-based filtering is
+meaningless — low-confidence predictions are not necessarily wrong, and
+high-confidence ones are not necessarily right. In that case, skip this notebook and
+label all crops directly with `crop_labeler.py`.
+
+See [§ prepare_retrain vs crop_labeler](#prepare_retrain-vs-relabel) for when each fits.
 
 ### Download extra web images (group classifier only)
 
@@ -233,7 +237,13 @@ individual crops one at a time.
 
 ---
 
-### `relabel.py` — correct labels or review inference output
+### `relabel.py` — at-a-glance grid browser for labeled crops
+
+> **Note:** `relabel.py` is currently slow to load and navigate, especially on large
+> crop sets. **`crop_labeler.py` is the recommended primary labeling tool** — it shows
+> frame context and tracks progress per camera. Use `relabel.py` when you want a quick
+> visual scan of an entire class folder as thumbnails (e.g. to spot obvious outliers),
+> not as the main labeling workflow.
 
 Two modes depending on whether you pass `--dest`:
 
@@ -282,27 +292,40 @@ python3 tools/labeling/relabel.py \
 
 ---
 
-### <a name="prepare_retrain-vs-relabel"></a>`prepare_retrain.ipynb` vs `relabel.py` — when to use which
+### <a name="prepare_retrain-vs-relabel"></a>`prepare_retrain.ipynb` vs `crop_labeler.py` — when to use which
 
-| | `prepare_retrain.ipynb` | `relabel.py` (review mode) |
+| | `prepare_retrain.ipynb` + `crop_labeler.py` | `crop_labeler.py` directly |
 |---|---|---|
-| **Input** | A completed inference run (`crop_results/`) | An organised `crops/` folder (from Cell 8) |
-| **What it does** | Reads `results.csv`, selects low-confidence crops, copies them to `retrain_review/` | GUI to correct predictions and copy crops to `annotated_crops/` |
-| **When to use** | Thousands of inference crops — only review uncertain ones | Review crops visually (all, or pre-filtered set from `prepare_retrain`) |
-| **Output** | `retrain_review/{class}/` | `annotated_crops/{class}/` |
+| **When** | Model confidence scores are trustworthy | Model is unreliable / early-stage |
+| **What it does** | Filters to low-confidence crops only; high-confidence ones are skipped | Labels all crops from scratch |
+| **Benefit** | Only review the uncertain fraction — saves time on large runs | Ensures every crop is human-verified |
+| **Prerequisite** | Model must already be reasonably accurate | None |
 
-**Typical active-learning round:**
+**Active-learning round (once the model is trustworthy):**
 ```
-infer_cropbased.ipynb  →  Cell 8 (organise by class)
-                       ↓
-      [OPTIONAL] prepare_retrain.ipynb   ← filter by low confidence
-                       ↓
-      relabel.py --labeled crops/ --dest annotated_crops/
-                       ↓
-      retrain_cropbased.ipynb
+infer_cropbased.ipynb
+        ↓
+prepare_retrain.ipynb   ← filters to low-confidence crops only
+        ↓                  high-confidence predictions go straight to retrain unchanged
+crop_labeler.py  --results retrain_review/  --output annotated_crops/
+        ↓
+retrain_cropbased.ipynb
 ```
 
-If your run has fewer than ~300 crops, skip `prepare_retrain` and go straight to `relabel.py`.
+**Current recommended workflow (model not yet trustworthy):**
+```
+infer_cropbased.ipynb
+        ↓
+crop_labeler.py  --results crop_results/run_XX/  --output annotated_crops/
+  ← label every crop; ignore predicted confidence
+        ↓
+retrain_cropbased.ipynb  (or train_binary_group.ipynb from scratch)
+```
+
+Note: `CONF_THRESHOLD_HIGH` in `prepare_retrain.ipynb` (default 0.95) controls what
+counts as "confident enough to skip". Crops above this threshold are excluded from the
+review set and go directly into retraining as-is. Setting `FORCE_ALL = True` disables
+all thresholds and queues every crop — equivalent to bypassing `prepare_retrain` entirely.
 
 ---
 
