@@ -27,6 +27,10 @@ export interface Detection {
   source: DetectionSource
   reviewer_status: ReviewerStatus
   reviewer_label: PollinatorClass | null
+  // True when "Suggest exports" auto-confirmed this detection (cleared both
+  // thresholds), as opposed to a manual reviewer confirmation. Drives the
+  // blue (auto) vs green (manual) cue on the Export page.
+  auto_accepted: boolean
   predicted_class: PollinatorClass | null
   source_image_filename: string
   source_image_url: string | null
@@ -57,7 +61,9 @@ export interface Run {
     binary_classifier?: { confidence?: number }
     group_classifier?: { confidence?: number }
     preprocessing?: {
-      roi_bbox?: [number, number, number, number] | null
+      // New runs store [x, y, width, height]; runs created before that store
+      // the legacy {x, y, width, height} object. Read via normalizeRoiBbox().
+      roi_bbox?: [number, number, number, number] | RoiBoxObject | null
     }
   }
   review_settings?: ReviewSettings
@@ -67,6 +73,34 @@ export interface DetectionsPage {
   count: number
   next: string | null
   results: Detection[]
+}
+
+// Legacy ROI shape: runs created before the switch to a [x,y,w,h] tuple
+// stored the drawer's raw object. Kept only so normalizeRoiBbox can read
+// older runs; new runs persist the tuple.
+export interface RoiBoxObject {
+  x: number
+  y: number
+  width: number
+  height: number
+}
+
+// Coerce either ROI shape to the [x, y, width, height] tuple the overlay
+// and CSV/annotated export expect, or null if absent/malformed. Tolerating
+// both shapes lets pre-existing runs keep rendering their ROI.
+export function normalizeRoiBbox(
+  r: [number, number, number, number] | RoiBoxObject | null | undefined,
+): [number, number, number, number] | null {
+  if (Array.isArray(r) && r.length === 4 && r.every((n) => typeof n === 'number')) {
+    return r as [number, number, number, number]
+  }
+  if (r && typeof r === 'object' && !Array.isArray(r)) {
+    const { x, y, width, height } = r
+    if ([x, y, width, height].every((n) => typeof n === 'number')) {
+      return [x, y, width, height]
+    }
+  }
+  return null
 }
 
 // Resolves a run's effective review thresholds + auto-select toggle.

@@ -198,6 +198,7 @@
                     :bbox="roiBbox"
                     :image-w="activeCard.naturalW"
                     :image-h="activeCard.naturalH"
+                    :color="settings.roiColor"
                   />
                 </g>
               </svg>
@@ -257,13 +258,18 @@ import ROIOverlay from '@/components/ROIOverlay.vue'
 import CsvExportDialog, { type CsvExportMode } from '@/components/CsvExportDialog.vue'
 import { api } from '@/api'
 import {
-  effectiveReviewSettings,
+  normalizeRoiBbox,
   type BBox,
   type Detection,
   type PollinatorClass,
 } from '@/types/pollinator'
 import { useRunDetections } from '@/composables/useRunDetections'
 import ImageThumbnailRail, { type RailItem } from '@/components/pollinator/ImageThumbnailRail.vue'
+import { usePollinatorSettingsStore } from '@/stores/pollinatorSettings'
+
+// User-level ROI outline color, shared with the review pages via the same
+// store, so the Export overlay matches whatever the reviewer picked.
+const settings = usePollinatorSettingsStore()
 
 const CLASS_COLORS: Record<PollinatorClass, string> = {
   fly: '#6b9bd2',
@@ -318,10 +324,9 @@ function effective(d: Detection): PollinatorClass | null {
   return d.reviewer_label ?? d.predicted_class ?? d.yolo_class ?? d.insectnet_class ?? null
 }
 
-const roiBbox = computed<[number, number, number, number] | null>(() => {
-  const r = run.value?.config?.preprocessing?.roi_bbox
-  return r && r.length === 4 ? r : null
-})
+const roiBbox = computed<[number, number, number, number] | null>(() =>
+  normalizeRoiBbox(run.value?.config?.preprocessing?.roi_bbox),
+)
 
 // Only accepted detections matter for export. Rejected/unsure/unreviewed
 // don't count in the CSV anyway, so don't clutter the Export view with
@@ -393,17 +398,13 @@ const totalExcluded = computed(
   () => acceptedDetections.value.filter((d) => d.excluded_from_export).length,
 )
 
-// "Auto-accepted" mirrors the Review-page blue cue: a detection where
-// both YOLO and the group classifier cleared the run's thresholds. The
-// toggle and thresholds are per-run (run.review_settings), defaulting to
-// the run's config confidences via effectiveReviewSettings. Suppressed
-// entirely when the run's auto-select is off.
+// "Auto-accepted" means the system confirmed this detection via the
+// Review-page "Suggest exports" toggle (it cleared both thresholds), not a
+// human. The backend stamps auto_accepted at toggle time and clears it on
+// any manual review, so the blue (auto) vs green (manual) cue stays honest
+// regardless of confidence.
 function isAutoAccepted(d: Detection): boolean {
-  const rs = effectiveReviewSettings(run.value)
-  if (!rs.autoSelect) return false
-  const y = d.yolo_confidence
-  const g = d.insectnet_confidence
-  return y != null && g != null && y >= rs.yolo && g >= rs.group
+  return d.auto_accepted === true
 }
 
 function hasExcluded(card: ImageCard): boolean {

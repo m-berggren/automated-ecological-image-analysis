@@ -11,6 +11,7 @@ from django.db import transaction
 from django.db.models import QuerySet
 from django.http import FileResponse, StreamingHttpResponse
 from django.shortcuts import get_object_or_404
+from django.utils import timezone
 from PIL import Image, ImageDraw, ImageFont
 from rest_framework import generics, serializers, status
 from rest_framework.pagination import PageNumberPagination
@@ -294,6 +295,22 @@ def _effective_class(d: Detection) -> str:
     return (d.reviewer_label or d.predicted_class or '').lower()
 
 
+def _normalize_roi_bbox(roi: object) -> tuple[float, float, float, float] | None:
+    """Coerce either ROI shape to an (x, y, w, h) tuple, or None.
+
+    New runs store [x, y, w, h]; runs created before that store the drawer's
+    raw {x, y, width, height} object. Mirrors the frontend's normalizeRoiBbox
+    so old runs still get their ROI burned into exports.
+    """
+    if isinstance(roi, (list, tuple)) and len(roi) == 4:
+        return tuple(roi)  # type: ignore[return-value]
+    if isinstance(roi, dict):
+        keys = ('x', 'y', 'width', 'height')
+        if all(isinstance(roi.get(k), (int, float)) for k in keys):
+            return tuple(roi[k] for k in keys)  # type: ignore[return-value]
+    return None
+
+
 def _safe_filename(name: str) -> str:
     """Strip path separators / control chars from a filename so the ZIP
     arcname can't escape its target folder. Falls back to the name's
@@ -429,7 +446,8 @@ class PollinatorRunExportAnnotatedView(APIView):
                         draw.text((tx, ty), cls, fill=_BBOX_RED, font=font)
 
                 roi = ((run.config or {}).get('preprocessing') or {}).get('roi_bbox')
-                if isinstance(roi, (list, tuple)) and len(roi) == 4:
+                roi = _normalize_roi_bbox(roi)
+                if roi is not None:
                     try:
                         rx, ry, rw, rh = (int(v) for v in roi)
                     except (TypeError, ValueError):
@@ -837,3 +855,96 @@ def _active_model(track: str):
             module=Module.POLLINATORS, kind=kind, is_active=True
         ).first()
     )
+
+
+def _resolve_thresholds(run: InferenceRun) -> tuple[float, float]:
+    """Effective (yolo, group) confidence thresholds for a run's auto-select.
+
+    Mirrors the frontend's effectiveReviewSettings(): a per-run override in
+    review_settings wins, otherwise fall back to the confidences the run was
+    created with in config, otherwise 0.5.
+    """
+    rs = run.review_settings or {}
+    cfg = run.config or {}
+
+    def _pick(setting_key: str, *cfg_path: str) -> float:
+        if setting_key in rs and isinstance(rs[setting_key], (int, float)):
+            return float(rs[setting_key])
+        node: object = cfg
+        for key in cfg_path:
+            node = node.get(key) if isinstance(node, dict) else None
+        return float(node) if isinstance(node, (int, float)) else 0.5
+
+    yolo = _pick('yolo_threshold', 'yolo', 'confidence')
+    group = _pick('group_threshold', 'group_classifier', 'confidence')
+    return yolo, group
+
+
+class PollinatorRunAutoSelectView(APIView):
+    """POST /api/pollinator/runs/<id>/auto-select/
+
+    Drives the "Suggest exports" toggle. Body: {"enabled": bool}.
+
+    Idempotent full recompute:
+      1. Persist auto_select in the run's review_settings.
+      2. Revert every prior auto-accepted detection back to unreviewed.
+      3. When enabled, confirm every still-unreviewed detection whose YOLO
+         and group-classifier confidences both clear the run's thresholds,
+         flagging them auto_accepted=True.
+
+    Manual confirmations/corrections/rejections are never touched: they carry
+    auto_accepted=False, so step 2 leaves them alone. Re-running after a
+    threshold change re-derives the set from scratch.
+    """
+
+    def post(self, request: Request, run_id: int) -> Response:
+        try:
+            run = InferenceRun.objects.get(pk=run_id)
+        except InferenceRun.DoesNotExist:
+            return Response(
+                {'error': 'Run not found'}, status=status.HTTP_404_NOT_FOUND
+            )
+        if run.module != Module.POLLINATORS:
+            return Response(
+                {'error': 'auto-select is only valid for pollinator runs'},
+                status=status.HTTP_400_BAD_REQUEST,
+            )
+
+        enabled = request.data.get('enabled')
+        if not isinstance(enabled, bool):
+            return Response(
+                {'error': 'enabled must be a boolean'},
+                status=status.HTTP_400_BAD_REQUEST,
+            )
+
+        run.review_settings = {**(run.review_settings or {}), 'auto_select': enabled}
+        run.save(update_fields=['review_settings'])
+
+        with transaction.atomic():
+            Detection.objects.filter(
+                inference_run=run, auto_accepted=True
+            ).update(
+                status=DetectionStatus.PENDING,
+                auto_accepted=False,
+                reviewer_label='',
+                reviewed_by=None,
+                reviewed_at=None,
+            )
+
+            accepted = 0
+            if enabled:
+                yolo, group = _resolve_thresholds(run)
+                accepted = Detection.objects.filter(
+                    inference_run=run,
+                    status=DetectionStatus.PENDING,
+                    pollinator_detection__yolo_confidence__gte=yolo,
+                    pollinator_detection__insectnet_confidence__gte=group,
+                ).update(
+                    status=DetectionStatus.ACCEPTED,
+                    auto_accepted=True,
+                    reviewer_label='',
+                    reviewed_by=request.user,
+                    reviewed_at=timezone.now(),
+                )
+
+        return Response({'enabled': enabled, 'auto_accepted': accepted})

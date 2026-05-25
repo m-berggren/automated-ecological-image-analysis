@@ -377,7 +377,7 @@ class Detection(models.Model):
             'the ML pipeline in ml-pipelines/pollinator/workflows.'
         ),
     )
-    polygon = models.JSONField()
+    polygon = models.JSONField(null=True, blank=True)
 
     confidence = models.FloatField()
     predicted_class = models.CharField(max_length=50)
@@ -425,6 +425,17 @@ class Detection(models.Model):
         related_name='reviewed_detections',
     )
     reviewed_at = models.DateTimeField(null=True, blank=True)
+
+    auto_accepted = models.BooleanField(
+        default=False,
+        help_text=(
+            'True when the "Suggest exports" auto-select confirmed this '
+            'detection because it cleared both confidence thresholds. '
+            'Distinguishes machine-picked acceptances from manual reviewer '
+            'confirmations: any manual review action clears it. Drives the '
+            'blue (auto) vs green (manual) cue on the Export page.'
+        ),
+    )
 
     excluded_from_export = models.BooleanField(
         default=False,

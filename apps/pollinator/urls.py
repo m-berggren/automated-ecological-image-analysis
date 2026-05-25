@@ -4,6 +4,7 @@ from .views import (
     PollinatorDetectionDetailView,
     PollinatorDetectionListView,
     PollinatorDetectorDatasetUploadView,
+    PollinatorRunAutoSelectView,
     PollinatorRunExportAnnotatedView,
     PollinatorRunExportCropsView,
     PollinatorRunExportCSVView,
@@ -16,6 +17,11 @@ urlpatterns = [
         'runs/<int:run_id>/detections/',
         PollinatorDetectionListView.as_view(),
         name='pollinator-run-detections',
+    ),
+    path(
+        'runs/<int:run_id>/auto-select/',
+        PollinatorRunAutoSelectView.as_view(),
+        name='pollinator-run-auto-select',
     ),
     path(
         'runs/<int:run_id>/export.csv',

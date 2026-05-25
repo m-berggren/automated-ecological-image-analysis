@@ -933,6 +933,8 @@ class DetectionBulkView(APIView):
             'status': REVIEWER_STATUS_MAP[rs],
             'reviewed_by': request.user,
             'reviewed_at': timezone.now(),
+            # Manual review overrides any prior auto-accept (Export colour cue).
+            'auto_accepted': False,
             'reviewer_label': (
                 write.validated_data.get('reviewer_label') or ''
                 if rs == 'corrected'
