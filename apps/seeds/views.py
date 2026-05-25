@@ -51,12 +51,10 @@ class SeedTrainingDataUploadView(APIView):
         # Create output dirs for sliced images
         sliced_train_img_dir = species_dir / 'train_sliced' / 'images'
         sliced_train_lbl_dir = species_dir / 'train_sliced' / 'labels'
-        sliced_val_img_dir = species_dir / 'val' / 'images'
-        sliced_val_lbl_dir = species_dir / 'val' / 'labels'
 
         # Create all dirs
         for d in [raw_train_img_dir, raw_train_lbl_dir, raw_val_img_dir, raw_val_lbl_dir,
-                sliced_train_img_dir, sliced_train_lbl_dir, sliced_val_img_dir, sliced_val_lbl_dir]:
+                sliced_train_img_dir, sliced_train_lbl_dir]:
             d.mkdir(parents=True, exist_ok=True)
 
         print(f'Upload endpoint hit — species: {species}, files: {len(files)}')
@@ -140,22 +138,9 @@ class SeedTrainingDataUploadView(APIView):
                 else:
                     print(f"  [WARNING] No label file for {img_file.name}")
 
-            # Process validation images to val/images
-            all_val_images = list(raw_val_img_dir.glob('*.[jJ][pP][gG]*'))
-            print(f"Total validation images to slice: {len(all_val_images)}")
-
-            for idx, img_file in enumerate(all_val_images, 1):
-                lbl_file = raw_val_lbl_dir / f"{img_file.stem}.txt"
-                if lbl_file.exists():
-                    print(f"  [{idx}/{len(all_val_images)}] Slicing {img_file.name}...")
-                    process_image(str(img_file), str(lbl_file), str(sliced_val_img_dir), str(sliced_val_lbl_dir))
-                else:
-                    print(f"  [WARNING] No label file for {img_file.name}")
-
             # Count how many sliced files were created
             sliced_train_count = len(list(sliced_train_img_dir.glob('*.png')))
-            sliced_val_count = len(list(sliced_val_img_dir.glob('*.png')))
-            print(f"Slicing completed successfully! Created {sliced_train_count} training slices and {sliced_val_count} validation slices")
+            print(f"Slicing completed successfully! Created {sliced_train_count} training slices")
 
         except Exception as e:
             print(f"Slicing failed: {e}")
