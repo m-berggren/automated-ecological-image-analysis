@@ -92,35 +92,36 @@ def process_image(img_path, label_path, output_img_dir, output_lbl_dir):
                     f.write('\n'.join(new_labels) + '\n')
 
 
+if __name__ == '__main__':
 # -------------------------
 # EXECUTION
 # -------------------------
-for species in SPECIES_LIST:
-    for split in SPLITS:
-        input_img_dir = os.path.join(BASE_PATH, f'{species}_model', split, 'images')
-        input_lbl_dir = os.path.join(BASE_PATH, f'{species}_model', split, 'labels')
+    for species in SPECIES_LIST:
+        for split in SPLITS:
+            input_img_dir = os.path.join(BASE_PATH, f'{species}_model', split, 'images')
+            input_lbl_dir = os.path.join(BASE_PATH, f'{species}_model', split, 'labels')
 
-        # Create new directories for the sliced data
-        out_img_dir = os.path.join(
-            BASE_PATH, f'{species}_model', f'{split}_sliced', 'images'
-        )
-        out_lbl_dir = os.path.join(
-            BASE_PATH, f'{species}_model', f'{split}_sliced', 'labels'
-        )
+            # Create new directories for the sliced data
+            out_img_dir = os.path.join(
+                BASE_PATH, f'{species}_model', f'{split}_sliced', 'images'
+            )
+            out_lbl_dir = os.path.join(
+                BASE_PATH, f'{species}_model', f'{split}_sliced', 'labels'
+            )
 
-        os.makedirs(out_img_dir, exist_ok=True)
-        os.makedirs(out_lbl_dir, exist_ok=True)
+            os.makedirs(out_img_dir, exist_ok=True)
+            os.makedirs(out_lbl_dir, exist_ok=True)
 
-        if not os.path.exists(input_img_dir):
-            continue
+            if not os.path.exists(input_img_dir):
+                continue
 
-        print(f'Slicing {species} - {split}...')
-        for img_name in os.listdir(input_img_dir):
-            if img_name.endswith(('.png', '.jpg', '.jpeg')):
-                img_path = os.path.join(input_img_dir, img_name)
-                lbl_path = os.path.join(
-                    input_lbl_dir, os.path.splitext(img_name)[0] + '.txt'
-                )
-                process_image(img_path, lbl_path, out_img_dir, out_lbl_dir)
+            print(f'Slicing {species} - {split}...')
+            for img_name in os.listdir(input_img_dir):
+                if img_name.endswith(('.png', '.jpg', '.jpeg')):
+                    img_path = os.path.join(input_img_dir, img_name)
+                    lbl_path = os.path.join(
+                        input_lbl_dir, os.path.splitext(img_name)[0] + '.txt'
+                    )
+                    process_image(img_path, lbl_path, out_img_dir, out_lbl_dir)
 
-print('Sliced datasets created.')
+    print('Sliced datasets created.')

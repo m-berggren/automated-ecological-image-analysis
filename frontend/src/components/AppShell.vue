@@ -2,7 +2,7 @@
   <div class="flex h-screen bg-background text-foreground overflow-hidden">
     <aside
       class="flex flex-col shrink-0 border-r border-border bg-surface transition-[width] duration-150"
-      :class="collapsed ? 'w-14' : 'w-44'"
+      :class="collapsed ? 'w-14' : 'w-58'"
     >
       <div
         class="flex items-center h-16 border-b border-border"

@@ -16,7 +16,12 @@ from apps.seeds.reference_seed_service import (
 )
 from apps.seeds.services import bootstrap_species_dataset, generate_export_bundle
 from apps.seeds.training import spawn_training_job
+from ml_pipelines.seed_src.training.slice_dataset import process_image
 
+from django.conf import settings
+
+def _base_data() -> Path:
+    return Path(settings.BASE_DIR) / 'data' / 'seed'
 
 class SeedTrainingDataUploadView(APIView):
     """POST /api/seeds/training/upload-data/ to upload training images."""
@@ -27,51 +32,132 @@ class SeedTrainingDataUploadView(APIView):
     def post(self, request) -> Response:
         species = request.data.get('species')
         files = request.FILES.getlist('files')
-        val_split = float(request.data.get('val_split', 0.2))  # 20% val by default
+        val_split = float(request.data.get('val_split', 0.2))
+        training_mode = request.data.get('training_mode', 'scratch')
 
         if not species:
             return Response({'error': 'species is required.'}, status=400)
         if not files:
             return Response({'error': 'No files provided.'}, status=400)
 
-        species_dir = Path('../data/seed') / f'{species.lower()}_model'
-        train_dir = species_dir / 'train_sliced'
-        val_dir = species_dir / 'val' / 'images'
-        train_dir.mkdir(parents=True, exist_ok=True)
-        val_dir.mkdir(parents=True, exist_ok=True)
+        species_dir = _base_data() / f'{species.lower()}_model'
 
-        # Shuffle and split
-        file_list = list(files)
-        random.shuffle(file_list)
-        n_val = max(1, int(len(file_list) * val_split))
-        val_files = file_list[:n_val]
-        train_files = file_list[n_val:]
+        # Save to RAW folders (before slicing)
+        raw_train_img_dir = species_dir / 'train' / 'images'
+        raw_train_lbl_dir = species_dir / 'train' / 'labels'
+        raw_val_img_dir   = species_dir / 'val' / 'images'
+        raw_val_lbl_dir   = species_dir / 'val' / 'labels'
 
-        saved_train = []
-        saved_val = []
+        # Create output dirs for sliced images
+        sliced_train_img_dir = species_dir / 'train_sliced' / 'images'
+        sliced_train_lbl_dir = species_dir / 'train_sliced' / 'labels'
 
-        for f in train_files:
-            dest = train_dir / f.name
+        # Create all dirs
+        for d in [raw_train_img_dir, raw_train_lbl_dir, raw_val_img_dir, raw_val_lbl_dir,
+                sliced_train_img_dir, sliced_train_lbl_dir]:
+            d.mkdir(parents=True, exist_ok=True)
+
+        print(f'Upload endpoint hit — species: {species}, files: {len(files)}')
+        print(f'Saving to raw_train_img_dir: {raw_train_img_dir}')
+        print(f'Saving to raw_val_img_dir: {raw_val_img_dir}')
+
+        # For incremental training, check existing images to avoid duplicates
+        existing_images = set()
+        if training_mode == 'incremental':
+            # Check existing training images
+            for f in raw_train_img_dir.glob('*.[jJ][pP][gG]*'):
+                existing_images.add(f.stem)
+            # Check existing val images
+            for f in raw_val_img_dir.glob('*.[jJ][pP][gG]*'):
+                existing_images.add(f.stem)
+            print(f"Incremental mode - found {len(existing_images)} existing images")
+
+        image_files = [f for f in files if not f.name.endswith('.txt')]
+        label_files  = {f.name.replace('.txt', ''): f for f in files if f.name.endswith('.txt')}
+
+        # Filter out images that already exist (for incremental training)
+        if training_mode == 'incremental':
+            new_images = []
+            for f in image_files:
+                stem = f.name.rsplit('.', 1)[0]
+                if stem not in existing_images:
+                    new_images.append(f)
+                else:
+                    print(f"Skipping existing image: {f.name}")
+            image_files = new_images
+            print(f"New images to add: {len(image_files)}")
+
+        if not image_files:
+            return Response({
+                'message': 'No new images to add. All images already exist.',
+                'train_images': 0,
+                'val_images': 0,
+                'total': 0,
+            })
+
+        print(f"val_split received: {val_split}")
+
+        random.shuffle(image_files)
+        n_val = int(len(image_files) * val_split)
+        val_imgs   = image_files[:n_val]
+        train_imgs = image_files[n_val:]
+
+        def save_file(f, dest_dir):
+            dest = dest_dir / f.name
             with open(dest, 'wb') as out:
                 for chunk in f.chunks():
                     out.write(chunk)
-            saved_train.append(f.name)
 
-        for f in val_files:
-            dest = val_dir / f.name
-            with open(dest, 'wb') as out:
-                for chunk in f.chunks():
-                    out.write(chunk)
-            saved_val.append(f.name)
+        # Save raw training images
+        for f in train_imgs:
+            save_file(f, raw_train_img_dir)
+            stem = f.name.rsplit('.', 1)[0]
+            if stem in label_files:
+                save_file(label_files[stem], raw_train_lbl_dir)
 
-        return Response(
-            {
-                'train_count': len(saved_train),
-                'val_count': len(saved_val),
-                'total': len(file_list),
-            }
-        )
+        # Save raw validation images
+        for f in val_imgs:
+            save_file(f, raw_val_img_dir)
+            stem = f.name.rsplit('.', 1)[0]
+            if stem in label_files:
+                save_file(label_files[stem], raw_val_lbl_dir)
 
+        print(f'Saved {len(train_imgs)} train images, {len(val_imgs)} val images')
+
+        # Run the slicer on all images
+        try:
+            print("Starting slicing process...")
+
+            # Process training images to train_sliced/
+            all_train_images = list(raw_train_img_dir.glob('*.[jJ][pP][gG]*'))
+            print(f"Total training images to slice: {len(all_train_images)}")
+
+            for idx, img_file in enumerate(all_train_images, 1):
+                lbl_file = raw_train_lbl_dir / f"{img_file.stem}.txt"
+                if lbl_file.exists():
+                    print(f"  [{idx}/{len(all_train_images)}] Slicing {img_file.name}...")
+                    process_image(str(img_file), str(lbl_file), str(sliced_train_img_dir), str(sliced_train_lbl_dir))
+                else:
+                    print(f"  [WARNING] No label file for {img_file.name}")
+
+            # Count how many sliced files were created
+            sliced_train_count = len(list(sliced_train_img_dir.glob('*.png')))
+            print(f"Slicing completed successfully! Created {sliced_train_count} training slices")
+
+        except Exception as e:
+            print(f"Slicing failed: {e}")
+
+        return Response({
+            'train_images': len(train_imgs),
+            'val_images': len(val_imgs),
+            'total_new_images': len(image_files),
+            'total_existing_images': len(existing_images) if training_mode == 'incremental' else 0,
+            'labels_matched': sum(
+                1 for f in image_files
+                if f.name.rsplit('.', 1)[0] in label_files
+            ),
+            'total': len(image_files),
+        })
 
 class SeedTrainingJobCreateView(APIView):
     """POST /api/seeds/training/start/ to bootstrap dataset folder and queue a training job."""
@@ -102,14 +188,13 @@ class SeedTrainingJobCreateView(APIView):
             try:
                 bootstrap_species_dataset(species)
             except Exception as e:
-                return Response(
-                    {'error': f'Failed to create dataset folder: {e}'}, status=500
-                )
+                return Response({'error': f'Failed to create dataset folder: {e}'}, status=500)
 
         job = TrainingJob.objects.create(
             module=Module.SEEDS,
             status=JobStatus.PENDING,
             initiated_by=request.user,
+            total_epochs=epochs,
             config={
                 'species': species.lower(),
                 'training_mode': training_mode,
