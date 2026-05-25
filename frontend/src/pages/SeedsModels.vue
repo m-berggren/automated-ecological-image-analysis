@@ -52,7 +52,6 @@
               · {{ track.versions.length }}
               {{ track.versions.length === 1 ? 'version' : 'versions' }}
             </span>
-            <span class="text-xs text-muted-foreground ml-auto">metric: MAE</span>
           </header>
 
           <div v-if="!track.versions.length" class="px-5 py-6 text-sm text-muted-foreground">
@@ -105,7 +104,7 @@
                   <td class="px-3 py-3 font-mono text-xs">
                     {{ formatMetric(v.metrics['f1']) }}
                   </td>
-                  <td class="px-3 py-3 text-xs">{{ v.samples.toLocaleString() }}</td>
+                  <td class="px-3 py-3 text-xs">{{ v.sample_count.toLocaleString() }}</td>
                   <td class="px-3 py-3 text-xs text-muted-foreground">
                     {{ formatRelative(v.trained_at) }}
                   </td>
@@ -149,7 +148,7 @@
                       <template v-if="v.training_duration_seconds">
                         · took {{ humanDuration(v.training_duration_seconds) }}
                       </template>
-                      · {{ v.samples.toLocaleString() }} samples
+                      · {{ v.sample_count.toLocaleString() }} samples
                     </div>
                     <div class="mt-3 pt-3 border-t border-border">
                       <button
@@ -191,7 +190,7 @@ interface Version {
   version_name: string
   is_active: boolean
   metrics: Record<string, number>
-  samples: number
+  sample_count: number
   trained_at: string
   training_duration_seconds: number
   parameters: Record<string, unknown>
@@ -261,8 +260,40 @@ async function loadFromApi() {
       loadError.value = `HTTP ${res.status}`
       return
     }
-    tracks.value = []
+    const versions: any[] = await res.json()
+    console.log('versions from API:', versions.map(v => ({ id: v.id, name: v.version_name, active: v.is_active })))
+
+    const speciesMap = new Map<string, Track>()
+
+    for (const v of versions) {
+      const species = (v.parameters?.species ?? '').toLowerCase()
+      const id = species.toUpperCase()
+
+      if (!speciesMap.has(id)) {
+        speciesMap.set(id, {
+          id,
+          label: id,
+          species: v.parameters?.species ?? id,
+          versions: [],
+        })
+      }
+
+      speciesMap.get(id)!.versions.push({
+        id: v.id,
+        version_name: v.version_name,
+        is_active: v.is_active,
+        metrics: v.metrics ?? {},
+        sample_count: v.sample_count ?? 0,
+        trained_at: v.trained_at ?? v.created_at,
+        training_duration_seconds: v.training_duration_seconds ?? 0,
+        parameters: v.parameters ?? {},
+        charts: v.charts ?? null,
+      })
+    }
+
+    tracks.value = Array.from(speciesMap.values())
   } catch (e) {
+    console.error('loadFromApi error:', e)
     loadError.value = e instanceof Error ? e.message : String(e)
   } finally {
     loading.value = false
@@ -314,10 +345,21 @@ function formatParam(value: unknown): string {
   }
   return String(value)
 }
-function setDefault(track: Track, v: Version) {
+
+async function setDefault(track: Track, v: Version) {
   for (const x of track.versions) x.is_active = false
   v.is_active = true
+
+  // Call backend to persist
+  try {
+    await api(`/api/analysis/models/${v.id}/set-active/`, {
+      method: 'POST',
+    })
+  } catch (e) {
+    console.error('Failed to set active model:', e)
+  }
 }
+
 function toggleExpanded(id: number) {
   const next = new Set(expandedIds.value)
   if (next.has(id)) next.delete(id)

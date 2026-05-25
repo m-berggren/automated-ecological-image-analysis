@@ -95,11 +95,20 @@ class ModelVersion(models.Model):
 
     def save(self, *args, **kwargs) -> None:
         if self.is_active:
-            ModelVersion.objects.filter(
+            # For seeds, only deactivate models of the same species
+            # For other modules, deactivate all of the same kind
+            species = self.parameters.get('species') if self.parameters else None
+            qs = ModelVersion.objects.filter(
                 module=self.module,
                 kind=self.kind,
                 is_active=True,
-            ).exclude(pk=self.pk).update(is_active=False)
+            ).exclude(pk=self.pk)
+
+            if species:
+                # Only deactivate same species
+                qs = qs.filter(parameters__species=species)
+
+            qs.update(is_active=False)
         super().save(*args, **kwargs)
 
     def __str__(self) -> str:

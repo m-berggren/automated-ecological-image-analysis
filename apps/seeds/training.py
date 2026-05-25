@@ -33,7 +33,7 @@ from apps.datasets.models import Module
 from apps.analysis.cancellation import RunCancelled
 
 from ml_pipelines.seed_src.training.train import train_species_model
-from ml_pipelines.seed_src.utils.metrics import calculate_tp_fp_fn  # for post-training evaluation
+from ml_pipelines.seed_src.utils.metrics import calculate_tp_fp_fn, calculate_precision_recall_f1_score
 
 logger = logging.getLogger(__name__)
 
@@ -65,6 +65,7 @@ def _make_progress_callback(job_id: int):
         # Cancellation check on every tick. Status is owned by the cancel
         # endpoint; we just read and raise. RunCancelled inherits
         # BaseException so it bypasses ML pipeline's `except Exception`.
+        print(f'Progress callback: job={job_id} epoch={processed}/{total}')
         current = (
             TrainingJob.objects.filter(pk=job_id)
             .values_list('status', flat=True)
@@ -163,6 +164,7 @@ def run_training_job(job: TrainingJob) -> None:
             raise FileNotFoundError(f'Dataset YAML not found: {data_yaml_path}')
 
         progress_cb = _make_progress_callback(job.pk)
+        print(f'Starting training job {job.pk} — species={species} mode={training_mode} epochs={epochs}')
 
         # Train model
         train_started = time.monotonic()
@@ -176,18 +178,113 @@ def run_training_job(job: TrainingJob) -> None:
         )
 
         train_duration = int(time.monotonic() - train_started)
+        version_name = f'{species.upper()}-{job.pk:02d}'
+        print(f'Training done in {train_duration}s, weights at {weights_path}')
+
+        # Run post-training evaluation
+        progress_cb(0, 0, 'Running post-training evaluation...', 'info')
+        try:
+            from ml_pipelines.seed_src.utils.helpers import load_model
+            from ml_pipelines.seed_src.inference.inference import run_inference
+            from ml_pipelines.seed_src.utils.metrics import calculate_tp_fp_fn, calculate_precision_recall_f1_score
+
+            eval_model = load_model(weights_path)
+            val_dir = BASE_DATA / f'{species}_model' / 'val'  / 'images'
+            label_dir = BASE_DATA / f'{species}_model' / 'val' / 'labels'
+
+            total_tp = total_fp = total_fn = total_error = total_gt = n_images = 0
+
+            if val_dir.exists():
+                for img_file in val_dir.iterdir():
+                    if img_file.suffix.lower() not in {'.jpg', '.jpeg', '.png'}:
+                        continue
+                    label_file = label_dir / f'{img_file.stem}.txt'
+                    gt_boxes = []
+                    if label_file.exists():
+                        from PIL import Image as PILImage
+                        with PILImage.open(img_file) as img:
+                            w, h = img.size
+                        with open(label_file) as f:
+                            for line in f:
+                                parts = line.strip().split()
+                                if len(parts) < 9:
+                                    continue
+                                coords = list(map(float, parts[1:]))
+                                pixel_coords = [
+                                    c * w if i % 2 == 0 else c * h
+                                    for i, c in enumerate(coords)
+                                ]
+                                gt_boxes.append(pixel_coords)
+
+                    result = run_inference(str(img_file), eval_model)
+                    preds = []
+                    for pred in result.object_prediction_list:
+                        b = pred.bbox
+                        poly = [b.minx, b.miny, b.maxx, b.miny,
+                                b.maxx, b.maxy, b.minx, b.maxy]
+                        preds.append({'poly': poly, 'conf': float(pred.score.value)})
+
+                    tp, fp, fn = calculate_tp_fp_fn(preds, gt_boxes, iou_threshold=0.3)
+                    total_tp += tp
+                    total_fp += fp
+                    total_fn += fn
+                    total_error += abs(len(preds) - len(gt_boxes))
+                    total_gt += len(gt_boxes)
+                    n_images += 1
+
+            mae = total_error / n_images if n_images > 0 else 0
+            precision, recall, f1 = calculate_precision_recall_f1_score(
+                total_tp, total_fp, total_fn
+            )
+            metrics = {
+                'mae': round(mae, 3),
+                'precision': round(precision, 3),
+                'recall': round(recall, 3),
+                'f1': round(f1, 3),
+                'val_images': n_images,
+            }
+            # Count training images
+            train_img_dir = BASE_DATA / f'{species}_model' / 'train_sliced' / 'images'
+            sample_count = len([
+                f for f in train_img_dir.iterdir()
+                if f.suffix.lower() in {'.jpg', '.jpeg', '.png'}
+            ]) if train_img_dir.exists() else 0
+
+            print(f'Evaluation complete — MAE={metrics.get("mae")} F1={metrics.get("f1")} samples={sample_count}')
+
+        except Exception as e:
+            logger.warning(f'Post-training evaluation failed: {e}')
+            metrics = {}
+            sample_count = 0
 
         # Persist new ModelVersion + finalise job
+        # By default, the most recent model version is automatically set as active
         with transaction.atomic():
+            ModelVersion.objects.filter(
+                module=Module.SEEDS,
+                parameters__species=species,
+                is_active=True,
+            ).update(is_active=False)
+
+            # Count existing versions for this species
+            existing_count = ModelVersion.objects.filter(
+                module=Module.SEEDS,
+                parameters__species=species,
+            ).count()
+            version_number = str(existing_count + 1).zfill(2)
+            version_name = f'{species.upper()}-{version_number}'
+
             new_mv = ModelVersion.objects.create(
                 module=Module.SEEDS,
                 kind='detector',
-                version_name=f'{species}-{training_mode}-{job.pk}',
+                version_name=version_name,
                 model_file_path=weights_path,
                 source_model_version=source_model,
                 training_duration_seconds=train_duration,
                 trained_at=timezone.now(),
-                is_active=False,
+                is_active=True,
+                metrics=metrics,
+                sample_count=sample_count,
                 parameters={
                     'species': species,
                     'mode': training_mode,
@@ -222,10 +319,6 @@ def run_training_job(job: TrainingJob) -> None:
         job.completed_at = timezone.now()
         job.save(update_fields=['status', 'error_message', 'completed_at'])
         raise
-
-
-# TODO: Post-training evaluation function (evaluation metrics, viability, etc.)
-
 
 def _run_in_thread(job_id: int) -> None:
     try:
