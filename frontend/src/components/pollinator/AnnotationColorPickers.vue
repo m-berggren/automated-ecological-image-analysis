@@ -1,9 +1,9 @@
 <template>
-  <!-- Below 1400px viewport the panel column is too narrow for the label plus
+  <!-- Below 1750px viewport the panel column is too narrow for the label plus
        three swatches in a row, so everything stacks vertically (label on top,
-       each swatch on its own line). At 1400px+ it lays out in a single row with
+       each swatch on its own line). At 1750px+ it lays out in a single row with
        the swatches right-aligned. -->
-  <div class="flex flex-col gap-1.5 min-[1400px]:flex-row min-[1400px]:items-center">
+  <div class="flex flex-col gap-1.5 min-[1750px]:flex-row min-[1750px]:items-center">
     <div class="flex items-center gap-1">
       <span
         class="text-[10px] xl:text-[11px] font-semibold uppercase tracking-wider text-muted-foreground"
@@ -17,7 +17,7 @@
       </InfoPopover>
     </div>
     <div
-      class="flex flex-col gap-1.5 min-[1400px]:flex-row min-[1400px]:items-center min-[1400px]:gap-3 min-[1400px]:ml-auto"
+      class="flex flex-col gap-1.5 min-[1750px]:flex-row min-[1750px]:items-center min-[1750px]:gap-3 min-[1750px]:ml-auto"
     >
         <label class="flex items-center gap-1 text-xs cursor-pointer">
           <input
