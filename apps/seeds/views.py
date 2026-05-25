@@ -95,8 +95,10 @@ class SeedTrainingDataUploadView(APIView):
                 'total': 0,
             })
 
+        print(f"val_split received: {val_split}")
+
         random.shuffle(image_files)
-        n_val = max(1, int(len(image_files) * val_split))
+        n_val = int(len(image_files) * val_split)
         val_imgs   = image_files[:n_val]
         train_imgs = image_files[n_val:]
 
