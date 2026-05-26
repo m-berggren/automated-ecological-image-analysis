@@ -55,10 +55,10 @@ def apply_jpeg_compression(img_path, out_path, quality=10):
 # Perturbations, explored various values to find weak points
 PERTURBATIONS = {
     'clean_baseline': None,
-    #   'gaussian_blur_15px': lambda i, o: apply_blur(i, o, severity=15),
-    #   'darkness_60_percent': lambda i, o: apply_darkness(
-    #       i, o, severity=0.4
-    #   ),  # 60% darker
+    'gaussian_blur_15px': lambda i, o: apply_blur(i, o, severity=15),
+    'darkness_60_percent': lambda i, o: apply_darkness(
+        i, o, severity=0.4
+    ),  # 60% darker
     'jpeg_compression_10': lambda i, o: apply_jpeg_compression(i, o, quality=1),
 }
 
