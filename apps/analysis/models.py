@@ -95,11 +95,20 @@ class ModelVersion(models.Model):
 
     def save(self, *args, **kwargs) -> None:
         if self.is_active:
-            ModelVersion.objects.filter(
+            # For seeds, only deactivate models of the same species
+            # For other modules, deactivate all of the same kind
+            species = self.parameters.get('species') if self.parameters else None
+            qs = ModelVersion.objects.filter(
                 module=self.module,
                 kind=self.kind,
                 is_active=True,
-            ).exclude(pk=self.pk).update(is_active=False)
+            ).exclude(pk=self.pk)
+
+            if species:
+                # Only deactivate same species
+                qs = qs.filter(parameters__species=species)
+
+            qs.update(is_active=False)
         super().save(*args, **kwargs)
 
     def __str__(self) -> str:
@@ -368,7 +377,7 @@ class Detection(models.Model):
             'the ML pipeline in ml-pipelines/pollinator/workflows.'
         ),
     )
-    polygon = models.JSONField()
+    polygon = models.JSONField(null=True, blank=True)
 
     confidence = models.FloatField()
     predicted_class = models.CharField(max_length=50)
@@ -416,6 +425,17 @@ class Detection(models.Model):
         related_name='reviewed_detections',
     )
     reviewed_at = models.DateTimeField(null=True, blank=True)
+
+    auto_accepted = models.BooleanField(
+        default=False,
+        help_text=(
+            'True when the "Suggest exports" auto-select confirmed this '
+            'detection because it cleared both confidence thresholds. '
+            'Distinguishes machine-picked acceptances from manual reviewer '
+            'confirmations: any manual review action clears it. Drives the '
+            'blue (auto) vs green (manual) cue on the Export page.'
+        ),
+    )
 
     excluded_from_export = models.BooleanField(
         default=False,

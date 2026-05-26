@@ -9,17 +9,21 @@ const STORAGE_KEY = 'pollinatorSettings'
 // selected box.
 const DEFAULT_ANNOTATION_COLOR = '#52525b'
 const DEFAULT_ANNOTATION_HIGHLIGHT_COLOR = '#ef4444'
+// blue-500, the ROIOverlay's previous hardcoded default.
+const DEFAULT_ROI_COLOR = '#3b82f6'
 
 interface PersistedShape {
   reviewLayout: ReviewLayout
   annotationColor: string
   annotationHighlightColor: string
+  roiColor: string
 }
 
 const DEFAULTS: PersistedShape = {
   reviewLayout: 'image-first',
   annotationColor: DEFAULT_ANNOTATION_COLOR,
   annotationHighlightColor: DEFAULT_ANNOTATION_HIGHLIGHT_COLOR,
+  roiColor: DEFAULT_ROI_COLOR,
 }
 
 function isReviewLayout(v: unknown): v is ReviewLayout {
@@ -46,6 +50,7 @@ function load(): PersistedShape {
       annotationHighlightColor: isHexColor(parsed.annotationHighlightColor)
         ? parsed.annotationHighlightColor
         : DEFAULTS.annotationHighlightColor,
+      roiColor: isHexColor(parsed.roiColor) ? parsed.roiColor : DEFAULTS.roiColor,
     }
   } catch {
     return { ...DEFAULTS }
@@ -67,6 +72,7 @@ export const usePollinatorSettingsStore = defineStore('pollinatorSettings', {
           reviewLayout: this.reviewLayout,
           annotationColor: this.annotationColor,
           annotationHighlightColor: this.annotationHighlightColor,
+          roiColor: this.roiColor,
         }),
       )
     },
@@ -82,6 +88,11 @@ export const usePollinatorSettingsStore = defineStore('pollinatorSettings', {
     setAnnotationHighlightColor(color: string) {
       if (!isHexColor(color)) return
       this.annotationHighlightColor = color
+      this.persist()
+    },
+    setRoiColor(color: string) {
+      if (!isHexColor(color)) return
+      this.roiColor = color
       this.persist()
     },
     resetLayout() {
