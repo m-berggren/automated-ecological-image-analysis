@@ -1,61 +1,89 @@
 <template>
-  <aside class="w-32 shrink-0 border-r border-border bg-background overflow-y-auto p-2">
+  <aside ref="railRoot" class="w-32 shrink-0 border-r border-border bg-background flex flex-col">
     <div v-if="!items.length" class="text-xs text-muted-foreground italic px-1 py-2">
       {{ emptyMessage }}
     </div>
-    <div v-else class="flex flex-col gap-2">
-      <!-- Wrapper div (not a button) so the optional delete control can sit
-           as a sibling overlay without nesting buttons. -->
-      <div v-for="item in items" :key="item.key" class="relative group">
-        <button
-          :ref="(el) => setItemRef(el, item.key)"
-          class="block w-full text-left relative focus:outline-none hover:opacity-90 border-2 rounded-md overflow-hidden transition-shadow"
-          :class="
-            item.key === activeKey
-              ? 'border-transparent bg-border ring-[3px] ring-green-800 ring-offset-2 ring-offset-background shadow-md z-10'
-              : (item.accentClass ?? 'border-border')
-          "
-          :title="item.title ?? item.label ?? item.key"
-          @click="emit('update:activeKey', item.key)"
+    <!-- Virtualized so an image-first run with thousands of source images
+         mounts only the tiles near the viewport instead of the whole rail.
+         Variable tile heights (per-item aspectRatio, optional label/caption)
+         are handled by DynamicScroller's measurement. -->
+    <DynamicScroller
+      v-else
+      ref="scroller"
+      :items="items"
+      :min-item-size="110"
+      key-field="key"
+      class="flex-1 min-h-0 p-2"
+    >
+      <template #default="{ item, index, active }">
+        <DynamicScrollerItem
+          :item="item"
+          :active="active"
+          :data-index="index"
+          :size-dependencies="[item.src, item.aspectRatio, item.label, item.caption]"
         >
-          <div v-if="item.label" class="px-1 pt-0.5 text-[10px] font-mono font-bold truncate">
-            {{ item.label }}
-          </div>
-          <div class="relative bg-background" :style="{ aspectRatio: item.aspectRatio ?? '4 / 3' }">
-            <img
-              v-if="item.src"
-              :src="item.src"
-              :alt="item.label ?? item.key"
-              loading="lazy"
-              class="absolute inset-0 w-full h-full object-cover"
-            />
-            <div
-              v-else
-              class="absolute inset-0 flex items-center justify-center text-[10px] text-muted-foreground"
+          <!-- pb-2 reproduces the previous flex gap-2 spacing between tiles.
+               Wrapper div (not a button) so the optional delete control can
+               sit as a sibling overlay without nesting buttons. -->
+          <div :data-rail-key="item.key" class="relative group pb-2">
+            <button
+              class="block w-full text-left relative focus:outline-none hover:opacity-90 border-2 rounded-md overflow-hidden transition-shadow"
+              :class="
+                item.key === activeKey
+                  ? 'border-transparent bg-border ring-[3px] ring-green-800 ring-offset-2 ring-offset-background shadow-md z-10'
+                  : (item.accentClass ?? 'border-border')
+              "
+              :title="item.title ?? item.label ?? item.key"
+              @click="emit('update:activeKey', item.key)"
             >
-              n/a
-            </div>
+              <div v-if="item.label" class="px-1 pt-0.5 text-[10px] font-mono font-bold truncate">
+                {{ item.label }}
+              </div>
+              <div
+                class="relative bg-background"
+                :style="{ aspectRatio: item.aspectRatio ?? '4 / 3' }"
+              >
+                <img
+                  v-if="item.src"
+                  :src="item.src"
+                  :alt="item.label ?? item.key"
+                  loading="lazy"
+                  class="absolute inset-0 w-full h-full object-cover"
+                />
+                <div
+                  v-else
+                  class="absolute inset-0 flex items-center justify-center text-[10px] text-muted-foreground"
+                >
+                  n/a
+                </div>
+              </div>
+              <div
+                v-if="item.caption"
+                class="px-1 pb-0.5 text-[10px] text-muted-foreground truncate"
+              >
+                {{ item.caption }}
+              </div>
+            </button>
+            <button
+              v-if="deletable"
+              class="absolute top-1 right-1 z-20 p-1 rounded bg-black/55 text-white opacity-0 group-hover:opacity-100 hover:bg-red-600 transition-opacity focus:opacity-100"
+              title="Delete image: reject all of its still-unreviewed crops as background"
+              @click.stop="emit('delete', item.key)"
+            >
+              <Trash2 class="w-3 h-3" />
+            </button>
           </div>
-          <div v-if="item.caption" class="px-1 pb-0.5 text-[10px] text-muted-foreground truncate">
-            {{ item.caption }}
-          </div>
-        </button>
-        <button
-          v-if="deletable"
-          class="absolute top-1 right-1 z-20 p-1 rounded bg-black/55 text-white opacity-0 group-hover:opacity-100 hover:bg-red-600 transition-opacity focus:opacity-100"
-          title="Delete image: reject all of its still-unreviewed crops as background"
-          @click.stop="emit('delete', item.key)"
-        >
-          <Trash2 class="w-3 h-3" />
-        </button>
-      </div>
-    </div>
+        </DynamicScrollerItem>
+      </template>
+    </DynamicScroller>
   </aside>
 </template>
 
 <script setup lang="ts">
-import { nextTick, watch, type ComponentPublicInstance } from 'vue'
+import { nextTick, ref, watch } from 'vue'
 import { Trash2 } from 'lucide-vue-next'
+import { DynamicScroller, DynamicScrollerItem } from 'vue-virtual-scroller'
+import 'vue-virtual-scroller/dist/vue-virtual-scroller.css'
 
 export interface RailItem {
   key: string
@@ -85,20 +113,29 @@ const emit = defineEmits<{
   (e: 'delete', key: string): void
 }>()
 
-const itemEls: Record<string, HTMLElement | null> = {}
+const railRoot = ref<HTMLElement | null>(null)
+const scroller = ref<{ scrollToItem: (i: number) => void } | null>(null)
 
-function setItemRef(el: Element | ComponentPublicInstance | null, key: string) {
-  itemEls[key] = el as HTMLElement | null
-}
-
-// Keep the active tile in view when the parent changes selection
-// (click on a bbox, keyboard arrow, filter switch, etc.).
+// Keep the active tile in view when the parent changes selection (click on a
+// bbox, keyboard arrow, filter switch, etc.). The tile may be windowed out of
+// the DOM, so page its row into the scroller's buffer first, then fall back
+// to the browser's "nearest" scroll so an already-visible tile doesn't jump.
 watch(
   () => props.activeKey,
   async (k) => {
     if (!k) return
     await nextTick()
-    itemEls[k]?.scrollIntoView({ block: 'nearest', behavior: 'smooth' })
+    const sel = `[data-rail-key="${CSS.escape(k)}"]`
+    let el = railRoot.value?.querySelector(sel)
+    if (!el) {
+      const idx = props.items.findIndex((it) => it.key === k)
+      if (idx >= 0) {
+        scroller.value?.scrollToItem(idx)
+        await nextTick()
+        el = railRoot.value?.querySelector(sel)
+      }
+    }
+    el?.scrollIntoView({ block: 'nearest', behavior: 'smooth' })
   },
 )
 </script>

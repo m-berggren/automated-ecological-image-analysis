@@ -494,91 +494,109 @@
           </button>
         </div>
 
-        <div class="flex-1 overflow-auto">
-          <div v-for="group in groupedDetections" :key="group.label" class="border-b border-border">
-            <header
-              class="px-4 py-2 text-xs font-semibold uppercase tracking-wide bg-surface sticky top-0 z-20 border-b border-border"
-              :class="
-                group.kind === 'needs_review'
-                  ? 'text-amber-700'
-                  : group.kind === 'unclassified'
-                    ? 'text-indigo-700'
-                    : group.kind === 'background'
-                      ? 'text-muted-foreground/70'
-                      : 'text-muted-foreground'
-              "
+        <!-- Virtualized grid. groupedDetections is flattened into header rows
+             and fixed-width tile rows (gridRows); DynamicScroller mounts only
+             the rows near the viewport, so a 15k-crop run paints ~2 screens of
+             DOM instead of every tile. Column count (colsPerRow) is measured
+             from the scroll container so the rows match the visual width at
+             every divider position, and keyboard nav reads the same value.
+             Group headers no longer stick — virtual rows are absolutely
+             positioned, so sticky has nothing to stick to. -->
+        <DynamicScroller
+          v-if="gridRows.length"
+          ref="gridScroller"
+          :items="gridRows"
+          :min-item-size="40"
+          key-field="key"
+          class="flex-1 min-h-0"
+        >
+          <template #default="{ item, index, active }">
+            <DynamicScrollerItem
+              :item="item"
+              :active="active"
+              :data-index="index"
+              :size-dependencies="item.type === 'tiles' ? [colsPerRow, item.detections.length] : []"
             >
-              <span v-if="group.kind === 'needs_review'" class="mr-1">⚠</span>
-              <span v-else-if="group.kind === 'unclassified'" class="mr-1">?</span>
-              <span v-else-if="group.kind === 'background'" class="mr-1">✗</span>
-              {{ group.label }}
-              <span class="font-normal">({{ group.detections.length }})</span>
-            </header>
-            <!-- Column count scales with the section's own width via
-                 container queries. Crops stay roughly square at every
-                 breakpoint so the grid feels consistent as the divider
-                 moves. -->
-            <div
-              class="grid grid-cols-3 @[260px]:grid-cols-4 @[340px]:grid-cols-5 @[440px]:grid-cols-6 @[560px]:grid-cols-7 gap-1 p-2"
-            >
+              <header
+                v-if="item.type === 'header'"
+                class="px-4 py-2 text-xs font-semibold uppercase tracking-wide bg-surface border-b border-border"
+                :class="
+                  item.kind === 'needs_review'
+                    ? 'text-amber-700'
+                    : item.kind === 'unclassified'
+                      ? 'text-indigo-700'
+                      : item.kind === 'background'
+                        ? 'text-muted-foreground/70'
+                        : 'text-muted-foreground'
+                "
+              >
+                <span v-if="item.kind === 'needs_review'" class="mr-1">⚠</span>
+                <span v-else-if="item.kind === 'unclassified'" class="mr-1">?</span>
+                <span v-else-if="item.kind === 'background'" class="mr-1">✗</span>
+                {{ item.label }}
+                <span class="font-normal">({{ item.count }})</span>
+              </header>
               <div
-                v-for="d in group.detections"
-                :key="d.id"
-                class="rounded-md overflow-hidden border-2 transition-all"
-                :class="[
-                  isHighlighted(d.id)
-                    ? 'border-primary ring-2 ring-primary'
-                    : 'border-transparent hover:border-border',
-                  reviewedFade(d) ? 'opacity-50' : '',
-                ]"
+                v-else
+                class="grid gap-1 px-2 py-0.5"
+                :style="{ gridTemplateColumns: `repeat(${colsPerRow}, minmax(0, 1fr))` }"
               >
                 <div
-                  :data-detection-id="d.id"
-                  role="button"
-                  tabindex="0"
-                  class="relative aspect-square cursor-pointer focus:outline-none select-none"
-                  :class="imageParityById.get(d.id) ? 'bg-muted/60' : 'bg-background'"
-                  @click="onTileClick(d, $event)"
-                  @keydown.enter.prevent="onTileClick(d, $event)"
+                  v-for="d in item.detections"
+                  :key="d.id"
+                  class="rounded-md overflow-hidden border-2 transition-all"
+                  :class="[
+                    isHighlighted(d.id)
+                      ? 'border-primary ring-2 ring-primary'
+                      : 'border-transparent hover:border-border',
+                    reviewedFade(d) ? 'opacity-50' : '',
+                  ]"
                 >
-                  <img
-                    v-if="d.crop_url"
-                    :src="d.crop_url"
-                    :alt="`Detection ${d.id}`"
-                    loading="lazy"
-                    class="absolute inset-0 w-full h-full object-contain"
-                  />
                   <div
-                    v-else
-                    class="absolute inset-0 flex items-center justify-center text-2xl font-bold opacity-30"
+                    :data-detection-id="d.id"
+                    role="button"
+                    tabindex="0"
+                    class="relative aspect-square cursor-pointer focus:outline-none select-none"
+                    :class="imageParityById.get(d.id) ? 'bg-muted/60' : 'bg-background'"
+                    @click="onTileClick(d, $event)"
+                    @keydown.enter.prevent="onTileClick(d, $event)"
                   >
-                    {{ classGlyph(primaryClass(d)) }}
+                    <img
+                      v-if="d.crop_url"
+                      :src="d.crop_url"
+                      :alt="`Detection ${d.id}`"
+                      loading="lazy"
+                      class="absolute inset-0 w-full h-full object-contain"
+                    />
+                    <div
+                      v-else
+                      class="absolute inset-0 flex items-center justify-center text-2xl font-bold opacity-30"
+                    >
+                      {{ classGlyph(primaryClass(d)) }}
+                    </div>
+                  </div>
+                  <div
+                    role="checkbox"
+                    :aria-checked="bulkIds.has(d.id)"
+                    tabindex="0"
+                    class="h-5 flex items-center justify-center text-xs cursor-pointer transition-colors"
+                    :class="
+                      bulkIds.has(d.id)
+                        ? 'bg-primary text-primary-foreground'
+                        : 'bg-surface text-muted-foreground hover:bg-muted'
+                    "
+                    @click="toggleBulk(d.id)"
+                    @keydown.space.prevent="toggleBulk(d.id)"
+                  >
+                    <span v-if="bulkIds.has(d.id)">✓</span>
                   </div>
                 </div>
-                <div
-                  role="checkbox"
-                  :aria-checked="bulkIds.has(d.id)"
-                  tabindex="0"
-                  class="h-5 flex items-center justify-center text-xs cursor-pointer transition-colors"
-                  :class="
-                    bulkIds.has(d.id)
-                      ? 'bg-primary text-primary-foreground'
-                      : 'bg-surface text-muted-foreground hover:bg-muted'
-                  "
-                  @click="toggleBulk(d.id)"
-                  @keydown.space.prevent="toggleBulk(d.id)"
-                >
-                  <span v-if="bulkIds.has(d.id)">✓</span>
-                </div>
               </div>
-            </div>
-          </div>
-          <div
-            v-if="!groupedDetections.length"
-            class="p-8 text-center text-sm text-muted-foreground"
-          >
-            No detections match the current filter.
-          </div>
+            </DynamicScrollerItem>
+          </template>
+        </DynamicScroller>
+        <div v-else class="flex-1 p-8 text-center text-sm text-muted-foreground">
+          No detections match the current filter.
         </div>
       </section>
 
@@ -969,6 +987,8 @@
 import { computed, nextTick, onMounted, onUnmounted, ref, watch } from 'vue'
 import { RouterLink, useRoute } from 'vue-router'
 import { ZoomIn } from 'lucide-vue-next'
+import { DynamicScroller, DynamicScrollerItem } from 'vue-virtual-scroller'
+import 'vue-virtual-scroller/dist/vue-virtual-scroller.css'
 import PageHeader from '@/components/PageHeader.vue'
 import Tooltip from '@/components/Tooltip.vue'
 import InfoPopover from '@/components/InfoPopover.vue'
@@ -1337,6 +1357,76 @@ const groupedDetections = computed(() => {
 // matches what the reviewer sees rather than the raw confidence sort.
 const flatVisible = computed(() => groupedDetections.value.flatMap((g) => g.detections))
 
+// --- Virtualized grid rows -------------------------------------------------
+// The crops grid renders through DynamicScroller, which windows a flat list
+// of rows. Each group becomes one header row plus ceil(n / colsPerRow) tile
+// rows. Only the rows near the viewport are mounted, so DOM size stays
+// constant regardless of how many crops the run produced.
+type HeaderRow = {
+  key: string
+  type: 'header'
+  label: string
+  kind: 'needs_review' | 'unclassified' | 'class' | 'background'
+  count: number
+}
+type TileRow = { key: string; type: 'tiles'; detections: Detection[] }
+type GridRow = HeaderRow | TileRow
+
+// Map the container-query breakpoints in the grid template to a column count.
+// Single source of truth shared by the layout (gridRows) and keyboard nav
+// (navigate steps by a full row), so the two can't drift.
+function colsForWidth(w: number): number {
+  if (w >= 560) return 7
+  if (w >= 440) return 6
+  if (w >= 340) return 5
+  if (w >= 260) return 4
+  return 3
+}
+
+// Live width of the scroll container, measured (not derived from leftWidth)
+// so the column count is correct on mobile too, where the section is
+// full-width rather than pinned to the divider. Seeded with the default left
+// width (4 cols); the ResizeObserver overwrites it as soon as the scroller
+// mounts, so this only governs the very first frame.
+const containerWidth = ref(300)
+const colsPerRow = computed(() => colsForWidth(containerWidth.value))
+const gridScroller = ref<{ $el: HTMLElement; scrollToItem: (i: number) => void } | null>(null)
+
+const gridRows = computed<GridRow[]>(() => {
+  const cols = colsPerRow.value
+  const rows: GridRow[] = []
+  for (const group of groupedDetections.value) {
+    rows.push({
+      key: `h:${group.label}`,
+      type: 'header',
+      label: group.label,
+      kind: group.kind,
+      count: group.detections.length,
+    })
+    for (let i = 0; i < group.detections.length; i += cols) {
+      const slice = group.detections.slice(i, i + cols)
+      rows.push({ key: `t:${group.label}:${slice[0].id}`, type: 'tiles', detections: slice })
+    }
+  }
+  return rows
+})
+
+// Observe the scroll container so colsPerRow tracks the divider drag and
+// viewport changes. The scroller only exists once detections have loaded, so
+// (re)attach whenever the element appears.
+let gridResizeObserver: ResizeObserver | null = null
+watch(gridScroller, (s) => {
+  gridResizeObserver?.disconnect()
+  gridResizeObserver = null
+  const el = s?.$el
+  if (!el) return
+  gridResizeObserver = new ResizeObserver((entries) => {
+    containerWidth.value = entries[0].contentRect.width
+  })
+  gridResizeObserver.observe(el)
+  containerWidth.value = el.clientWidth
+})
+
 // Stripe by source image: same image → same tile background, image
 // changes → flip. Restarts per group so each group's first cluster is
 // always the same shade. Lets reviewers eyeball "two tiles from img0091
@@ -1465,7 +1555,21 @@ watch(selectedId, async (id) => {
   pendingLabel.value = null
   if (id == null) return
   await nextTick()
-  const el = document.querySelector(`[data-detection-id="${id}"]`)
+  // The tile may be windowed out of the DOM. If so, scroll its row into the
+  // scroller's buffer first so the element mounts, then fall back to the
+  // browser's "nearest" scroll which keeps an already-visible tile from
+  // jumping during left/right navigation.
+  let el = document.querySelector(`[data-detection-id="${id}"]`)
+  if (!el) {
+    const rowIdx = gridRows.value.findIndex(
+      (r) => r.type === 'tiles' && r.detections.some((d) => d.id === id),
+    )
+    if (rowIdx >= 0) {
+      gridScroller.value?.scrollToItem(rowIdx)
+      await nextTick()
+      el = document.querySelector(`[data-detection-id="${id}"]`)
+    }
+  }
   el?.scrollIntoView({ block: 'nearest', behavior: 'smooth' })
 })
 
@@ -2354,19 +2458,6 @@ function nextVisibleId(currentId: number): number | null {
   return null
 }
 
-// Crops grid column count follows the container-query thresholds in the
-// template, so Down/Up keyboard nav matches the actual visual rows. Below
-// the lg breakpoint (stacked mobile layout) the section is full-width;
-// default to 5 there.
-const GRID_COLS = computed(() => {
-  const w = leftWidth.value
-  if (w >= 560) return 7
-  if (w >= 440) return 6
-  if (w >= 340) return 5
-  if (w >= 260) return 4
-  return 3
-})
-
 // Anchor for range selection. Set by every plain click and by every
 // non-extending keyboard navigation. Shift+arrow / shift+click define the
 // range anchor->current; backtracking shrinks rather than accumulating.
@@ -2550,7 +2641,7 @@ function onKeydown(e: KeyboardEvent) {
       if (settings.reviewLayout === 'image-first') {
         navigateImage(1)
       } else {
-        navigate(GRID_COLS.value, e.shiftKey)
+        navigate(colsPerRow.value, e.shiftKey)
       }
       e.preventDefault()
       break
@@ -2559,7 +2650,7 @@ function onKeydown(e: KeyboardEvent) {
       if (settings.reviewLayout === 'image-first') {
         navigateImage(-1)
       } else {
-        navigate(-GRID_COLS.value, e.shiftKey)
+        navigate(-colsPerRow.value, e.shiftKey)
       }
       e.preventDefault()
       break
@@ -2587,6 +2678,7 @@ function onKeydown(e: KeyboardEvent) {
 onMounted(() => window.addEventListener('keydown', onKeydown))
 onUnmounted(() => {
   window.removeEventListener('keydown', onKeydown)
+  gridResizeObserver?.disconnect()
   // If the user navigates away mid-drag, the move/up listeners would leak.
   window.removeEventListener('mousemove', onPreviewDragMove)
   window.removeEventListener('mouseup', onPreviewDragEnd)
