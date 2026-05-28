@@ -15,7 +15,7 @@ apart on the actual model logic.
 | Package | Domain | How it is run |
 |---------|--------|---------------|
 | [`pollinator/`](pollinator/README.md) | Insect detection + classification | A **library**. Imported by the backend and the notebooks; no entry-point script. |
-| [`seed_src/`](seed_src/README.md) | Seed detection (YOLO oriented bounding boxes) | A **script**. Driven by `main.py` with a settings block at the top. |
+| [`seed_src/`](seed_src/README.md) | Seed detection (YOLO oriented bounding boxes) | A **library**. Imported by the backend. It can also be used for as a set of scripts via `main.py` with a settings block at the top. |
 
 These are independent. They share nothing except living under this folder.
 
