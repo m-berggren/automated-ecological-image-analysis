@@ -17,14 +17,14 @@ the repo convention that ignores any `predictions/` directory. So a fresh clone
 has empty data: repopulate `predictions/` (re-run Stage 1, copy the JSONs in, or
 point `FLY_EVAL_PRED_DIR` at them) before running stages 2 and 3.
 
-| Name | Default | Override |
-|---|---|---|
-| `PRED_DIR` | `./predictions/` | `FLY_EVAL_PRED_DIR` |
-| `VETTED_JSON` | `./predictions/vetted_predictions.json` | `FLY_EVAL_VETTED` |
-| `OPERATING_CURVE_JSON` | `./operating_curve.json` | `FLY_EVAL_CURVE` |
-| `DATASET` (`IMAGES`/`LABELS`) | `thesis-aid/yolo-test-inference-with-annotations` | `FLY_EVAL_DATASET` |
-| `GRID` | `thesis-aid/grid` | `FLY_EVAL_GRID` |
-| `OUT_DIR` | `./figures/` | `FLY_EVAL_OUT` |
+| Name                                | Default                                             | Override              |
+| ----------------------------------- | --------------------------------------------------- | --------------------- |
+| `PRED_DIR`                        | `./predictions/`                                  | `FLY_EVAL_PRED_DIR` |
+| `VETTED_JSON`                     | `./predictions/vetted_predictions.json`           | `FLY_EVAL_VETTED`   |
+| `OPERATING_CURVE_JSON`            | `./operating_curve.json`                          | `FLY_EVAL_CURVE`    |
+| `DATASET` (`IMAGES`/`LABELS`) | `thesis-aid/yolo-test-inference-with-annotations` | `FLY_EVAL_DATASET`  |
+| `GRID`                            | `thesis-aid/grid`                                 | `FLY_EVAL_GRID`     |
+| `OUT_DIR`                         | `./figures/`                                      | `FLY_EVAL_OUT`      |
 
 To retarget on a machine that lacks the thesis repo, set `THESIS_AID_ROOT` (the
 fallback for the un-vendored inputs) or the specific `FLY_EVAL_*` variables. No
@@ -32,7 +32,7 @@ code edits needed.
 
 ## Raw inputs
 
-1. **Vetted field images** in `$DATASET/images/` (358 frames, 3008x1692, three
+1. **Vetted field images** in `$DATA/Evaluation/images/` (358 frames, 3008x1692, three
    plots: `dia`, `dryo`, `various`).
 2. **Ground-truth labels** in `$DATASET/labels/` (YOLO-normalized `.txt`, CVAT
    classes `bumblebee/fly/butterfly/other/unsure`). 430 annotated flies in
@@ -46,6 +46,7 @@ code edits needed.
 ## Pipeline
 
 ### Stage 1: run the real pipeline, capture raw predictions
+
 `combined_pipeline_eval.py` invokes the actual deployed inference
 (`python -m pollinator.workflows.inference`) once per plot, at deliberately low
 capture thresholds so every candidate is retained for later re-thresholding:
@@ -62,6 +63,7 @@ Each detection record holds `bbox`, `source` (`yolo` / `preprocessing` /
 inference.
 
 ### Stage 2: sweep thresholds, produce curve data
+
 `sweep_operating_curve.py` reads the three `*_results.json` from `PRED_DIR`, the
 ground-truth labels, and image sizes. For each YOLO confidence in
 `[0.05 .. 0.50]` it rebuilds the YOLO-only and combined fly detections (binary
@@ -70,6 +72,7 @@ computes fly **recall** and **false-positive count**. It also sweeps the crop
 branch over its own binary gate. Output: `operating_curve.json`.
 
 ### Stage 3: render the figure
+
 `make_yolo_figures.py`, function `operating_curve()`, reads
 `OPERATING_CURVE_JSON` and draws the three curves plus the deployed-point ring.
 Figures land in `OUT_DIR` (default `./figures/`).
