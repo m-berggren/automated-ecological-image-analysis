@@ -35,23 +35,9 @@ class PollinatorDetectionSerializer(BaseDetectionReadSerializer):
         read_only=True,
         allow_null=True,
     )
-    binary_confidence = serializers.FloatField(
-        source='pollinator_detection.binary_confidence',
-        read_only=True,
-        allow_null=True,
-    )
-    class_probs = serializers.JSONField(
-        source='pollinator_detection.class_probs',
-        read_only=True,
-    )
     source = serializers.CharField(
         source='pollinator_detection.source',
         read_only=True,
-    )
-    merge_iou = serializers.FloatField(
-        source='pollinator_detection.merge_iou',
-        read_only=True,
-        allow_null=True,
     )
 
     class Meta(BaseDetectionReadSerializer.Meta):
@@ -61,10 +47,7 @@ class PollinatorDetectionSerializer(BaseDetectionReadSerializer):
             'yolo_confidence',
             'insectnet_class',
             'insectnet_confidence',
-            'binary_confidence',
-            'class_probs',
             'source',
-            'merge_iou',
         )
 
     def get_predicted_class(self, obj: Detection) -> str:
@@ -177,7 +160,9 @@ class PollinatorTrainingCreateSerializer(serializers.ModelSerializer):
         version_name = value.get('version_name')
         if version_name is not None:
             if not isinstance(version_name, str) or not version_name.strip():
-                raise serializers.ValidationError('version_name must be a non-empty string')
+                raise serializers.ValidationError(
+                    'version_name must be a non-empty string'
+                )
             if ModelVersion.objects.filter(version_name=version_name.strip()).exists():
                 raise serializers.ValidationError(
                     f'version_name "{version_name.strip()}" already exists'

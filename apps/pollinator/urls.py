@@ -3,6 +3,7 @@ from django.urls import path
 from .views import (
     PollinatorDetectionDetailView,
     PollinatorDetectionListView,
+    PollinatorDetectionSummaryView,
     PollinatorDetectorDatasetUploadView,
     PollinatorRunAutoSelectView,
     PollinatorRunExportAnnotatedView,
@@ -17,6 +18,11 @@ urlpatterns = [
         'runs/<int:run_id>/detections/',
         PollinatorDetectionListView.as_view(),
         name='pollinator-run-detections',
+    ),
+    path(
+        'runs/<int:run_id>/detections/summary/',
+        PollinatorDetectionSummaryView.as_view(),
+        name='pollinator-run-detections-summary',
     ),
     path(
         'runs/<int:run_id>/auto-select/',

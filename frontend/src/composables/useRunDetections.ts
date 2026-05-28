@@ -48,8 +48,12 @@ export function useRunDetections(
 
       // Stream pages: paint the first batch immediately so the UI becomes
       // interactive, then keep appending. detections.value is reactive, so
-      // any computed downstream of it recomputes per page.
-      let next: string | null = `/api/pollinator/runs/${runId}/detections/`
+      // any computed downstream of it recomputes per page. page_size is the
+      // server max (5000) so a ~15k-detection run loads in ~3 round-trips
+      // instead of ~16; the grid is virtualized, so a larger first page costs
+      // no extra render. DRF echoes page_size into the `next` links.
+      const PAGE_SIZE = 5000
+      let next: string | null = `/api/pollinator/runs/${runId}/detections/?page_size=${PAGE_SIZE}`
       let firstPage = true
       while (next) {
         // DRF sometimes returns the absolute URL; api() expects a relative path.
