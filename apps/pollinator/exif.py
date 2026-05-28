@@ -137,6 +137,20 @@ def _determine_exclusion(
     return False, ''
 
 
+def _strip_nulls(value: Any) -> Any:
+    """Camera EXIF often pads strings with NUL bytes (e.g. PrintIM tags).
+    Postgres jsonb refuses U+0000, so scrub them at the source. Recurses
+    through dicts and lists; non-strings pass through unchanged.
+    """
+    if isinstance(value, str):
+        return value.replace('\x00', '')
+    if isinstance(value, dict):
+        return {k: _strip_nulls(v) for k, v in value.items()}
+    if isinstance(value, (list, tuple)):
+        return [_strip_nulls(v) for v in value]
+    return value
+
+
 def extract_image_metadata(file: Any) -> dict[str, Any]:
     """Returns width, height, captured_at, flash_fired, exif, weather,
     laplacian_var, shutter_speed, excluded, exclusion_reason."""
@@ -168,7 +182,7 @@ def extract_image_metadata(file: Any) -> dict[str, Any]:
 
     excluded, exclusion_reason = _determine_exclusion(flash_fired, laplacian_var)
 
-    return {
+    return _strip_nulls({
         'width': width,
         'height': height,
         'captured_at': captured_at,
@@ -179,4 +193,4 @@ def extract_image_metadata(file: Any) -> dict[str, Any]:
         'shutter_speed': shutter_speed,
         'excluded': excluded,
         'exclusion_reason': exclusion_reason,
-    }
+    })
