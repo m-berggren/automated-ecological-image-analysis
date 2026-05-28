@@ -40,11 +40,20 @@ outputs/
 │           ├── other/
 │           └── background/
 └── evaluation/
-    └── {run_name}_{timestamp}/
-        ├── summary.csv
-        ├── confusion_matrix.png
-        ├── pr_curve.png
-        └── report.html
+    ├── {run_name}_{timestamp}/          ← from evaluate.ipynb
+    │   ├── summary.csv
+    │   ├── confusion_matrix.png
+    │   ├── pr_curve.png
+    │   └── report.html
+    ├── yolo_sensitivity_{timestamp}/    ← from yolo_sensitivity_analysis.ipynb
+    │   ├── yolo_robustness.png
+    │   ├── yolo_ece.png
+    │   ├── yolo_occlusion.png
+    │   └── yolo_eigencam.png
+    └── crop_sensitivity_{timestamp}/    ← from crop_classifier_sensitivity_analysis.ipynb
+        ├── gradcam_all_classes.png
+        ├── robustness_all_classes.png
+        └── ece_all_classes.png
 ```
 
 ---
@@ -70,7 +79,6 @@ the same crops in a single pass — each pipeline adds its own prefixed columns.
 | `skip` | `True` if the frame was skipped before motion detection |
 | `skip_reason` | `flash` or `foggy` (only set when `skip=True`) |
 | `laplacian_var` | Laplacian variance of the frame (sharpness proxy) |
-| `temperature_c` | Temperature OCR'd from frame strip (only if `strip_ocr_temperature=True`) |
 | `pollinator_detected` | `True` if any active pipeline classified the crop as insect |
 
 **Per-pipeline columns** (one set per pipeline listed in `PIPELINES`; prefix = pipeline name):
@@ -177,3 +185,28 @@ One timestamped folder per evaluation run.
 Compare `summary.csv` across evaluation runs to track whether retraining improved accuracy
 before promoting new weights to `models/`. The `report.html` is the easiest way to visually
 inspect what the model is getting wrong.
+
+---
+
+## evaluation/yolo_sensitivity_{timestamp}/
+
+Written by `experiments/evaluation/yolo_sensitivity_analysis.ipynb`.
+
+| File | Contents |
+|------|----------|
+| `yolo_robustness.png` | Recall vs. image degradation (blur, brightness, contrast) |
+| `yolo_ece.png` | Expected calibration error curve |
+| `yolo_occlusion.png` | Occlusion sensitivity heatmap (bottom strip excluded) |
+| `yolo_eigencam.png` | EigenCAM activation saliency overlays |
+
+---
+
+## evaluation/crop_sensitivity_{timestamp}/
+
+Written by `experiments/evaluation/crop_classifier_sensitivity_analysis.ipynb`.
+
+| File | Contents |
+|------|----------|
+| `gradcam_all_classes.png` | GradCAM saliency maps per class |
+| `robustness_all_classes.png` | Classifier accuracy vs. image degradation |
+| `ece_all_classes.png` | Calibration curves per class |

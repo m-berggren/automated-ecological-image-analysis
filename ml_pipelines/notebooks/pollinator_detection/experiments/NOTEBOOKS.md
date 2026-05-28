@@ -28,8 +28,8 @@ experiments/
 | `inference/infer_cropbased.ipynb` | `data/evaluation/images/` | `outputs/inference/crop_results/` |
 | `inference/infer_yolo.ipynb` | `data/evaluation/images/` | `outputs/inference/yolo_results/` |
 | `evaluation/evaluate.ipynb` | `outputs/inference/*/` + `data/evaluation/annotations/` | `outputs/evaluation/` |
-| `evaluation/yolo_sensitivity_analysis.ipynb` | `data/evaluation/images/` + `data/evaluation/annotations/` + `models/yolo_best.pt` | `outputs/yolo_occlusion.png`, `outputs/yolo_eigencam.png` |
-| `evaluation/crop_classifier_sensitivity_analysis.ipynb` | `data/training/annotated_crops/` + `models/` | `outputs/evaluation/gradcam_*.png` |
+| `evaluation/yolo_sensitivity_analysis.ipynb` | `data/evaluation/images/` + `data/evaluation/annotations/` + `models/yolo_best.pt` | `outputs/evaluation/yolo_sensitivity_{timestamp}/` |
+| `evaluation/crop_classifier_sensitivity_analysis.ipynb` | `data/training/annotated_crops/` + `models/` | `outputs/evaluation/crop_sensitivity_{timestamp}/` |
 | `training/train_binary_group.ipynb` | `data/training/annotated_crops/` | `outputs/training/model_runs/`, `models/` |
 | `training/train_5class.ipynb` | `data/training/annotated_crops/` | `outputs/training/model_runs/`, `models/` |
 | `training/train_yolo.ipynb` | CVAT YOLO 1.1 zip (path set in Cell 2) | `outputs/training/model_runs/`, `models/` |
@@ -88,7 +88,7 @@ The primary inference notebook. Runs the full crop-based pipeline on a set of ca
 | Variable | Type | Description |
 |----------|------|-------------|
 | `RUN_NAME` | `str` | Unique name for this run; notebook raises `FileExistsError` if already exists |
-| `PREPROCESS_CONFIG` | `dict` | Motion detection parameters — override individual keys from `DEFAULT_PREPROCESS_CONFIG`; includes `strip_ocr_temperature` (default `False`) and `strip_height` |
+| `PREPROCESS_CONFIG` | `dict` | Motion detection parameters — override individual keys from `DEFAULT_PREPROCESS_CONFIG`; includes `strip_height` |
 | `PIPELINES` | `dict` | One entry per classifier pipeline to run; each has `enabled`, `type` (`'two_stage'` or `'five_class'`), model paths, and optionally `conf_threshold`. All enabled pipelines run in parallel and each adds its own columns to `results.csv` |
 
 Key optional fields inside each `PIPELINES` entry (five_class only):
@@ -101,7 +101,6 @@ Key toggles inside `PREPROCESS_CONFIG`:
 
 | Key | Default | Effect |
 |-----|---------|--------|
-| `strip_ocr_temperature` | `False` | Extract temperature from camera OSD strip (requires tesseract) |
 | `enable_large_motion` | `True` | Detect large fast-moving objects in addition to frame diffs |
 | `darker_threshold` | `15` | Sensitivity of motion detection |
 | `min_contour_area` | `200` | Minimum pixel area for a detected contour to become a crop |
