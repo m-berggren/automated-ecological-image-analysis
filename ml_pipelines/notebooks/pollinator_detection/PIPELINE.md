@@ -218,8 +218,7 @@ The standalone training notebooks point directly to `annotated_crops/` and read 
 
 ### Incremental retraining (Method B)
 
-After the pipeline is running, `retrain_cropbased.ipynb` fine-tunes the binary and
-5-class classifiers using new labeled crops from inference runs. Key differences from
+After the pipeline is running, `retrain_cropbased.ipynb` fine-tunes the binary, 5-class, and 4-class InsectNet classifiers using new labeled crops from inference runs. Key differences from
 initial training:
 
 - Uses a **lower learning rate** (`LR_FINETUNE = 1e-4` vs `1e-3`) to avoid overwriting
@@ -324,9 +323,8 @@ outputs/inference/crop_results/{RUN_NAME}/
 ### Model
 
 The YOLO detector uses **Ultralytics YOLO26n** (`yolo26n.pt`). This is the default in
-`colab_master_pipeline.ipynb` and in `train_yolo.py`. The standalone `train_yolo.ipynb`
-ships with `yolo11n.pt` as a fallback default — change `MODEL_SIZE` in Cell 2 to
-`yolo26n.pt` to match.
+`colab_master_pipeline.ipynb` and in `train_yolo.ipynb`. The standalone `train_yolo.ipynb`
+defaults to `yolo26n.pt` — verify `MODEL_SIZE` in Cell 2 matches the checkpoint you want.
 
 Two-stage training: Stage 1 freezes the backbone (fast convergence, learns the detection
 head); Stage 2 fine-tunes the entire network (best final performance).
@@ -468,7 +466,7 @@ The full iterative improvement cycle looks like this:
     → review only the uncertain fraction
         ↓
 7. retrain_cropbased.ipynb
-   → fine-tunes binary + 5-class classifiers
+   → fine-tunes binary, 5-class, and 4-class InsectNet classifiers
    → new weights → models/ + outputs/training/model_runs/{name}_{timestamp}/
         ↓
 8. back to step 3 with new RUN_NAME to verify improvement

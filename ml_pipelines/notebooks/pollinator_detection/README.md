@@ -41,7 +41,7 @@ The crop-based classifiers also include a **background** class for regions with 
 pollinator-classification/
 │
 ├── experiments/                    ← standalone notebooks (run locally or in Colab)
-│   ├── README.md                   ← per-notebook config reference
+│   ├── NOTEBOOKS.md                ← per-notebook config reference
 │   ├── inference/
 │   │   ├── infer_cropbased.ipynb   ← preprocess images + (optionally) run classifiers
 │   │   └── infer_yolo.ipynb        ← run YOLO detector
@@ -52,14 +52,16 @@ pollinator-classification/
 │   │   ├── prepare_retrain.ipynb     ← select uncertain crops for human review
 │   │   └── retrain_cropbased.ipynb   ← fine-tune classifiers with new labeled crops
 │   └── evaluation/
-│       └── evaluate.ipynb          ← compare pipelines against ground truth
+│       ├── evaluate.ipynb                        ← compare pipelines against ground truth
+│       ├── yolo_sensitivity_analysis.ipynb       ← YOLO occlusion sensitivity + EigenCAM
+│       └── crop_classifier_sensitivity_analysis.ipynb  ← crop classifier GradCAM visualisations
 │
 ├── colab/                          ← master pipeline notebooks (call pollinator package)
-│   ├── README.md                   ← explains standalone vs package-linked distinction
+│   ├── COLAB.md                    ← explains standalone vs package-linked distinction
 │   └── colab_master_pipeline.ipynb ← orchestrates retrain via ml-pipelines backend
 │
 ├── tools/                          ← labeling, triage, and data-prep scripts
-│   ├── README.md                   ← usage guide for every script
+│   ├── TOOLS.md                    ← usage guide for every script
 │   ├── triage/                     ← frame selection before labeling
 │   │   ├── frame_flag_mac.py       ← (macOS) browse camera folders and flag frames
 │   │   ├── feh-triage.sh           ← (Linux) frame triage using feh
@@ -72,7 +74,7 @@ pollinator-classification/
 │       └── flatten-jpg.sh          ← flatten nested JPG folder structures
 │
 ├── models/                         ← model weights (current inference models)
-│   ├── README.md                   ← model descriptions and update workflow
+│   ├── MODELS.md                   ← model descriptions and update workflow
 │   ├── binary_best.pth             ← binary classifier (insect vs background)
 │   ├── 4group_insectnet.pth        ← 4-class group classifier (InsectNet)
 │   ├── 5group_efficientnet.pth     ← 5-class classifier (EfficientNet)
@@ -80,12 +82,12 @@ pollinator-classification/
 │   └── yolo_best.pt                ← YOLO detector
 │
 ├── InsectNet/                      ← third-party backbone (CC BY-NC 4.0, see NOTICE)
-│   ├── README.md                   ← what it is, download link, when it's needed
+│   ├── INSECTNET.md                ← what it is, download link, when it's needed
 │   ├── evaluate.py                 ← adapter code (one line changed from upstream)
 │   └── model.pth                   ← pre-trained weights (gitignored — download from Zenodo)
 │
 ├── data/                           ← input image data (not in git)
-│   ├── README.md                   ← data layout, class structure, how to add training data
+│   ├── DATA.md                     ← data layout, class structure, how to add training data
 │   ├── training/                   ← data used for model training
 │   │   └── annotated_crops/        ← manually labeled crops ({class}/ sub-folders)
 │   └── evaluation/                 ← data used for pipeline evaluation
@@ -93,7 +95,7 @@ pollinator-classification/
 │       └── annotations/   ← CVAT YOLO 1.1 ground truth
 │
 ├── outputs/                        ← generated outputs (not in git)
-│   ├── README.md                   ← output folder structure, CSV column reference
+│   ├── OUTPUTS.md                  ← output folder structure, CSV column reference
 │   ├── inference/                  ← results from running the pipelines
 │   │   ├── crop_results/           ← crop-based inference runs
 │   │   └── yolo_results/           ← YOLO inference runs
@@ -153,4 +155,4 @@ and how initial training differs from incremental retraining.
 | Inference results | `outputs/inference/crop_results/{run_name}/` |
 | Trained model weights (current) | `models/*.pth` / `models/*.pt` |
 | Training run outputs (historical) | `outputs/training/model_runs/{name}_{timestamp}/` |
-| Helper script docs | `tools/README.md` |
+| Helper script docs | `tools/TOOLS.md` |

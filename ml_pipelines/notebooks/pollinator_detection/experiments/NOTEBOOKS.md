@@ -16,7 +16,9 @@ experiments/
 │   ├── prepare_retrain.ipynb       ← select uncertain crops for human review
 │   └── retrain_cropbased.ipynb     ← fine-tune classifiers with newly labeled crops
 └── evaluation/                     ← measure pipeline accuracy
-    └── evaluate.ipynb              ← compare outputs against ground truth
+    ├── evaluate.ipynb                        ← compare outputs against ground truth
+    ├── yolo_sensitivity_analysis.ipynb       ← YOLO occlusion sensitivity + EigenCAM
+    └── crop_classifier_sensitivity_analysis.ipynb  ← crop classifier GradCAM visualisations
 ```
 
 ## Quick reference
@@ -26,6 +28,8 @@ experiments/
 | `inference/infer_cropbased.ipynb` | `data/evaluation/images/` | `outputs/inference/crop_results/` |
 | `inference/infer_yolo.ipynb` | `data/evaluation/images/` | `outputs/inference/yolo_results/` |
 | `evaluation/evaluate.ipynb` | `outputs/inference/*/` + `data/evaluation/annotations/` | `outputs/evaluation/` |
+| `evaluation/yolo_sensitivity_analysis.ipynb` | `data/evaluation/images/` + `data/evaluation/annotations/` + `models/yolo_best.pt` | `outputs/yolo_occlusion.png`, `outputs/yolo_eigencam.png` |
+| `evaluation/crop_classifier_sensitivity_analysis.ipynb` | `data/training/annotated_crops/` + `models/` | `outputs/evaluation/gradcam_*.png` |
 | `training/train_binary_group.ipynb` | `data/training/annotated_crops/` | `outputs/training/model_runs/`, `models/` |
 | `training/train_5class.ipynb` | `data/training/annotated_crops/` | `outputs/training/model_runs/`, `models/` |
 | `training/train_yolo.ipynb` | CVAT YOLO 1.1 zip (path set in Cell 2) | `outputs/training/model_runs/`, `models/` |
@@ -131,18 +135,18 @@ Key entries inside `YOLO_CONFIG`:
 
 | Key | Default | Effect |
 |-----|---------|--------|
-| `conf_threshold` | `0.25` | Minimum confidence to keep a detection |
+| `conf_threshold` | `0.2` | Minimum confidence to keep a detection |
 | `nms_iou` | `0.45` | NMS IoU threshold |
 | `use_sahi` | `True` | Slice-and-tile detection via SAHI (recommended for full-res images) |
 | `sahi_slice` | `640` | Tile size for SAHI inference |
 | `sahi_overlap` | `0.2` | Overlap fraction between SAHI tiles |
-| `sahi_conf` | `0.20` | Per-tile confidence threshold before NMS |
+| `sahi_conf` | `0.05` | Per-tile confidence threshold before NMS |
 | `save_crops` | `True` | Save cropped detection patches |
 | `strip_height` | `120` | Pixels to crop from frame bottom (camera OSD bar) |
 
 Output goes to `outputs/inference/yolo_results/{RUN_NAME}/`:
-- `detections.csv` — per-frame: frame path, bbox (x1 y1 x2 y2), class, confidence
-- `crops/{class}/` — cropped detection patches (if `save_crops = True`)
+- `yolo_results.csv` — one row per detection: camera folder, image name, bbox, class, confidence
+- `yolo_crops/` — cropped detection patches (if `save_crops = True`)
 
 Use `evaluation/evaluate.ipynb` to compare this against the crop-based pipeline.
 
@@ -277,10 +281,10 @@ to review everything regardless of confidence, set `FORCE_ALL = True`.
 
 ### retrain_cropbased.ipynb
 
-Fine-tunes the existing binary and group classifiers with newly labeled crops, rather
+Fine-tunes the existing binary, 5-class, and 4-class InsectNet classifiers with newly labeled crops, rather
 than training from scratch. Faster and requires fewer new samples than a full retrain.
 
-**What it does:** loads the current `models/binary_best.pth` and `models/5group_efficientnet.pth`,
+**What it does:** loads the current `models/binary_best.pth`, `models/5group_efficientnet.pth`, and `models/4group_insectnet.pth`,
 optionally freezes the backbone, and continues training on the updated `annotated_crops/` dataset.
 
 **Key config (Cell 2):**
@@ -288,16 +292,18 @@ optionally freezes the backbone, and continues training on the updated `annotate
 | Variable | Default | Description |
 |----------|---------|-------------|
 | `RETRAIN_BINARY` | `True` | Whether to fine-tune the binary classifier |
-| `RETRAIN_5CLASS` | `True` | Whether to fine-tune the 5-class classifier |
+| `RETRAIN_5CLASS` | `True` | Whether to fine-tune the 5-class EfficientNet classifier |
+| `RETRAIN_4CLASS` | `True` | Whether to fine-tune the 4-class InsectNet group classifier |
 | `EPOCHS_BINARY` | `12` | Fine-tune epochs for binary |
-| `EPOCHS_5CLASS` | `12` | Fine-tune epochs for 5-class |
+| `EPOCHS_5CLASS` | `12` | Fine-tune epochs for 5-class EfficientNet |
+| `EPOCHS_4CLASS` | `12` | Fine-tune epochs for 4-class InsectNet |
 | `LR_FINETUNE` | `1e-4` | Lower LR than scratch training to avoid overwriting learned features |
 | `FREEZE_BACKBONE` | `False` | `True` = update head only (safer for small datasets); `False` = full network |
 | `USE_WEB_FOR_BINARY` | `True` | Add web images as extra insect data for binary |
 | `BG_RATIO` | `3` | Background : insect sampling ratio. Background sampling is balanced across camera plots — each plot contributes an equal quota. Camera-overflow folders (`_101_WSCT`, `_102_WSCT`, …) are the same physical camera hitting the 9 999-image folder limit and are automatically merged into one plot key. |
 
-Best weights overwrite `models/binary_best.pth` and `models/5group_efficientnet.pth` on completion.
-The old weights are backed up to `outputs/training/model_runs/` before overwriting.
+Best weights overwrite `models/binary_best.pth`, `models/5group_efficientnet.pth`, and `models/4group_insectnet.pth` on completion (for whichever models were enabled).
+The old weights are backed up to `{model}_prev.pth` before overwriting.
 
 ---
 
@@ -315,7 +321,7 @@ Scores one or both pipeline outputs against the CVAT ground truth in
 | `CROP_RUNS` | `dict` | `{label: path}` mapping of crop-based runs to evaluate; omit or leave empty to skip |
 | `YOLO_RUNS` | `dict` | `{label: path}` mapping of YOLO runs to evaluate; omit or leave empty to skip |
 | `GT_CLASSES` | `list` | Class names for crop-based ground truth matching (order must match CVAT export) |
-| `YOLO_GT_CLASSES` | `list` | Class names for YOLO ground truth matching |
+| `CLASSES_NO_BB` | `list` | Class names for YOLO ground truth matching (excludes bumblebee — YOLO not trained on it) |
 | `STRIP_HEIGHT` | `120` | Pixels to exclude from frame bottom when matching detections to annotations |
 | `CONF_THRESHOLDS` | `dict` | Per-pipeline confidence threshold applied at eval time only — predictions below this are treated as background. `0` = off. The CSV is never modified; re-run evaluate.ipynb with a different value to test a new threshold instantly. |
 

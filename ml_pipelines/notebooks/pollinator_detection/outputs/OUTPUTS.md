@@ -19,7 +19,8 @@ outputs/
 │   │       └── ...
 │   └── yolo_results/
 │       └── {run_name}_{timestamp}/
-│           ├── detections.csv
+│           ├── yolo_results.csv
+│           ├── yolo_crops/             ← cropped detection patches
 │           └── annotated/              ← frames with bounding boxes drawn
 │               └── {camera_name}/
 ├── training/
@@ -52,7 +53,7 @@ outputs/
 
 Written by `experiments/inference/infer_cropbased.ipynb`.
 
-One folder per run. The `{run_name}` comes from the `RUN_NAME` variable in Cell 2 of the notebook. **The notebook aborts at startup if a folder with that name already exists** (checks both local and Drive) — choose a new name before re-running.
+One folder per run. The `{run_name}` comes from the `RUN_NAME` variable in Cell 3 of the notebook. **The notebook aborts at startup if a folder with that name already exists** (checks both local and Drive) — choose a new name before re-running.
 
 ### results.csv
 
@@ -82,7 +83,7 @@ the same crops in a single pass — each pipeline adds its own prefixed columns.
 | `{pipe}__group_conf` | Group classifier confidence [0, 1] |
 
 Default pipeline names: `two_stage`, `five_class_eff`, `five_class_ins` (whichever are
-enabled in Cell 4 of `infer_cropbased.ipynb`).
+enabled in Cell 3 of `infer_cropbased.ipynb`).
 
 ### crops/
 
@@ -96,22 +97,28 @@ These are the direct input to `tools/labeling/relabel.py` for building training 
 
 Written by `experiments/inference/infer_yolo.ipynb`.
 
-### detections.csv
+### yolo_results.csv
 
 One row per bounding box detection:
 
 | Column | Description |
 |--------|-------------|
-| `frame_path` | Absolute path to the source frame |
-| `camera` | Camera folder name |
-| `x1, y1, x2, y2` | Bounding box in pixels |
-| `class` | Predicted class name |
+| `camera_folder` | Camera folder name |
+| `image_name` | Source image filename |
+| `crop_filename` | Saved crop filename (empty if `save_crops = False`) |
+| `bbox_x, bbox_y, bbox_w, bbox_h` | Bounding box: top-left x/y plus width and height (pixels) |
+| `class_name` | Predicted class name (`fly`, `butterfly`, or `other`) |
 | `confidence` | YOLO confidence score [0, 1] |
+| `method` | Detection method: `sahi` (tiled) or `direct` |
+
+### yolo_crops/
+
+Cropped detection patches saved by the inference loop. Each filename encodes camera, image stem,
+detection index, and class so it can be traced back to the source frame.
 
 ### annotated/
 
-Copies of source frames with bounding boxes and class labels drawn on. Only written if
-`SAVE_ANNOTATED = True` in Cell 2 (default). Useful for a quick visual sanity check.
+Copies of source frames with bounding boxes and class labels drawn on. Useful for a quick visual sanity check.
 
 ---
 

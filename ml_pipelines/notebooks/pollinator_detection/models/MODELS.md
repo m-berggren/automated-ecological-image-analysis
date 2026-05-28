@@ -37,9 +37,9 @@ The notebooks load models from this folder by default. Historical checkpoints st
 | `4group_insectnet.pth` | InsectNet (fine-tuned) | 4 (bee, fly, butterfly, other) | Stage 2 of crop pipeline |
 | `5group_efficientnet.pth` | EfficientNet-B2 | 5 (+ background) | Standalone alternative |
 | `5group_insectnet.pth` | InsectNet (fine-tuned) | 5 (+ background) | Standalone alternative |
-| `yolo_best.pt` | YOLOv26n (Ultralytics) | 4 (bee, fly, butterfly, other) | Fine-tuned 2-stage |
+| `yolo_best.pt` | YOLOv26n (Ultralytics) | 3 (fly, butterfly, other) | Fine-tuned 2-stage; bumblebee excluded from YOLO training |
 
 The `*insectnet*.pth` files are fine-tuned from the InsectNet backbone. The backbone code
-and original weights live in `InsectNet/` — see `InsectNet/README.md` for the download
+and original weights live in `InsectNet/` — see `InsectNet/INSECTNET.md` for the download
 link. You only need `InsectNet/model.pth` if retraining from scratch; retraining and
 inference use the `.pth` files in this folder directly.
