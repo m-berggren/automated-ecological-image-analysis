@@ -118,12 +118,6 @@ pollinator-classification/
 → Open `experiments/inference/infer_cropbased.ipynb`, run all cells — `RUN_NAME` auto-generates a timestamp
 → To add a descriptive label, uncomment Option B in Cell 3 and edit the suffix
 
-**Read temperatures from camera strip (optional)**
-→ Set `strip_ocr_temperature: True` in Cell 3 of `infer_cropbased.ipynb`
-→ Requires tesseract: `!apt-get install -y tesseract-ocr && !pip install pytesseract` (Colab)
-→ Adds a `temperature_c` column to `results.csv`; adds ~0.3 s/frame overhead
-→ See §6 of [PIPELINE.md](PIPELINE.md) for full details
-
 **Evaluate accuracy against ground truth**
 → Open `experiments/evaluation/evaluate.ipynb`, point to a completed run, run all cells
 

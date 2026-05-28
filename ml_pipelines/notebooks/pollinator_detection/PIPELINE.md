@@ -256,26 +256,11 @@ Before motion detection runs, two checks can skip a frame entirely (skipped fram
 
 The Laplacian is computed on the image **after** the strip is removed and at whatever `detection_scale` is set, so lowering `detection_scale` also lowers the measured sharpness. Use `detection_scale=1.0` (the default) to keep the Laplacian on full-resolution pixels. The per-frame variance is always written to `results.csv` as `laplacian_var` for post-hoc inspection.
 
-#### Bottom-strip removal and temperature OCR
+#### Bottom-strip removal
 
 Wingscapes cameras overlay a text bar at the bottom of each image (date, time, temperature). The pipeline removes this strip before processing:
 
 - `strip_height` (default `120` px) — how many pixels to remove from the bottom.
-
-Optionally the pipeline can also **OCR the temperature** from the strip and write it to `results.csv` as `temperature_c`:
-
-- `strip_ocr_temperature` (default `False`) — set to `True` to enable.
-- `strip_ocr_target_height` (default `120`) — strip is upscaled to this height before OCR for reliability.
-- `strip_temp_min` / `strip_temp_max` (default `-50` / `60`) — plausibility range; values outside this are discarded.
-
-Temperature OCR uses [pytesseract](https://github.com/madmaze/pytesseract). On Colab, install it before running:
-
-```python
-!apt-get install -y tesseract-ocr
-!pip install pytesseract
-```
-
-> **Performance note:** OCR adds roughly **0.3 s per frame**. Leave `strip_ocr_temperature=False` (the default) unless you specifically need temperature data in your CSV.
 
 #### Key detection parameters (set in Cell 3 of `infer_cropbased.ipynb`)
 
@@ -285,7 +270,6 @@ Temperature OCR uses [pytesseract](https://github.com/madmaze/pytesseract). On C
 - `detection_scale` — downscale factor for CV operations (1.0 = full resolution, recommended)
 - `foggy_threshold` — Laplacian variance below this → frame skipped as blurry (default `20`)
 - `strip_height` — pixels to remove from the bottom strip (default `120`)
-- `strip_ocr_temperature` — enable temperature OCR from strip (default `False`)
 
 Each run is identified by a `RUN_NAME` and its full config is saved to
 `crop_results/{RUN_NAME}/run_config.json` for reproducibility. If a run with the
