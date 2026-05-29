@@ -243,17 +243,18 @@ Best weights are copied to `models/yolo_best.pt` on completion.
 
 ### prepare_retrain.ipynb
 
-Reads `results.csv` from a completed inference run and extracts low-confidence crops
-for human review — instead of labeling the entire crop set.
+> **Crop-based pipeline only.** Does not apply to the YOLO pipeline.
 
-> **Requires a trustworthy model.** This notebook filters by confidence score:
-> crops above `CONF_THRESHOLD_HIGH` are skipped (assumed correct) and go directly
-> into retraining without human review; only uncertain predictions are queued.
-> If the model's confidence scores are not yet reliable, this filtering is
-> meaningless — skip this notebook and label everything with `crop_labeler.py` instead.
+Reads `results.csv` from a completed inference run and copies crops into a review folder
+sorted by predicted class, ready for human labeling and correction.
+
+> ⚠️ **The model is not yet reliable.** Do not trust its confidence scores or class predictions at this stage.
+> Set `FORCE_ALL = True` to copy every detected crop regardless of confidence.
+> Only crops that are manually moved into `annotated_crops/` will enter retraining —
+> nothing is labeled or accepted automatically.
 > Once the model has been retrained on a fully human-labeled dataset and its confidence
-> scores are well-calibrated, this notebook becomes useful for efficient incremental
-> improvement rounds.
+> scores are well-calibrated, you can switch to confidence-based filtering for faster
+> incremental improvement rounds.
 
 **Key config (Cell 2):**
 
@@ -279,6 +280,8 @@ to review everything regardless of confidence, set `FORCE_ALL = True`.
 ---
 
 ### retrain_cropbased.ipynb
+
+> **Crop-based pipeline only.** Does not apply to the YOLO pipeline.
 
 Fine-tunes the existing binary, 5-class, and 4-class InsectNet classifiers with newly labeled crops, rather
 than training from scratch. Faster and requires fewer new samples than a full retrain.
