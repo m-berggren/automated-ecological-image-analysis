@@ -8,7 +8,7 @@ from collections import Counter
 from pathlib import Path
 
 from django.db import transaction
-from django.db.models import QuerySet
+from django.db.models import Count, Q, QuerySet
 from django.http import FileResponse, StreamingHttpResponse
 from django.shortcuts import get_object_or_404
 from django.utils import timezone
@@ -495,33 +495,124 @@ class PollinatorRunExportAnnotatedView(APIView):
 
 
 class _DetectionPagination(PageNumberPagination):
-    """1000 detections per page by default, capped at 5000. Big enough that
-    the Review/Export pages can paint the first batch fast, small enough
-    that a 12k-image upload doesn't try to ship a single multi-MB JSON.
-    The frontend keeps requesting `next` until exhausted."""
+    """1000 detections per page by default, capped at 5000. The review UI
+    requests larger pages (page_size) to cut a 15k-detection run from ~16
+    round-trips down to a handful; 1000 stays the default for any other
+    caller. The frontend keeps requesting `next` until exhausted."""
 
     page_size = 1000
     page_size_query_param = 'page_size'
     max_page_size = 5000
 
 
+# Map the frontend's reviewer-status vocabulary (and the review page's "Show"
+# filter values) onto Detection.status / reviewer_label predicates. Single
+# source of truth so the list view and the summary endpoint agree on what each
+# label means. Mirrors BaseDetectionReadSerializer.get_reviewer_status.
+_HAS_LABEL = ~Q(reviewer_label='') & Q(reviewer_label__isnull=False)
+_REVIEWER_STATUS_Q: dict[str, Q] = {
+    'unreviewed': Q(status=DetectionStatus.PENDING),
+    'pending': Q(status=DetectionStatus.PENDING),
+    'confirmed': Q(status=DetectionStatus.ACCEPTED) & ~_HAS_LABEL,
+    'corrected': Q(status=DetectionStatus.ACCEPTED) & _HAS_LABEL,
+    'rejected': Q(status=DetectionStatus.REJECTED),
+    'unsure': Q(status=DetectionStatus.UNSURE),
+    'reviewed': Q(status__in=[DetectionStatus.ACCEPTED, DetectionStatus.REJECTED]),
+}
+
+
+def _apply_detection_filters(qs: QuerySet[Detection], params) -> QuerySet[Detection]:
+    """Opt-in server-side narrowing shared by the list and summary endpoints.
+    No params -> unchanged queryset (the review page still loads the full run
+    and filters client-side so its sliders stay instant). An unknown `status`
+    fails loud rather than silently returning everything."""
+    status_param = params.get('status')
+    if status_param:
+        try:
+            qs = qs.filter(_REVIEWER_STATUS_Q[status_param])
+        except KeyError:
+            raise serializers.ValidationError(
+                {'status': f'unknown value {status_param!r}; '
+                 f'expected one of {sorted(_REVIEWER_STATUS_Q)}'}
+            )
+    predicted_class = params.get('predicted_class')
+    if predicted_class:
+        qs = qs.filter(predicted_class=predicted_class)
+    min_confidence = params.get('min_confidence')
+    if min_confidence:
+        try:
+            qs = qs.filter(confidence__gte=float(min_confidence))
+        except ValueError:
+            raise serializers.ValidationError(
+                {'min_confidence': f'not a number: {min_confidence!r}'}
+            )
+    return qs
+
+
 class PollinatorDetectionListView(generics.ListAPIView):
     """GET /api/pollinator/runs/<run_id>/detections/?page=&page_size=
+        &status=&predicted_class=&min_confidence=
 
-    Lists pollinator detections for a run. Paginated (1000 per page by
-    default) so the review UI can stream batches instead of waiting on a
-    single huge response. Filters by module so a non-pollinator run id
-    returns an empty list rather than raising on the missing
-    pollinator_detection relation in the serializer.
+    Lists pollinator detections for a run. Paginated so the review UI can
+    stream batches instead of waiting on one huge response. Filters by module
+    so a non-pollinator run id returns an empty list rather than raising on the
+    missing pollinator_detection relation in the serializer.
+
+    The status/predicted_class/min_confidence params are an optional
+    accelerator: when a caller already knows it only needs one slice (e.g. a
+    single class), it can fetch just that instead of the whole run. They are
+    not required, and the review page leaves them off so its in-memory sliders
+    and grouping stay instant.
     """
 
     serializer_class = PollinatorDetectionSerializer
     pagination_class = _DetectionPagination
 
     def get_queryset(self) -> QuerySet[Detection]:
-        return _POLLINATOR_DETECTION_QS.filter(
-            inference_run_id=self.kwargs['run_id'],
-        ).order_by('id')
+        qs = _POLLINATOR_DETECTION_QS.filter(inference_run_id=self.kwargs['run_id'])
+        return _apply_detection_filters(qs, self.request.query_params).order_by('id')
+
+
+class PollinatorDetectionSummaryView(APIView):
+    """GET /api/pollinator/runs/<run_id>/detections/summary/
+        [?status=&predicted_class=&min_confidence=]
+
+    Lightweight counts for the run: total plus a breakdown by reviewer status
+    and by predicted class. Lets the UI show totals and filter-chip counts
+    without shipping every detection. Honors the same opt-in filters as the
+    list endpoint so a narrowed count matches a narrowed list.
+
+    Note: the review grid's *group* counts (Needs review / per-class /
+    Background) come from client-side detector logic and won't match
+    by_predicted_class one-for-one; these are raw DB counts.
+    """
+
+    def get(self, request: Request, run_id: int) -> Response:
+        qs = _apply_detection_filters(
+            _POLLINATOR_DETECTION_QS.filter(inference_run_id=run_id),
+            request.query_params,
+        )
+        accepted = qs.filter(status=DetectionStatus.ACCEPTED)
+        corrected = accepted.filter(_HAS_LABEL).count()
+        accepted_total = accepted.count()
+        by_status = {
+            'unreviewed': qs.filter(status=DetectionStatus.PENDING).count(),
+            'confirmed': accepted_total - corrected,
+            'corrected': corrected,
+            'rejected': qs.filter(status=DetectionStatus.REJECTED).count(),
+            'unsure': qs.filter(status=DetectionStatus.UNSURE).count(),
+        }
+        by_predicted_class = {
+            row['predicted_class']: row['n']
+            for row in qs.values('predicted_class').annotate(n=Count('id'))
+        }
+        return Response(
+            {
+                'total': qs.count(),
+                'by_status': by_status,
+                'by_predicted_class': by_predicted_class,
+            }
+        )
 
 
 class PollinatorDetectionDetailView(generics.RetrieveUpdateAPIView):
