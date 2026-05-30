@@ -33,12 +33,11 @@ outputs/
 │   │       ├── confusion_matrix.png
 │   │       └── args.yaml               ← full training config snapshot
 │   └── retrain_review/
-│       └── {run_name}_{timestamp}/
-│           ├── bumblebee/
-│           ├── fly/
-│           ├── butterfly/
-│           ├── other/
-│           └── background/
+│       ├── bumblebee/
+│       ├── fly/
+│       ├── butterfly/
+│       ├── other/
+│       └── background/
 └── evaluation/
     ├── {run_name}_{timestamp}/          ← from evaluate.ipynb
     │   ├── summary.csv
@@ -157,7 +156,7 @@ For YOLO runs the folder mirrors the standard Ultralytics output structure:
 - `args.yaml` — full snapshot of every training hyperparameter used in that run
 
 For classifier runs, the structure is similar but uses `.pth` weights files and a
-`metrics.json` instead of Ultralytics CSV format.
+`config.json` (training hyperparameters) instead of Ultralytics CSV format.
 
 **Deploying a new model:** copy the best checkpoint to `models/` manually after verifying
 accuracy with `evaluate.ipynb`:

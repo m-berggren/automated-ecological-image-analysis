@@ -405,11 +405,12 @@ history of all experiments:
 
 ```
 outputs/training/model_runs/{name}_{YYYYMMDD_HHMMSS}/
-  binary_best.pth              ← best checkpoint for this run
-  binary_train_curves.png      ← loss + F1 curves
-  binary_classification_report.txt
+  {model}_best.pth             ← best checkpoint for this run
+  {model}_curves.png           ← loss + F1 curves per model
   config.json                  ← training hyperparameters
 ```
+
+For `train_binary_group.ipynb` the run folder contains two sub-directories (`binary/` and `group/`) with model-specific checkpoints and curves inside each. For `train_5class.ipynb` and `retrain_cropbased.ipynb` the checkpoints and curves are written directly into the run folder.
 
 After a run completes, the notebook also copies the best model to the flat `models/`
 directory to make it the new active inference model.

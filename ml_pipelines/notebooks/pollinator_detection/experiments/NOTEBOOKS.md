@@ -178,7 +178,7 @@ When `BINARY_BACKBONE = 'both'`, backbone-specific copies (`binary_efficientnet_
 | `EPOCHS_S2` | `0` | Epochs for group classifier Stage 2 fine-tune on field only (0 = skip) |
 | `LR_S1` | `1e-3` | Learning rate for Stage 1 |
 | `LR_S2` | `1e-4` | Learning rate for Stage 2 |
-| `BG_RATIO` | `3` | Background : insect sampling ratio. Background sampling is balanced across camera plots — each plot contributes an equal quota. Camera-overflow folders (`_101_WSCT`, `_102_WSCT`, …) are the same physical camera hitting the 9 999-image folder limit and are automatically merged into one plot key. |
+| `BG_RATIO` | `4` | Background : insect sampling ratio. Background sampling is balanced across camera plots — each plot contributes an equal quota. Camera-overflow folders (`_101_WSCT`, `_102_WSCT`, …) are the same physical camera hitting the 9 999-image folder limit and are automatically merged into one plot key. |
 | `USE_WEB_FOR_BINARY` | `True` | Add iNaturalist web images as extra insect data for binary |
 | `WEB_ROOT` | `data/training/web_images/` | Root folder containing `batch_*/` sub-folders produced by `download_web_images.py` |
 | `WEB_BATCHES` | `[]` (all batches) | Which download batches to include; `[]` = all, e.g. `['batch_20260529_143000']` = one specific batch only |
@@ -288,7 +288,7 @@ to review everything regardless of confidence, set `FORCE_ALL = True`.
 Fine-tunes the existing binary, 5-class, and 4-class InsectNet classifiers with newly labeled crops, rather
 than training from scratch. Faster and requires fewer new samples than a full retrain.
 
-**What it does:** loads the current `models/binary_best.pth`, `models/5group_efficientnet.pth`, and `models/4group_insectnet.pth`,
+**What it does:** loads the current `models/binary_best.pth`, `models/5group_efficientnet.pth`, `models/5group_insectnet.pth`, and `models/4group_insectnet.pth`,
 optionally freezes the backbone, and continues training on the updated `annotated_crops/` dataset.
 
 **Key config (Cell 2):**
@@ -296,17 +296,21 @@ optionally freezes the backbone, and continues training on the updated `annotate
 | Variable | Default | Description |
 |----------|---------|-------------|
 | `RETRAIN_BINARY` | `True` | Whether to fine-tune the binary classifier |
-| `RETRAIN_5CLASS` | `True` | Whether to fine-tune the 5-class EfficientNet classifier |
+| `RETRAIN_5CLASS_EFFNET` | `True` | Whether to fine-tune the 5-class EfficientNet-B2 classifier |
+| `RETRAIN_5CLASS_INSECTNET` | `True` | Whether to fine-tune the 5-class InsectNet classifier |
 | `RETRAIN_4CLASS` | `True` | Whether to fine-tune the 4-class InsectNet group classifier |
 | `EPOCHS_BINARY` | `12` | Fine-tune epochs for binary |
-| `EPOCHS_5CLASS` | `12` | Fine-tune epochs for 5-class EfficientNet |
+| `EPOCHS_5CLS_EN` | `12` | Fine-tune epochs for 5-class EfficientNet |
+| `EPOCHS_5CLS_IN` | `12` | Fine-tune epochs for 5-class InsectNet |
 | `EPOCHS_4CLASS` | `12` | Fine-tune epochs for 4-class InsectNet |
 | `LR_FINETUNE` | `1e-4` | Lower LR than scratch training to avoid overwriting learned features |
 | `FREEZE_BACKBONE` | `False` | `True` = update head only (safer for small datasets); `False` = full network |
 | `USE_WEB_FOR_BINARY` | `True` | Add web images as extra insect data for binary |
+| `WEB_ROOT` | `data/training/web_images/` | Root folder containing `batch_*/` sub-folders |
+| `WEB_BATCHES` | `[]` (all batches) | Which download batches to include; `[]` = all |
 | `BG_RATIO` | `3` | Background : insect sampling ratio. Background sampling is balanced across camera plots — each plot contributes an equal quota. Camera-overflow folders (`_101_WSCT`, `_102_WSCT`, …) are the same physical camera hitting the 9 999-image folder limit and are automatically merged into one plot key. |
 
-Best weights overwrite `models/binary_best.pth`, `models/5group_efficientnet.pth`, and `models/4group_insectnet.pth` on completion (for whichever models were enabled).
+Best weights overwrite `models/binary_best.pth`, `models/5group_efficientnet.pth`, `models/5group_insectnet.pth`, and `models/4group_insectnet.pth` on completion (for whichever models were enabled).
 The old weights are backed up with a timestamped filename (`{model}_YYYYMMDD_HHMMSS.pth`) before overwriting — check `models/` for the most recent backup if you need to roll back.
 
 ---
