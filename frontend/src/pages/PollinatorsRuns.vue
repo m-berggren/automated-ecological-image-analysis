@@ -366,6 +366,18 @@ function openCsvDialog(runId: number) {
   csvDialogOpen.value = true
 }
 
+// Name the download after the upload (falling back to the run, then its id),
+// matching the Export page instead of the generic run-<id> form. Suffix tracks
+// the mode: per_image -> _images, per_detection -> _detections.
+function csvDownloadName(runId: number, mode: CsvExportMode): string {
+  const run = runs.value.find((r) => r.id === runId)
+  const upload = run?.upload != null ? uploadsById.value.get(run.upload) : null
+  const raw = upload?.name || run?.name || `run-${runId}`
+  const base = raw.replace(/[^\w.-]+/g, '_').replace(/^_+|_+$/g, '') || `run-${runId}`
+  const suffix = mode === 'per_image' ? 'images' : 'detections'
+  return `${base}_${suffix}.csv`
+}
+
 async function onCsvConfirm(mode: CsvExportMode) {
   const runId = csvDialogRunId.value
   csvDialogRunId.value = null
@@ -381,7 +393,7 @@ async function onCsvConfirm(mode: CsvExportMode) {
     const url = URL.createObjectURL(blob)
     const a = document.createElement('a')
     a.href = url
-    a.download = `run-${runId}-${mode === 'per_image' ? 'images' : 'detections'}.csv`
+    a.download = csvDownloadName(runId, mode)
     document.body.appendChild(a)
     a.click()
     a.remove()

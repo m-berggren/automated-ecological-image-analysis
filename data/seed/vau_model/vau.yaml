@@ -1,4 +1,4 @@
-path: ../data/seed/vau_model
+path: data/seed/vau_model
 train: train_sliced
 val: val/images
 

@@ -14,13 +14,13 @@ BASE_DIR = Path(__file__).resolve().parent.parent.parent
 
 # The pollinator ML package lives next to the Django project; make it
 # importable so apps.analysis can call pollinator.inference at runtime.
-sys.path.insert(0, str(BASE_DIR / 'ml-pipelines'))
+sys.path.insert(0, str(BASE_DIR / 'ml_pipelines'))
 
 # ---------------------------------------------------------------------------
 # Configurable values — override via env vars or per-environment settings
 # ---------------------------------------------------------------------------
 
-JWT_ACCESS_LIFETIME_MINUTES = int(os.environ.get('JWT_ACCESS_LIFETIME_MINUTES', 30))
+JWT_ACCESS_LIFETIME_MINUTES = int(os.environ.get('JWT_ACCESS_LIFETIME_MINUTES', 720))
 JWT_REFRESH_LIFETIME_DAYS = int(os.environ.get('JWT_REFRESH_LIFETIME_DAYS', 7))
 JWT_ROTATE_REFRESH = os.environ.get('JWT_ROTATE_REFRESH', 'true').lower() == 'true'
 
@@ -52,6 +52,7 @@ INSTALLED_APPS = [
     'apps.analysis',
     'apps.datasets',
     'apps.pollinator',
+    'apps.seeds',
     'rest_framework',
     'corsheaders',
 ]
@@ -104,7 +105,7 @@ AUTH_PASSWORD_VALIDATORS = [
 # ---------------------------------------------------------------------------
 
 LANGUAGE_CODE = 'en-us'
-TIME_ZONE = 'UTC'
+TIME_ZONE = 'Europe/Stockholm'
 USE_I18N = True
 USE_TZ = True
 

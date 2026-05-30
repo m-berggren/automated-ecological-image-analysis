@@ -1,6 +1,40 @@
 <template>
   <PageHeader :title="headerTitle" subtitle="Confirm, correct, or reject detections" />
   <PollinatorsStepper current="review" :runId="run?.id" />
+  <div
+    v-if="detections.length > 0"
+    class="px-8 py-1.5 border-b border-border bg-surface flex items-center gap-3 text-xs text-muted-foreground"
+  >
+    <span
+      v-if="imageFirstPageInfo"
+      class="inline-flex items-center gap-1.5 px-2 py-0.5 rounded bg-muted"
+    >
+      <span class="font-medium text-foreground">Image</span>
+      <span class="font-mono tabular-nums text-foreground"
+        >{{ imageFirstPageInfo.current.toLocaleString() }} /
+        {{ imageFirstPageInfo.total.toLocaleString() }}</span
+      >
+    </span>
+    <span class="inline-flex items-center gap-1.5 px-2 py-0.5 rounded bg-muted">
+      <span class="font-mono tabular-nums text-foreground">{{
+        filteredDetections.length.toLocaleString()
+      }}</span>
+      <span>visible</span>
+      <span class="text-muted-foreground/50">/</span>
+      <span class="font-mono tabular-nums text-foreground">{{
+        detections.length.toLocaleString()
+      }}</span>
+      <span>total crops</span>
+    </span>
+    <InfoPopover>
+      Visible = crops shown right now; total = every crop in the run. Crops are hidden when they
+      fall below the confidence thresholds or don't match the active filters, and already-reviewed
+      crops are hidden by default.
+    </InfoPopover>
+    <span v-if="loadProgress.total && loadProgress.loaded < loadProgress.total" class="italic">
+      loading {{ loadProgress.loaded.toLocaleString() }}/{{ loadProgress.total.toLocaleString() }}…
+    </span>
+  </div>
 
   <div v-if="loading" class="flex-1 p-8 text-sm text-muted-foreground">Loading…</div>
   <div v-else-if="loadError" class="flex-1 p-8 text-sm text-red-600">{{ loadError }}</div>
@@ -28,7 +62,267 @@
         Dismiss
       </button>
     </div>
-    <div class="flex-1 flex flex-col-reverse lg:flex-row min-h-0">
+    <ReviewImageFirst
+      v-if="settings.reviewLayout === 'image-first'"
+      :detections="filteredDetections"
+      :selected-id="selectedId"
+      :bulk-ids="bulkIds"
+      :roi-bbox="roiBbox"
+      @update:selected-id="selectedId = $event"
+      @drag-select="onImageFirstDragSelect"
+      @delete-image="onDeleteImage"
+      @toggle-training-exclude="onToggleTrainingExclude"
+    >
+      <template #below>
+        <!-- Four side-by-side containers under the image. Fixed height so
+             the row never reflows when a crop with unusual aspect lands
+             in the preview. Left to right: crop preview, predictions,
+             thresholds, labels. -->
+        <div
+          class="grid grid-cols-1 md:grid-cols-[1fr_1fr_1fr_1.2fr] divide-y md:divide-y-0 md:divide-x divide-border h-48"
+        >
+          <!-- Focused crop preview. Hidden in bulk mode since there's no
+               single crop to preview; only shown for a lone selection. -->
+          <div class="p-2 min-h-0 flex items-center justify-center">
+            <img
+              v-if="!bulkMode && selected && selected.crop_url"
+              :src="selected.crop_url"
+              :alt="`Detection ${selected.id}`"
+              class="w-full h-full object-contain bg-background border border-border shadow-sm"
+            />
+            <span v-else class="text-xs text-muted-foreground">
+              {{ bulkMode ? `${bulkIds.size} crops selected` : 'No crop selected' }}
+            </span>
+          </div>
+
+          <!-- Model predictions for the focused crop. Mirrors the sidebar
+               row format so the same info is reachable without scrolling.
+               Empty-state message is centered to match the crop-preview
+               container's layout when nothing is selected or in bulk mode. -->
+          <div class="px-4 py-2 min-h-0 overflow-auto flex flex-col">
+            <div
+              class="flex items-center gap-1 text-[10px] xl:text-[11px] font-semibold uppercase tracking-wider text-muted-foreground"
+            >
+              <span>Predictions</span>
+              <InfoPopover>
+                The model calls for the focused crop: the YOLO detector and the 4-group classifier
+                (fly / bumblebee / butterfly / other), each with its confidence. These are model
+                outputs, not your decision — confirm or correct them with the Label controls.
+              </InfoPopover>
+            </div>
+            <div
+              class="flex-1 min-h-0 mt-1"
+              :class="!bulkMode && selected ? '' : 'flex items-center justify-center text-center'"
+            >
+              <div v-if="!bulkMode && selected" class="space-y-0.5 text-xs font-mono">
+                <div class="flex items-center gap-2">
+                  <span class="text-muted-foreground w-16 text-[10px]">YOLO</span>
+                  <span class="w-10 tabular-nums">
+                    {{
+                      selected.yolo_confidence != null ? selected.yolo_confidence.toFixed(2) : '—'
+                    }}
+                  </span>
+                  <span class="font-medium">{{
+                    selected.yolo_class
+                      ? classLabel(selected.yolo_class).slice(0, 1).toUpperCase() +
+                        classLabel(selected.yolo_class).slice(1)
+                      : '—'
+                  }}</span>
+                </div>
+                <div class="flex items-center gap-2">
+                  <span class="text-muted-foreground w-16 text-[10px]">4-Group</span>
+                  <span class="w-10 tabular-nums">
+                    {{
+                      selected.insectnet_confidence != null
+                        ? selected.insectnet_confidence.toFixed(2)
+                        : '—'
+                    }}
+                  </span>
+                  <span class="font-medium">{{
+                    selected.insectnet_class ? classLabel(selected.insectnet_class) : '—'
+                  }}</span>
+                </div>
+              </div>
+              <span v-else class="text-xs text-muted-foreground">
+                {{ bulkMode ? `${bulkIds.size} crops selected` : 'No crop selected' }}
+              </span>
+            </div>
+
+            <!-- Annotation bbox colors. User-level (localStorage), shared across
+                 runs; the review boxes read these from the same store. -->
+            <div class="border-t border-border pt-2 mt-2">
+              <AnnotationColorPickers />
+            </div>
+          </div>
+
+          <!-- Thresholds -->
+          <div class="px-4 py-2 space-y-1 min-h-0 overflow-auto">
+            <div
+              class="flex items-center gap-1 text-[10px] xl:text-[11px] font-semibold uppercase tracking-wider text-muted-foreground"
+            >
+              <span>Thresholds</span>
+              <InfoPopover>
+                Hide crops below either confidence from the review grid. The same values drive the
+                "Suggest exports" blue ring on the Export page. Crops with no score in a branch pass
+                that branch's filter (e.g. a preprocessing-only crop has no YOLO score). Stored per
+                run.
+              </InfoPopover>
+            </div>
+            <div class="grid grid-cols-[auto_1fr_auto] items-center gap-x-1 gap-y-1 text-xs">
+              <label for="img-yolo-min" class="text-muted-foreground" title="YOLO detector confidence threshold"><span class="min-[1200px]:hidden">Y ≥</span><span class="hidden min-[1200px]:inline">YOLO ≥</span></label>
+              <input
+                id="img-yolo-min"
+                type="range"
+                min="0"
+                max="1"
+                step="0.05"
+                v-model.number="yoloMinConf"
+                class="w-full accent-primary"
+              />
+              <span class="font-mono w-9 text-right">{{ yoloMinConf.toFixed(2) }}</span>
+              <label for="img-group-min" class="text-muted-foreground" title="Group classifier confidence threshold"><span class="min-[1200px]:hidden">G ≥</span><span class="hidden min-[1200px]:inline">Group ≥</span></label>
+              <input
+                id="img-group-min"
+                type="range"
+                min="0"
+                max="1"
+                step="0.05"
+                v-model.number="groupMinConf"
+                class="w-full accent-primary"
+              />
+              <span class="font-mono w-9 text-right">{{ groupMinConf.toFixed(2) }}</span>
+            </div>
+
+            <!-- Run-scoped controls live with the thresholds they relate to.
+                 flex-wrap keeps the toggle + its info icon together as one
+                 unit and drops the reset link to its own line when the column
+                 is too narrow for both. pt-4 spaces it down from the sliders. -->
+            <div class="flex flex-wrap items-center gap-x-3 gap-y-2 pt-4 text-xs">
+              <div class="flex items-center gap-1.5">
+                <button
+                  role="switch"
+                  :aria-checked="exportAutoSelect"
+                  :disabled="!run"
+                  class="inline-flex items-center gap-1.5 cursor-pointer focus:outline-none disabled:opacity-50 disabled:cursor-not-allowed"
+                  @click="toggleAutoSelect"
+                >
+                  <span
+                    class="relative inline-block w-8 h-4 rounded-full transition-colors shrink-0"
+                    :class="exportAutoSelect ? 'bg-primary' : 'bg-muted-foreground/30'"
+                  >
+                    <span
+                      class="absolute top-0.5 left-0.5 w-3 h-3 rounded-full bg-white shadow transition-transform"
+                      :class="exportAutoSelect ? 'translate-x-4' : ''"
+                    />
+                  </span>
+                  <span class="font-medium">Suggest exports</span>
+                </button>
+                <InfoPopover>
+                  When on, every unreviewed detection that clears both confidence thresholds is
+                  auto-confirmed and sent to the Export page, shown with a blue ring to mark it as
+                  machine-picked (manual confirmations stay green). Turning it off reverts those
+                  auto-confirmations; your manual decisions are untouched.
+                </InfoPopover>
+              </div>
+              <Tooltip
+                class="ml-auto"
+                text="Set both thresholds back to the confidence values this run was configured with on the upload page."
+              >
+                <button
+                  class="text-muted-foreground hover:text-foreground underline-offset-2 hover:underline disabled:opacity-50 disabled:cursor-not-allowed disabled:no-underline"
+                  :disabled="!run"
+                  @click="resetThresholdsToRunConfig"
+                >
+                  Use run's thresholds
+                </button>
+              </Tooltip>
+            </div>
+          </div>
+
+          <!-- Labels (right) -->
+          <div class="px-4 py-2 flex flex-col gap-1 min-h-0 overflow-auto">
+            <div
+              class="flex items-center gap-1 text-[10px] xl:text-[11px] font-semibold uppercase tracking-wider text-muted-foreground"
+            >
+              <span>Label</span>
+              <InfoPopover>
+                Your decision for the selected crop (or the whole bulk selection). Pick a class to
+                confirm/correct it, or Background to reject. Keyboard: 1-4 for classes, x to reject,
+                u for unsure, ⏎ for the suggested class.
+              </InfoPopover>
+              <span
+                v-if="bulkMode"
+                class="ml-1 normal-case tracking-normal text-muted-foreground/80"
+              >
+                · {{ bulkIds.size }} selected
+              </span>
+            </div>
+            <div class="flex flex-col">
+              <label
+                v-for="cls in CLASSES"
+                :key="cls"
+                class="flex items-center gap-2 py-0 px-2 -mx-2 rounded text-sm cursor-pointer hover:bg-muted/50"
+                :class="!selected && !bulkMode ? 'opacity-50 pointer-events-none' : ''"
+              >
+                <span
+                  class="w-2 h-2 rounded-full shrink-0"
+                  :style="{ backgroundColor: classColor(cls) }"
+                />
+                <span class="flex-1">{{ classLabel(cls) }}</span>
+                <input
+                  type="radio"
+                  name="label-class-img"
+                  :checked="panelLabelOf(selected) === cls"
+                  @change="pendingLabel = cls"
+                  class="w-4 h-4"
+                />
+              </label>
+              <label
+                class="flex items-center gap-2 py-0 px-2 -mx-2 rounded text-sm cursor-pointer hover:bg-muted/50"
+                :class="!selected && !bulkMode ? 'opacity-50 pointer-events-none' : ''"
+              >
+                <span class="w-2 h-2 rounded-full shrink-0 bg-muted-foreground/40" />
+                <span class="flex-1">
+                  Background
+                  <span class="text-[11px] text-muted-foreground ml-1">(reject)</span>
+                </span>
+                <input
+                  type="radio"
+                  name="label-class-img"
+                  :checked="panelLabelOf(selected) === 'background'"
+                  @change="pendingLabel = 'background'"
+                  class="w-4 h-4"
+                />
+              </label>
+            </div>
+            <div class="flex gap-2 pt-1">
+              <Tooltip
+                text="Mark the selection as unsure — parks it for later revisit (shortcut: u)."
+              >
+                <button
+                  class="flex-1 px-2 py-1 rounded-md text-sm font-medium border border-amber-300 text-amber-700 hover:bg-amber-50"
+                  @click="commitUnsure"
+                >
+                  Unsure
+                </button>
+              </Tooltip>
+              <Tooltip
+                text="Apply the chosen label to the selection (shortcuts: 1-4 for classes, x for reject, ⏎ for the suggested class)."
+              >
+                <button
+                  class="flex-1 px-2 py-1 rounded-md text-sm font-medium bg-primary text-primary-foreground hover:bg-primary/90 disabled:opacity-50 disabled:cursor-not-allowed"
+                  :disabled="!canConfirm"
+                  @click="commitPending"
+                >
+                  Confirm
+                </button>
+              </Tooltip>
+            </div>
+          </div>
+        </div>
+      </template>
+    </ReviewImageFirst>
+    <div v-else class="flex-1 flex flex-col-reverse lg:flex-row min-h-0">
       <!-- Left: filters + grouped grid. Width controlled by --left-width
            at lg+ so the divider drag can update it via a single CSS var.
            @container lets children query *this section's* width (not the
@@ -78,8 +372,8 @@
              score in a branch (e.g. preprocessing-only crops lack a YOLO
              score) pass that branch's filter unaffected, so the slider
              only hides things its branch actually scored. -->
-          <div class="grid grid-cols-[auto_1fr_auto] items-center gap-x-2 gap-y-1 text-xs">
-            <label for="yolo-min" class="text-muted-foreground">YOLO ≥</label>
+          <div class="grid grid-cols-[auto_1fr_auto] items-center gap-x-1 gap-y-1 text-xs">
+            <label for="yolo-min" class="text-muted-foreground" title="YOLO detector confidence threshold"><span class="min-[1200px]:hidden">Y ≥</span><span class="hidden min-[1200px]:inline">YOLO ≥</span></label>
             <input
               id="yolo-min"
               type="range"
@@ -89,18 +383,18 @@
               v-model.number="yoloMinConf"
               class="w-full accent-primary"
             />
-            <span class="font-mono w-10 text-right">{{ yoloMinConf.toFixed(2) }}</span>
-            <label for="insectnet-min" class="text-muted-foreground">InsectNet ≥</label>
+            <span class="font-mono w-9 text-right">{{ yoloMinConf.toFixed(2) }}</span>
+            <label for="group-min" class="text-muted-foreground" title="Group classifier confidence threshold"><span class="min-[1200px]:hidden">G ≥</span><span class="hidden min-[1200px]:inline">Group ≥</span></label>
             <input
-              id="insectnet-min"
+              id="group-min"
               type="range"
               min="0"
               max="1"
               step="0.05"
-              v-model.number="insectnetMinConf"
+              v-model.number="groupMinConf"
               class="w-full accent-primary"
             />
-            <span class="font-mono w-10 text-right">{{ insectnetMinConf.toFixed(2) }}</span>
+            <span class="font-mono w-9 text-right">{{ groupMinConf.toFixed(2) }}</span>
           </div>
           <!-- Search + below-threshold toggle. Same row when the section
                is wide enough; stacks when not (search on top, button
@@ -129,13 +423,20 @@
             </button>
           </div>
           <div class="text-xs text-muted-foreground flex items-center justify-between gap-3">
-            <span class="flex-1 min-w-0 truncate">
-              {{ filteredDetections.length }} of {{ detections.length }} detections<span
-                v-if="loadProgress.total && loadProgress.loaded < loadProgress.total"
-                class="italic"
-              >
-                · loading {{ loadProgress.loaded }}/{{ loadProgress.total }}…</span
-              >
+            <span class="flex items-center gap-1 flex-1 min-w-0">
+              <span class="truncate">
+                {{ filteredDetections.length }} of {{ detections.length }} detections<span
+                  v-if="loadProgress.total && loadProgress.loaded < loadProgress.total"
+                  class="italic"
+                >
+                  · loading {{ loadProgress.loaded }}/{{ loadProgress.total }}…</span
+                >
+              </span>
+              <InfoPopover>
+                First number = detections left under the current filters (Show, Class, search, and
+                the YOLO / Group sliders); second = total in the run. The default "Pending" filter
+                hides crops you've already reviewed.
+              </InfoPopover>
             </span>
             <button
               class="text-primary hover:underline"
@@ -193,91 +494,109 @@
           </button>
         </div>
 
-        <div class="flex-1 overflow-auto">
-          <div v-for="group in groupedDetections" :key="group.label" class="border-b border-border">
-            <header
-              class="px-4 py-2 text-xs font-semibold uppercase tracking-wide bg-surface sticky top-0 z-20 border-b border-border"
-              :class="
-                group.kind === 'needs_review'
-                  ? 'text-amber-700'
-                  : group.kind === 'unclassified'
-                    ? 'text-indigo-700'
-                    : group.kind === 'background'
-                      ? 'text-muted-foreground/70'
-                      : 'text-muted-foreground'
-              "
+        <!-- Virtualized grid. groupedDetections is flattened into header rows
+             and fixed-width tile rows (gridRows); DynamicScroller mounts only
+             the rows near the viewport, so a 15k-crop run paints ~2 screens of
+             DOM instead of every tile. Column count (colsPerRow) is measured
+             from the scroll container so the rows match the visual width at
+             every divider position, and keyboard nav reads the same value.
+             Group headers no longer stick — virtual rows are absolutely
+             positioned, so sticky has nothing to stick to. -->
+        <DynamicScroller
+          v-if="gridRows.length"
+          ref="gridScroller"
+          :items="gridRows"
+          :min-item-size="40"
+          key-field="key"
+          class="flex-1 min-h-0"
+        >
+          <template #default="{ item, index, active }">
+            <DynamicScrollerItem
+              :item="item"
+              :active="active"
+              :data-index="index"
+              :size-dependencies="item.type === 'tiles' ? [colsPerRow, item.detections.length] : []"
             >
-              <span v-if="group.kind === 'needs_review'" class="mr-1">⚠</span>
-              <span v-else-if="group.kind === 'unclassified'" class="mr-1">?</span>
-              <span v-else-if="group.kind === 'background'" class="mr-1">✗</span>
-              {{ group.label }}
-              <span class="font-normal">({{ group.detections.length }})</span>
-            </header>
-            <!-- Column count scales with the section's own width via
-                 container queries. Crops stay roughly square at every
-                 breakpoint so the grid feels consistent as the divider
-                 moves. -->
-            <div
-              class="grid grid-cols-3 @[260px]:grid-cols-4 @[340px]:grid-cols-5 @[440px]:grid-cols-6 @[560px]:grid-cols-7 gap-1 p-2"
-            >
+              <header
+                v-if="item.type === 'header'"
+                class="px-4 py-2 text-xs font-semibold uppercase tracking-wide bg-surface border-b border-border"
+                :class="
+                  item.kind === 'needs_review'
+                    ? 'text-amber-700'
+                    : item.kind === 'unclassified'
+                      ? 'text-indigo-700'
+                      : item.kind === 'background'
+                        ? 'text-muted-foreground/70'
+                        : 'text-muted-foreground'
+                "
+              >
+                <span v-if="item.kind === 'needs_review'" class="mr-1">⚠</span>
+                <span v-else-if="item.kind === 'unclassified'" class="mr-1">?</span>
+                <span v-else-if="item.kind === 'background'" class="mr-1">✗</span>
+                {{ item.label }}
+                <span class="font-normal">({{ item.count }})</span>
+              </header>
               <div
-                v-for="d in group.detections"
-                :key="d.id"
-                class="rounded-md overflow-hidden border-2 transition-all"
-                :class="[
-                  isHighlighted(d.id)
-                    ? 'border-primary ring-2 ring-primary'
-                    : 'border-transparent hover:border-border',
-                  reviewedFade(d) ? 'opacity-50' : '',
-                ]"
+                v-else
+                class="grid gap-1 px-2 py-0.5"
+                :style="{ gridTemplateColumns: `repeat(${colsPerRow}, minmax(0, 1fr))` }"
               >
                 <div
-                  :data-detection-id="d.id"
-                  role="button"
-                  tabindex="0"
-                  class="relative aspect-square cursor-pointer focus:outline-none select-none"
-                  :class="imageParityById.get(d.id) ? 'bg-muted/60' : 'bg-background'"
-                  @click="onTileClick(d, $event)"
-                  @keydown.enter.prevent="onTileClick(d, $event)"
+                  v-for="d in item.detections"
+                  :key="d.id"
+                  class="rounded-md overflow-hidden border-2 transition-all"
+                  :class="[
+                    isHighlighted(d.id)
+                      ? 'border-primary ring-2 ring-primary'
+                      : 'border-transparent hover:border-border',
+                    reviewedFade(d) ? 'opacity-50' : '',
+                  ]"
                 >
-                  <img
-                    v-if="d.crop_url"
-                    :src="d.crop_url"
-                    :alt="`Detection ${d.id}`"
-                    loading="lazy"
-                    class="absolute inset-0 w-full h-full object-contain"
-                  />
                   <div
-                    v-else
-                    class="absolute inset-0 flex items-center justify-center text-2xl font-bold opacity-30"
+                    :data-detection-id="d.id"
+                    role="button"
+                    tabindex="0"
+                    class="relative aspect-square cursor-pointer focus:outline-none select-none"
+                    :class="imageParityById.get(d.id) ? 'bg-muted/60' : 'bg-background'"
+                    @click="onTileClick(d, $event)"
+                    @keydown.enter.prevent="onTileClick(d, $event)"
                   >
-                    {{ classGlyph(primaryClass(d)) }}
+                    <img
+                      v-if="d.crop_url"
+                      :src="d.crop_url"
+                      :alt="`Detection ${d.id}`"
+                      loading="lazy"
+                      class="absolute inset-0 w-full h-full object-contain"
+                    />
+                    <div
+                      v-else
+                      class="absolute inset-0 flex items-center justify-center text-2xl font-bold opacity-30"
+                    >
+                      {{ classGlyph(primaryClass(d)) }}
+                    </div>
+                  </div>
+                  <div
+                    role="checkbox"
+                    :aria-checked="bulkIds.has(d.id)"
+                    tabindex="0"
+                    class="h-5 flex items-center justify-center text-xs cursor-pointer transition-colors"
+                    :class="
+                      bulkIds.has(d.id)
+                        ? 'bg-primary text-primary-foreground'
+                        : 'bg-surface text-muted-foreground hover:bg-muted'
+                    "
+                    @click="toggleBulk(d.id)"
+                    @keydown.space.prevent="toggleBulk(d.id)"
+                  >
+                    <span v-if="bulkIds.has(d.id)">✓</span>
                   </div>
                 </div>
-                <div
-                  role="checkbox"
-                  :aria-checked="bulkIds.has(d.id)"
-                  tabindex="0"
-                  class="h-5 flex items-center justify-center text-xs cursor-pointer transition-colors"
-                  :class="
-                    bulkIds.has(d.id)
-                      ? 'bg-primary text-primary-foreground'
-                      : 'bg-surface text-muted-foreground hover:bg-muted'
-                  "
-                  @click="toggleBulk(d.id)"
-                  @keydown.space.prevent="toggleBulk(d.id)"
-                >
-                  <span v-if="bulkIds.has(d.id)">✓</span>
-                </div>
               </div>
-            </div>
-          </div>
-          <div
-            v-if="!groupedDetections.length"
-            class="p-8 text-center text-sm text-muted-foreground"
-          >
-            No detections match the current filter.
-          </div>
+            </DynamicScrollerItem>
+          </template>
+        </DynamicScroller>
+        <div v-else class="flex-1 p-8 text-center text-sm text-muted-foreground">
+          No detections match the current filter.
         </div>
       </section>
 
@@ -350,9 +669,13 @@
                   :y="ov.outline.y"
                   :width="ov.outline.width"
                   :height="ov.outline.height"
-                  :fill="isHighlighted(ov.id) ? '#ef4444' : 'transparent'"
+                  :fill="isHighlighted(ov.id) ? settings.annotationHighlightColor : 'transparent'"
                   :fill-opacity="isHighlighted(ov.id) ? 0.18 : 0"
-                  :stroke="isHighlighted(ov.id) ? '#ef4444' : '#52525b'"
+                  :stroke="
+                    isHighlighted(ov.id)
+                      ? settings.annotationHighlightColor
+                      : settings.annotationColor
+                  "
                   :stroke-width="bboxStrokeWidth"
                   class="cursor-pointer"
                   @mousedown.stop
@@ -373,7 +696,12 @@
                   stroke-dasharray="8 4"
                   class="pointer-events-none"
                 />
-                <ROIOverlay :bbox="roiBbox" :image-w="sourceImage.w" :image-h="sourceImage.h" />
+                <ROIOverlay
+                  :bbox="roiBbox"
+                  :image-w="sourceImage.w"
+                  :image-h="sourceImage.h"
+                  :color="settings.roiColor"
+                />
               </svg>
               <span
                 v-else
@@ -412,10 +740,18 @@
               <!-- Label first (one row per class with radio at end). -->
               <div class="px-5 py-2 border-b border-border @[500px]:border-b-0 @[500px]:border-r">
                 <div
-                  class="text-[10px] xl:text-[11px] font-semibold uppercase tracking-wider text-muted-foreground mb-0.5"
+                  class="inline-flex items-center gap-1 text-[10px] xl:text-[11px] font-semibold uppercase tracking-wider text-muted-foreground mb-0.5"
                 >
                   Label
-                  <span v-if="bulkMode" class="ml-1 normal-case tracking-normal text-muted-foreground/80">
+                  <InfoPopover>
+                    Your decision for the selected crop (or the whole bulk selection). Pick a class
+                    to confirm/correct it, or Background to reject. Keyboard: 1-4 for classes, x to
+                    reject, u for unsure, ⏎ for the suggested class.
+                  </InfoPopover>
+                  <span
+                    v-if="bulkMode"
+                    class="ml-1 normal-case tracking-normal text-muted-foreground/80"
+                  >
                     · applies to {{ bulkIds.size }} selected
                   </span>
                 </div>
@@ -472,11 +808,16 @@
               <!-- Predictions (compact, two-line). Hidden in bulk mode —
                    per-detection model output doesn't make sense when the
                    user is acting on a mixed selection. -->
-              <div v-if="!bulkMode" class="px-5 py-2">
+              <div v-if="!bulkMode" class="px-5 py-2 flex flex-col">
                 <div
-                  class="text-[10px] xl:text-[11px] font-semibold uppercase tracking-wider text-muted-foreground mb-0.5"
+                  class="inline-flex items-center gap-1 text-[10px] xl:text-[11px] font-semibold uppercase tracking-wider text-muted-foreground mb-0.5"
                 >
                   Predictions
+                  <InfoPopover>
+                    The model calls for this crop: the YOLO detector and the 4-group classifier (fly
+                    / bumblebee / butterfly / other), each with its confidence. These are model
+                    outputs, not your decision — confirm or correct them with the Label controls.
+                  </InfoPopover>
                 </div>
                 <div class="space-y-0.5 text-xs xl:text-sm">
                   <div
@@ -501,7 +842,7 @@
                     class="flex items-center gap-2"
                     :class="selected.insectnet_class == null ? 'opacity-60' : ''"
                   >
-                    <span class="text-muted-foreground w-16 xl:w-20">InsectNet</span>
+                    <span class="text-muted-foreground w-16 xl:w-20">4-Group</span>
                     <span
                       class="w-2 h-2 rounded-full shrink-0"
                       :style="{ backgroundColor: classColor(selected.insectnet_class) }"
@@ -523,6 +864,11 @@
                   <div v-else-if="isLowConfidence(selected)" class="text-amber-700">
                     ⚠ Low confidence
                   </div>
+                </div>
+                <!-- Annotation bbox colors (shared store; same control as the
+                     image-first layout). Pushed to the bottom of the panel. -->
+                <div class="border-t border-border pt-3 mt-auto">
+                  <AnnotationColorPickers />
                 </div>
               </div>
             </div>
@@ -619,6 +965,7 @@
             :bbox="roiBbox"
             :image-w="sourceImage.w"
             :image-h="sourceImage.h"
+            :color="settings.roiColor"
             non-scaling-stroke
           />
         </g>
@@ -640,13 +987,29 @@
 import { computed, nextTick, onMounted, onUnmounted, ref, watch } from 'vue'
 import { RouterLink, useRoute } from 'vue-router'
 import { ZoomIn } from 'lucide-vue-next'
+import { DynamicScroller, DynamicScrollerItem } from 'vue-virtual-scroller'
+import 'vue-virtual-scroller/dist/vue-virtual-scroller.css'
 import PageHeader from '@/components/PageHeader.vue'
+import Tooltip from '@/components/Tooltip.vue'
+import InfoPopover from '@/components/InfoPopover.vue'
 import PollinatorsStepper from '@/components/PollinatorsStepper.vue'
 import ROIOverlay from '@/components/ROIOverlay.vue'
 import { api } from '@/api'
+import {
+  effectiveReviewSettings,
+  normalizeRoiBbox,
+  type Detection,
+  type PollinatorClass,
+  type ReviewerStatus,
+  type ReviewSettings,
+} from '@/types/pollinator'
+import { useRunDetections } from '@/composables/useRunDetections'
+import { usePollinatorSettingsStore } from '@/stores/pollinatorSettings'
+import ReviewImageFirst from '@/components/pollinator/ReviewImageFirst.vue'
+import AnnotationColorPickers from '@/components/pollinator/AnnotationColorPickers.vue'
 
-type ClassName = 'fly' | 'bumblebee' | 'butterfly' | 'other'
-type ReviewerStatus = 'unreviewed' | 'confirmed' | 'corrected' | 'rejected' | 'unsure'
+const settings = usePollinatorSettingsStore()
+
 // Frontend workflow labels (not the backend reviewer_status).
 //   pending  — unreviewed; the active working queue.
 //   reviewed — anything the reviewer has settled (confirmed / corrected /
@@ -655,62 +1018,17 @@ type ReviewerStatus = 'unreviewed' | 'confirmed' | 'corrected' | 'rejected' | 'u
 //              disappear into the reviewed pile.
 //   all      — everything.
 type StatusFilter = 'pending' | 'reviewed' | 'unsure' | 'all'
-type Source = 'yolo' | 'preprocessing' | 'both'
 
 const LOW_CONFIDENCE_THRESHOLD = 0.6
 
-interface BBox {
-  x1: number
-  y1: number
-  x2: number
-  y2: number
-  w: number
-  h: number
-}
-
-interface Detection {
-  id: number
-  // YOLO-only detections have null insectnet_*, preprocessing-only have null
-  // yolo_*. Only source='both' detections populate both branches.
-  yolo_class: ClassName | null
-  yolo_confidence: number | null
-  insectnet_class: ClassName | null
-  insectnet_confidence: number | null
-  source: Source
-  reviewer_status: ReviewerStatus
-  reviewer_label: ClassName | null
-  predicted_class: ClassName | null
-  source_image_filename: string
-  bbox: BBox | null
-  source_image_url: string | null
-  crop_url: string | null
-}
-
-interface ReviewBundle {
-  run: {
-    id: number
-    name: string
-    status: string
-    detection_count: number
-    config?: {
-      yolo?: { confidence?: number }
-      binary_classifier?: { confidence?: number }
-      preprocessing?: {
-        roi_bbox?: [number, number, number, number] | null
-      }
-    }
-  }
-  detections: Detection[]
-}
-
-const CLASSES: ClassName[] = ['fly', 'bumblebee', 'butterfly', 'other']
-const CLASS_COLORS: Record<ClassName, string> = {
+const CLASSES: PollinatorClass[] = ['fly', 'bumblebee', 'butterfly', 'other']
+const CLASS_COLORS: Record<PollinatorClass, string> = {
   fly: '#6b9bd2',
   bumblebee: '#e6a946',
   butterfly: '#c87bba',
   other: '#9aa3ab',
 }
-const CLASS_GLYPHS: Record<ClassName, string> = {
+const CLASS_GLYPHS: Record<PollinatorClass, string> = {
   fly: '🪰',
   bumblebee: '🐝',
   butterfly: '🦋',
@@ -718,32 +1036,128 @@ const CLASS_GLYPHS: Record<ClassName, string> = {
 }
 
 const route = useRoute()
-const loading = ref(true)
-const loadError = ref('')
-const run = ref<ReviewBundle['run'] | null>(null)
-const detections = ref<Detection[]>([])
+const { run, detections, loading, loadError, loadProgress, load } = useRunDetections(
+  route.params.id as string,
+)
 const selectedId = ref<number | null>(null)
 const statusFilter = ref<StatusFilter>('pending')
-type ClassFilter = ClassName | 'background' | 'all'
+type ClassFilter = PollinatorClass | 'background' | 'all'
 const classFilter = ref<ClassFilter>('all')
-// Per-branch confidence sliders. Seeded from the run's own config in
-// loadFromApi so the review view starts in the same regime the run was
-// actually created with — whatever the reviewer set on the upload page
-// is what they see here, not a hard-coded default. The literals here
-// are just a placeholder before the run loads. Detections with no score
-// in a branch pass that branch's filter so preprocessing-only crops
-// aren't dropped by the YOLO slider, etc.
-const yoloMinConf = ref(0)
-const insectnetMinConf = ref(0)
+// Per-run reviewer settings (thresholds + auto-select). Stored in the DB
+// on the run, defaulting to the run's own config confidences via
+// effectiveReviewSettings — so a run's sliders start where it was
+// processed, and any change is remembered per-run. The thresholds drive
+// BOTH the visible filter here AND the export auto-select indicator.
+//
+// Writes are optimistic + debounced: dragging a slider updates the UI and
+// filtering immediately, but only one PATCH lands ~400ms after the drag
+// settles instead of one per step.
+let reviewSettingsTimer: ReturnType<typeof setTimeout> | null = null
+let pendingReviewSettings: ReviewSettings = {}
+let pendingReviewSettingsRunId: number | null = null
+
+// True while an auto-select round-trip + reload is in flight, so the toggle
+// can't be double-fired and the UI can show a busy state.
+const applyingAutoSelect = ref(false)
+
+// Drive the "Suggest exports" toggle: the backend persists auto_select,
+// reverts prior auto-accepts, and (when enabled) confirms every unreviewed
+// detection above both thresholds. Reload afterwards so the grid reflects
+// the new reviewer_status / auto_accepted stamps. detections.value is reset
+// first because the composable's load() appends pages onto the current list.
+async function runAutoSelect(enabled: boolean) {
+  const r = run.value
+  if (!r || applyingAutoSelect.value) return
+  applyingAutoSelect.value = true
+  try {
+    const res = await api(`/api/pollinator/runs/${r.id}/auto-select/`, {
+      method: 'POST',
+      body: JSON.stringify({ enabled }),
+    })
+    if (!res.ok) throw new Error(`Auto-select: HTTP ${res.status}`)
+    r.review_settings = { ...(r.review_settings ?? {}), auto_select: enabled }
+    detections.value = []
+    await load()
+  } catch (e) {
+    console.error(e)
+  } finally {
+    applyingAutoSelect.value = false
+  }
+}
+
+// Send whatever's queued right now and clear the timer. Called both by the
+// debounce and on unmount, so a save can't be lost by navigating away
+// inside the debounce window. recompute=false on unmount so we don't kick
+// off a reload into a dead component.
+async function flushReviewSettings(recompute = true) {
+  if (reviewSettingsTimer != null) {
+    clearTimeout(reviewSettingsTimer)
+    reviewSettingsTimer = null
+  }
+  if (pendingReviewSettingsRunId == null || Object.keys(pendingReviewSettings).length === 0) return
+  const id = pendingReviewSettingsRunId
+  const body = pendingReviewSettings
+  pendingReviewSettings = {}
+  pendingReviewSettingsRunId = null
+  const hadThreshold = 'yolo_threshold' in body || 'group_threshold' in body
+  const res = await api(`/api/analysis/runs/${id}/review-settings/`, {
+    method: 'POST',
+    body: JSON.stringify(body),
+  })
+  // A threshold change while auto-select is on must re-derive the
+  // auto-accepted set against the new bounds.
+  if (recompute && res.ok && hadThreshold && effectiveReviewSettings(run.value).autoSelect) {
+    await runAutoSelect(true)
+  }
+}
+
+function patchReviewSettings(partial: ReviewSettings) {
+  const r = run.value
+  if (!r) return
+  r.review_settings = { ...(r.review_settings ?? {}), ...partial }
+  pendingReviewSettings = { ...pendingReviewSettings, ...partial }
+  pendingReviewSettingsRunId = r.id
+  if (reviewSettingsTimer != null) clearTimeout(reviewSettingsTimer)
+  reviewSettingsTimer = setTimeout(flushReviewSettings, 400)
+}
+
+const yoloMinConf = computed<number>({
+  get: () => effectiveReviewSettings(run.value).yolo,
+  set: (v) => patchReviewSettings({ yolo_threshold: v }),
+})
+// The wire field is `insectnet_confidence`, but the value it carries is
+// the group classifier's top-class probability.
+const groupMinConf = computed<number>({
+  get: () => effectiveReviewSettings(run.value).group,
+  set: (v) => patchReviewSettings({ group_threshold: v }),
+})
+const exportAutoSelect = computed(() => effectiveReviewSettings(run.value).autoSelect)
+function toggleAutoSelect() {
+  // Flush any pending threshold edits first so the backend recompute reads
+  // the thresholds the reviewer just set, then apply/revert auto-accept.
+  void flushReviewSettings(false).then(() =>
+    runAutoSelect(!effectiveReviewSettings(run.value).autoSelect),
+  )
+}
 
 function passesSliders(d: Detection): boolean {
   const yoloOk = d.yolo_confidence == null || d.yolo_confidence >= yoloMinConf.value
-  const insectnetOk =
-    d.insectnet_confidence == null || d.insectnet_confidence >= insectnetMinConf.value
-  return yoloOk && insectnetOk
+  const groupOk = d.insectnet_confidence == null || d.insectnet_confidence >= groupMinConf.value
+  return yoloOk && groupOk
+}
+
+// Reset both sliders to the confidence values THIS run was created with on
+// the upload page (YOLO ← yolo.confidence, Group ← group_classifier
+// .confidence), persisting them as the run's review thresholds.
+function resetThresholdsToRunConfig() {
+  const cfg = run.value?.config
+  patchReviewSettings({
+    yolo_threshold: cfg?.yolo?.confidence ?? 0.5,
+    group_threshold: cfg?.group_classifier?.confidence ?? 0.5,
+  })
 }
 const bulkIds = ref<Set<number>>(new Set())
-const bulkCorrectClass = ref<'' | ClassName>('')
+const bulkCorrectClass = ref<'' | PollinatorClass>('')
 // Surfaces how many rows the most recent bulk-confirm skipped because they
 // had no derivable class. Reset when the reviewer next interacts with the
 // bulk bar (selection change or explicit clear).
@@ -751,9 +1165,9 @@ const bulkConfirmSkipped = ref(0)
 
 interface FailedEntry {
   status: ReviewerStatus
-  label: ClassName | null
+  label: PollinatorClass | null
   prevStatus: ReviewerStatus
-  prevLabel: ClassName | null
+  prevLabel: PollinatorClass | null
 }
 const failedSaves = ref<Map<number, FailedEntry>>(new Map())
 const retrying = ref(false)
@@ -770,60 +1184,7 @@ const viewBelowOnly = ref(false)
 const searchQuery = ref('')
 const SEARCH_MIN_LEN = 3
 
-onMounted(loadFromApi)
-
-interface DetectionsPage {
-  count: number
-  next: string | null
-  results: Detection[]
-}
-
-const loadProgress = ref({ loaded: 0, total: 0 })
-
-async function loadFromApi() {
-  const id = route.params.id as string
-  try {
-    const runRes = await api(`/api/analysis/runs/${id}/`)
-    if (!runRes.ok) {
-      loadError.value = `Run: HTTP ${runRes.status}`
-      loading.value = false
-      return
-    }
-    run.value = await runRes.json()
-    // Seed the confidence sliders from the run's own config so the
-    // review view starts at the same thresholds the upload page picked.
-    // Falls back to 0 ("no filter") if the run was created without an
-    // explicit threshold for that branch.
-    yoloMinConf.value = run.value?.config?.yolo?.confidence ?? 0
-    insectnetMinConf.value = run.value?.config?.binary_classifier?.confidence ?? 0
-    // Stream pages: paint the first batch immediately so the reviewer
-    // can start clicking, then keep appending until the run is fully
-    // loaded. detections.value is reactive; groupedDetections recomputes
-    // each time we extend it.
-    let next: string | null = `/api/pollinator/runs/${id}/detections/`
-    let firstPage = true
-    while (next) {
-      const url: string = next.startsWith('http') ? next.replace(/^https?:\/\/[^/]+/, '') : next
-      const res = await api(url)
-      if (!res.ok) {
-        loadError.value = `Detections: HTTP ${res.status}`
-        return
-      }
-      const page = (await res.json()) as DetectionsPage
-      detections.value = detections.value.concat(page.results)
-      loadProgress.value = { loaded: detections.value.length, total: page.count }
-      next = page.next
-      if (firstPage) {
-        loading.value = false
-        firstPage = false
-      }
-    }
-  } catch (e) {
-    loadError.value = e instanceof Error ? e.message : String(e)
-  } finally {
-    loading.value = false
-  }
-}
+onMounted(load)
 
 const headerTitle = computed(() =>
   run.value ? `Review · ${run.value.name || `Run #${run.value.id}`}` : 'Review',
@@ -891,19 +1252,36 @@ const filteredDetections = computed(() => {
   } else {
     list = list.filter(passesSliders)
   }
-  // Stable sort by id. The previous double-sort (confidence at this layer,
-  // then by source-image filename inside each group) caused tiles to
-  // visibly swap places whenever streamed pages arrived or a review action
-  // shifted the underlying ordering. Insertion order from the backend is
-  // deterministic and never moves once loaded.
-  return [...list].sort((a, b) => a.id - b.id)
+  // Sort by (source image filename, bbox.x1, bbox.y1, id). Within a single
+  // image this gives the natural left-to-right reading order, which
+  // matches the image-first arrow-key navigation users expect; between
+  // images it falls back to alphabetical filename so the rail and the
+  // detection sequence stay aligned. Detections with no bbox sink to the
+  // end of their image's group (by id), keeping the comparator total and
+  // deterministic.
+  return [...list].sort((a, b) => {
+    const fn = a.source_image_filename.localeCompare(b.source_image_filename)
+    if (fn !== 0) return fn
+    const ax = a.bbox?.x1
+    const bx = b.bbox?.x1
+    if (ax == null && bx == null) return a.id - b.id
+    if (ax == null) return 1
+    if (bx == null) return -1
+    if (ax !== bx) return ax - bx
+    // Larger y first when x ties: at the same horizontal slot, the
+    // lower-on-image crop comes earlier in the sequence.
+    const ay = a.bbox?.y1 ?? 0
+    const by = b.bbox?.y1 ?? 0
+    if (ay !== by) return by - ay
+    return a.id - b.id
+  })
 })
 
 const groupedDetections = computed(() => {
   const review: Detection[] = []
   const unclassified: Detection[] = []
   const background: Detection[] = []
-  const classGroups = new Map<ClassName, Detection[]>()
+  const classGroups = new Map<PollinatorClass, Detection[]>()
   // Placement priority:
   // 1. Rejected detections are labelled "background" — they go to the
   //    Background bucket regardless of detector state. Keeping them under
@@ -920,7 +1298,7 @@ const groupedDetections = computed(() => {
   // Class=Fly doesn't count rejected things.
   // Class=Background is handled via the existing rejected → background
   // bucket above, so we don't need a collapse rule for it.
-  const collapseToClass: ClassName | null =
+  const collapseToClass: PollinatorClass | null =
     classFilter.value !== 'all' && classFilter.value !== 'background' ? classFilter.value : null
   for (const d of filteredDetections.value) {
     if (d.reviewer_status === 'rejected') {
@@ -979,6 +1357,76 @@ const groupedDetections = computed(() => {
 // matches what the reviewer sees rather than the raw confidence sort.
 const flatVisible = computed(() => groupedDetections.value.flatMap((g) => g.detections))
 
+// --- Virtualized grid rows -------------------------------------------------
+// The crops grid renders through DynamicScroller, which windows a flat list
+// of rows. Each group becomes one header row plus ceil(n / colsPerRow) tile
+// rows. Only the rows near the viewport are mounted, so DOM size stays
+// constant regardless of how many crops the run produced.
+type HeaderRow = {
+  key: string
+  type: 'header'
+  label: string
+  kind: 'needs_review' | 'unclassified' | 'class' | 'background'
+  count: number
+}
+type TileRow = { key: string; type: 'tiles'; detections: Detection[] }
+type GridRow = HeaderRow | TileRow
+
+// Map the container-query breakpoints in the grid template to a column count.
+// Single source of truth shared by the layout (gridRows) and keyboard nav
+// (navigate steps by a full row), so the two can't drift.
+function colsForWidth(w: number): number {
+  if (w >= 560) return 7
+  if (w >= 440) return 6
+  if (w >= 340) return 5
+  if (w >= 260) return 4
+  return 3
+}
+
+// Live width of the scroll container, measured (not derived from leftWidth)
+// so the column count is correct on mobile too, where the section is
+// full-width rather than pinned to the divider. Seeded with the default left
+// width (4 cols); the ResizeObserver overwrites it as soon as the scroller
+// mounts, so this only governs the very first frame.
+const containerWidth = ref(300)
+const colsPerRow = computed(() => colsForWidth(containerWidth.value))
+const gridScroller = ref<{ $el: HTMLElement; scrollToItem: (i: number) => void } | null>(null)
+
+const gridRows = computed<GridRow[]>(() => {
+  const cols = colsPerRow.value
+  const rows: GridRow[] = []
+  for (const group of groupedDetections.value) {
+    rows.push({
+      key: `h:${group.label}`,
+      type: 'header',
+      label: group.label,
+      kind: group.kind,
+      count: group.detections.length,
+    })
+    for (let i = 0; i < group.detections.length; i += cols) {
+      const slice = group.detections.slice(i, i + cols)
+      rows.push({ key: `t:${group.label}:${slice[0].id}`, type: 'tiles', detections: slice })
+    }
+  }
+  return rows
+})
+
+// Observe the scroll container so colsPerRow tracks the divider drag and
+// viewport changes. The scroller only exists once detections have loaded, so
+// (re)attach whenever the element appears.
+let gridResizeObserver: ResizeObserver | null = null
+watch(gridScroller, (s) => {
+  gridResizeObserver?.disconnect()
+  gridResizeObserver = null
+  const el = s?.$el
+  if (!el) return
+  gridResizeObserver = new ResizeObserver((entries) => {
+    containerWidth.value = entries[0].contentRect.width
+  })
+  gridResizeObserver.observe(el)
+  containerWidth.value = el.clientWidth
+})
+
 // Stripe by source image: same image → same tile background, image
 // changes → flip. Restarts per group so each group's first cluster is
 // always the same shade. Lets reviewers eyeball "two tiles from img0091
@@ -1001,6 +1449,27 @@ const imageParityById = computed(() => {
 
 const selected = computed(() => detections.value.find((d) => d.id === selectedId.value) ?? null)
 
+// Image-first page indicator: count unique source-image filenames in the
+// filtered view, find where the active selection sits in that order.
+// Returns null in crop-first or when nothing is selected — the strip
+// below the stepper only renders the indicator when this resolves.
+const imageFirstPageInfo = computed<{ current: number; total: number } | null>(() => {
+  if (settings.reviewLayout !== 'image-first') return null
+  const filenames: string[] = []
+  const seen = new Set<string>()
+  for (const d of filteredDetections.value) {
+    if (d.source_image_filename && !seen.has(d.source_image_filename)) {
+      seen.add(d.source_image_filename)
+      filenames.push(d.source_image_filename)
+    }
+  }
+  if (filenames.length === 0) return null
+  const activeFilename = selected.value?.source_image_filename ?? filenames[0]
+  const idx = filenames.indexOf(activeFilename)
+  if (idx < 0) return { current: 1, total: filenames.length }
+  return { current: idx + 1, total: filenames.length }
+})
+
 // Only pick an initial selection when nothing is selected. We deliberately
 // do not snap to list[0] when the current selection falls out of the
 // filtered view (e.g. slider moved, bulk action, status change) — the
@@ -1022,18 +1491,85 @@ watch(
 // reject row. null = no pending change. Resets on selection change (or
 // when bulkIds shifts) so a staged-but-uncommitted pick can't leak into
 // the next target.
-type PendingLabel = ClassName | 'background' | null
+type PendingLabel = PollinatorClass | 'background' | null
 const pendingLabel = ref<PendingLabel>(null)
 
 // True when the bulk drag-selected more than one detection — the Label
 // panel then targets the whole bulk instead of just the primary `selected`.
 const bulkMode = computed(() => bulkIds.value.size > 1)
 
+// Drag-select handler for the image-first view. The child computes which
+// detection ids fell inside the dragged rectangle (center-in-rect) and
+// sends them up here so the parent's bulkIds stays the single source of
+// truth across both layouts.
+function onImageFirstDragSelect(ids: number[]) {
+  if (ids.length === 0) {
+    bulkIds.value = new Set()
+    return
+  }
+  bulkIds.value = new Set(ids)
+  // Promote the first hit to the active selection so the right pane is
+  // populated and the keyboard shortcuts have something to act on.
+  if (selectedId.value == null || !bulkIds.value.has(selectedId.value)) {
+    selectedId.value = ids[0]
+  }
+}
+
+// Rail "delete": reject every still-unreviewed crop in the image as
+// background. Already-decided crops (confirmed/corrected/rejected/unsure)
+// are left untouched, and the source file/image is NOT deleted. Undoable
+// as one Ctrl+Z (pushUndo captures the prior state of every crop touched).
+function onDeleteImage(filename: string) {
+  const ids = detections.value
+    .filter((d) => d.source_image_filename === filename && d.reviewer_status === 'unreviewed')
+    .map((d) => d.id)
+  if (!ids.length) return
+  // If the active selection is one we're about to reject, move it to the
+  // first crop that isn't being deleted (computed before the mutation,
+  // while the list still contains everything).
+  if (selectedId.value != null && ids.includes(selectedId.value)) {
+    const deleted = new Set(ids)
+    const nextOutside = filteredDetections.value.find((d) => !deleted.has(d.id))
+    selectedId.value = nextOutside ? nextOutside.id : null
+  }
+  pushUndo(ids)
+  void submitBulk(ids, 'rejected', null)
+}
+
+// Toggle the per-image "exclude from YOLO training" flag. Optimistically
+// flips it on every detection of that image (they all carry the same
+// per-image value), then persists against the image id.
+function onToggleTrainingExclude(filename: string) {
+  const imgDets = detections.value.filter((d) => d.source_image_filename === filename)
+  const imageId = imgDets[0]?.source_image_id
+  if (imageId == null) return
+  const next = !imgDets[0].exclude_from_training
+  for (const d of imgDets) d.exclude_from_training = next
+  void api(`/api/analysis/images/${imageId}/exclude-training/`, {
+    method: 'POST',
+    body: JSON.stringify({ excluded: next }),
+  })
+}
+
 watch(selectedId, async (id) => {
   pendingLabel.value = null
   if (id == null) return
   await nextTick()
-  const el = document.querySelector(`[data-detection-id="${id}"]`)
+  // The tile may be windowed out of the DOM. If so, scroll its row into the
+  // scroller's buffer first so the element mounts, then fall back to the
+  // browser's "nearest" scroll which keeps an already-visible tile from
+  // jumping during left/right navigation.
+  let el = document.querySelector(`[data-detection-id="${id}"]`)
+  if (!el) {
+    const rowIdx = gridRows.value.findIndex(
+      (r) => r.type === 'tiles' && r.detections.some((d) => d.id === id),
+    )
+    if (rowIdx >= 0) {
+      gridScroller.value?.scrollToItem(rowIdx)
+      await nextTick()
+      el = document.querySelector(`[data-detection-id="${id}"]`)
+    }
+  }
   el?.scrollIntoView({ block: 'nearest', behavior: 'smooth' })
 })
 
@@ -1052,6 +1588,13 @@ function panelLabel(d: Detection): PendingLabel {
   if (pendingLabel.value !== null) return pendingLabel.value
   if (d.reviewer_status === 'rejected') return 'background'
   return effectiveLabel(d)
+}
+
+// Null-tolerant variant for templates that render under (selected || bulk)
+// guards: when no row is selected but a bulk is active, the pending
+// pick is what the panel should mirror.
+function panelLabelOf(d: Detection | null): PendingLabel {
+  return d ? panelLabel(d) : pendingLabel.value
 }
 
 // Confirm enabled when there's something to send.
@@ -1222,10 +1765,9 @@ const siblingOverlays = computed<SiblingOverlay[]>(() => {
   return out
 })
 
-const roiBbox = computed<[number, number, number, number] | null>(() => {
-  const r = run.value?.config?.preprocessing?.roi_bbox
-  return r && r.length === 4 ? r : null
-})
+const roiBbox = computed<[number, number, number, number] | null>(() =>
+  normalizeRoiBbox(run.value?.config?.preprocessing?.roi_bbox),
+)
 
 // Fullscreen zoom modal. State lives in viewBox units; the SVG <g> is
 // translated then scaled, so the wheel-around-cursor math has to convert
@@ -1446,7 +1988,7 @@ function onPreviewDragEnd() {
 
 function classColor(cls: string | null): string {
   if (!cls) return '#9aa3ab'
-  return CLASS_COLORS[cls as ClassName] ?? '#9aa3ab'
+  return CLASS_COLORS[cls as PollinatorClass] ?? '#9aa3ab'
 }
 function classBgFor(cls: string | null): string {
   const hex = classColor(cls)
@@ -1454,7 +1996,7 @@ function classBgFor(cls: string | null): string {
 }
 function classGlyph(cls: string | null): string {
   if (!cls) return '?'
-  return CLASS_GLYPHS[cls as ClassName] ?? '?'
+  return CLASS_GLYPHS[cls as PollinatorClass] ?? '?'
 }
 function classLabel(cls: string | null): string {
   if (!cls) return '—'
@@ -1462,7 +2004,7 @@ function classLabel(cls: string | null): string {
 }
 // Class shown on the grid card and used for grouping/coloring. Falls back
 // to whichever branch produced the detection when only one is populated.
-function primaryClass(d: Detection): ClassName | null {
+function primaryClass(d: Detection): PollinatorClass | null {
   return d.yolo_class ?? d.insectnet_class ?? null
 }
 // Highest of the populated confidences. 0 when both are missing (shouldn't
@@ -1511,7 +2053,7 @@ function statusBadgeClass(s: ReviewerStatus): string {
 function statusLabel(s: ReviewerStatus): string {
   return s[0].toUpperCase() + s.slice(1)
 }
-function suggestedClass(d: Detection): ClassName | null {
+function suggestedClass(d: Detection): PollinatorClass | null {
   if (d.yolo_class == null) return d.insectnet_class
   if (d.insectnet_class == null) return d.yolo_class
   return (d.insectnet_confidence ?? 0) >= (d.yolo_confidence ?? 0)
@@ -1524,14 +2066,14 @@ function suggestedClass(d: Detection): ClassName | null {
 // moves into that class group. Returns null for rejected/unsure/
 // unreviewed — those use the detector-state fallback in
 // groupedDetections.
-function settledClass(d: Detection): ClassName | null {
+function settledClass(d: Detection): PollinatorClass | null {
   if (d.reviewer_status === 'confirmed' || d.reviewer_status === 'corrected') {
     return effectiveLabel(d)
   }
   return null
 }
 
-function effectiveLabel(d: Detection): ClassName | null {
+function effectiveLabel(d: Detection): PollinatorClass | null {
   // Rejected = background, which isn't one of the four class labels. Clear
   // any class hint so the Label panel doesn't end up with both Fly and
   // Background ticked when a previously-consensus-Fly is rejected.
@@ -1550,7 +2092,7 @@ function effectiveLabel(d: Detection): ClassName | null {
 async function patchDetection(
   id: number,
   status: ReviewerStatus,
-  label: ClassName | null,
+  label: PollinatorClass | null,
 ): Promise<boolean> {
   try {
     const res = await api(`/api/pollinator/detections/${id}/`, {
@@ -1569,7 +2111,7 @@ async function patchDetection(
 async function postBulkReview(
   ids: number[],
   status: ReviewerStatus,
-  label: ClassName | null,
+  label: PollinatorClass | null,
 ): Promise<boolean> {
   try {
     const res = await api('/api/analysis/detections/bulk/', {
@@ -1592,9 +2134,71 @@ function clearFailedSave(id: number) {
   failedSaves.value = new Map(failedSaves.value)
 }
 
-async function applyAction(status: ReviewerStatus, label: ClassName | null, advanceAfter = false) {
+// --- Undo -----------------------------------------------------------------
+// Each classify gesture (a single key/click, or one bulk apply) snapshots
+// the prior state of every detection it touches as ONE entry, so a single
+// Ctrl+Z reverts the whole gesture — including a bulk that hit dozens of
+// crops. Capacity-capped so the stack can't grow unbounded on long runs.
+interface UndoItem {
+  id: number
+  status: ReviewerStatus
+  label: PollinatorClass | null
+}
+const undoStack = ref<{ items: UndoItem[] }[]>([])
+const UNDO_LIMIT = 50
+
+function pushUndo(ids: number[]) {
+  const idSet = new Set(ids)
+  const items: UndoItem[] = []
+  for (const d of detections.value) {
+    if (idSet.has(d.id)) {
+      items.push({ id: d.id, status: d.reviewer_status, label: d.reviewer_label })
+    }
+  }
+  if (!items.length) return
+  undoStack.value.push({ items })
+  if (undoStack.value.length > UNDO_LIMIT) undoStack.value.shift()
+}
+
+async function undoLast() {
+  const entry = undoStack.value.pop()
+  if (!entry) return
+  const byId = new Map(entry.items.map((i) => [i.id, i]))
+  // Restore optimistically in the UI.
+  for (const d of detections.value) {
+    const it = byId.get(d.id)
+    if (!it) continue
+    d.reviewer_status = it.status
+    d.reviewer_label = it.label
+    clearFailedSave(d.id)
+  }
+  // Re-select the single reverted crop so the change is visible; leave
+  // selection alone for a bulk revert.
+  if (entry.items.length === 1) selectedId.value = entry.items[0].id
+  // Persist, grouping identical (status, label) into one bulk request.
+  const groups = new Map<
+    string,
+    { status: ReviewerStatus; label: PollinatorClass | null; ids: number[] }
+  >()
+  for (const it of entry.items) {
+    const key = `${it.status}|${it.label ?? ''}`
+    if (!groups.has(key)) groups.set(key, { status: it.status, label: it.label, ids: [] })
+    groups.get(key)!.ids.push(it.id)
+  }
+  for (const g of groups.values()) {
+    if (g.ids.length === 1) await patchDetection(g.ids[0], g.status, g.label)
+    else await postBulkReview(g.ids, g.status, g.label)
+  }
+}
+
+async function applyAction(
+  status: ReviewerStatus,
+  label: PollinatorClass | null,
+  advanceAfter = false,
+) {
   if (!selected.value) return
   const d = selected.value
+  pushUndo([d.id])
   // If a previous save for this detection already failed, keep its original
   // prev so Dismiss reverts all the way back, not to the last optimistic state.
   const existing = failedSaves.value.get(d.id)
@@ -1659,10 +2263,10 @@ watch([belowThresholdIds, viewBelowOnly], ([ids, on]) => {
   if (on && ids.length === 0) viewBelowOnly.value = false
 })
 
-async function submitBulk(ids: number[], status: ReviewerStatus, label: ClassName | null) {
+async function submitBulk(ids: number[], status: ReviewerStatus, label: PollinatorClass | null) {
   if (!ids.length) return
   const idSet = new Set(ids)
-  const snapshot = new Map<number, { status: ReviewerStatus; label: ClassName | null }>()
+  const snapshot = new Map<number, { status: ReviewerStatus; label: PollinatorClass | null }>()
   for (const d of detections.value) {
     if (idSet.has(d.id)) {
       const existing = failedSaves.value.get(d.id)
@@ -1696,8 +2300,9 @@ async function submitBulk(ids: number[], status: ReviewerStatus, label: ClassNam
   }
 }
 
-async function applyToBulk(status: ReviewerStatus, label: ClassName | null) {
+async function applyToBulk(status: ReviewerStatus, label: PollinatorClass | null) {
   const ids = [...bulkIds.value]
+  pushUndo(ids)
   // If the bulk includes the primary selection, advance selectedId off
   // it before the commit. siblingOverlays keeps the selected row's bbox
   // visible even after it's reviewed (intentional, for browsing the
@@ -1718,7 +2323,7 @@ async function retryFailedSaves() {
     // Group by intended (status, label) so we can retry as bulk requests.
     const groups = new Map<
       string,
-      { status: ReviewerStatus; label: ClassName | null; ids: number[] }
+      { status: ReviewerStatus; label: PollinatorClass | null; ids: number[] }
     >()
     for (const [id, entry] of failedSaves.value) {
       const key = `${entry.status}::${entry.label ?? ''}`
@@ -1760,7 +2365,7 @@ function dismissFailedSaves() {
 // as 'corrected' so reviewer_label is always populated. Rows with no derivable
 // class are skipped and surfaced to the reviewer.
 async function bulkConfirm() {
-  const buckets = new Map<ClassName, number[]>()
+  const buckets = new Map<PollinatorClass, number[]>()
   let skipped = 0
   for (const d of detections.value) {
     if (!bulkIds.value.has(d.id)) continue
@@ -1773,6 +2378,8 @@ async function bulkConfirm() {
     buckets.get(lbl)!.push(d.id)
   }
   bulkConfirmSkipped.value = skipped
+  // One undo entry for the whole confirm gesture, across every bucket.
+  pushUndo([...buckets.values()].flat())
   // Same advance logic as applyToBulk — see comment there.
   const sel = selected.value
   const advanceTo = sel && bulkIds.value.has(sel.id) ? nextVisibleId(sel.id) : null
@@ -1795,7 +2402,7 @@ function onBulkCorrectChange() {
 // Confirmed only when both models agreed and the user picked that class.
 // When models disagree there's no single prediction to confirm, so any pick
 // is a correction (and the label is preserved server-side).
-function confirmAs(cls: ClassName | null, advanceAfter = false) {
+function confirmAs(cls: PollinatorClass | null, advanceAfter = false) {
   if (!selected.value || cls == null) return
   const d = selected.value
   const consensus = d.yolo_class != null && d.yolo_class === d.insectnet_class ? d.yolo_class : null
@@ -1810,28 +2417,46 @@ function markUnsure(advanceAfter = false) {
 }
 
 function nextVisibleId(currentId: number): number | null {
+  // Image-first navigates purely by spatial order (filteredDetections,
+  // sorted filename → x1 asc → y1 desc → id). It never touches
+  // flatVisible, whose status/class bucketing interleaves images and
+  // would skip whole images on the cross-image step.
+  if (settings.reviewLayout === 'image-first') {
+    const fl = filteredDetections.value
+    const fIdx = fl.findIndex((d) => d.id === currentId)
+    if (fIdx < 0) return null
+    const fn = fl[fIdx].source_image_filename
+    // 1. Finish the current image: forward (left-to-right) first…
+    for (let i = fIdx + 1; i < fl.length; i++) {
+      if (fl[i].source_image_filename === fn) return fl[i].id
+    }
+    // …then wrap backward to mop up any earlier crops skipped in this
+    // image (e.g. the reviewer clicked the right-most one first).
+    for (let i = fIdx - 1; i >= 0; i--) {
+      if (fl[i].source_image_filename === fn) return fl[i].id
+    }
+    // 2. Image cleared: jump to the first (left-most) crop of the next
+    //    image. Since crops are contiguous per filename and x-ascending,
+    //    the first differing filename ahead is that image's left-most.
+    for (let i = fIdx + 1; i < fl.length; i++) {
+      if (fl[i].source_image_filename !== fn) return fl[i].id
+    }
+    // 3. Nothing ahead (finished the last image): fall back to the
+    //    nearest crop in the previous image so selection doesn't dead-end.
+    for (let i = fIdx - 1; i >= 0; i--) {
+      if (fl[i].source_image_filename !== fn) return fl[i].id
+    }
+    return null
+  }
+
+  // Crop-first: unchanged — grouped flatVisible order, forward then back.
   const list = flatVisible.value
   const idx = list.findIndex((d) => d.id === currentId)
   if (idx < 0) return null
-  // Forward if possible; otherwise fall back to the previous tile so a
-  // reject on the last visible item doesn't snap selection to list[0].
   if (idx + 1 < list.length) return list[idx + 1].id
   if (idx > 0) return list[idx - 1].id
   return null
 }
-
-// Crops grid column count follows the container-query thresholds in the
-// template, so Down/Up keyboard nav matches the actual visual rows. Below
-// the lg breakpoint (stacked mobile layout) the section is full-width;
-// default to 5 there.
-const GRID_COLS = computed(() => {
-  const w = leftWidth.value
-  if (w >= 560) return 7
-  if (w >= 440) return 6
-  if (w >= 340) return 5
-  if (w >= 260) return 4
-  return 3
-})
 
 // Anchor for range selection. Set by every plain click and by every
 // non-extending keyboard navigation. Shift+arrow / shift+click define the
@@ -1842,15 +2467,72 @@ const anchorId = ref<number | null>(null)
 const stableBulkIds = ref<Set<number>>(new Set())
 
 function setShiftRange(fromIdx: number, toIdx: number) {
-  const list = flatVisible.value
+  const list = navList.value
   const [lo, hi] = fromIdx <= toIdx ? [fromIdx, toIdx] : [toIdx, fromIdx]
   const next = new Set(stableBulkIds.value)
   for (let i = lo; i <= hi; i++) next.add(list[i].id)
   bulkIds.value = next
 }
 
+// Image-first up/down: jump to the first detection of the next or
+// previous unique source image in filteredDetections order. Bulk
+// extension via shift is intentionally ignored — extending a bulk
+// across whole images isn't the gesture users want from arrow keys
+// here. Left/right keys keep their per-crop step.
+function navigateImage(direction: 1 | -1) {
+  const sel = selected.value
+  if (!sel) return
+  const list = filteredDetections.value
+  const currentIdx = list.findIndex((d) => d.id === sel.id)
+  if (currentIdx < 0) return
+  const currentFilename = sel.source_image_filename
+
+  if (direction === 1) {
+    for (let i = currentIdx + 1; i < list.length; i++) {
+      if (list[i].source_image_filename !== currentFilename) {
+        selectedId.value = list[i].id
+        anchorId.value = list[i].id
+        stableBulkIds.value = new Set(bulkIds.value)
+        return
+      }
+    }
+    return
+  }
+
+  // Prev image: walk back until the filename changes, then keep
+  // walking until it changes again — that's the first detection of
+  // the previous image.
+  let prevImageLast = -1
+  for (let i = currentIdx - 1; i >= 0; i--) {
+    if (list[i].source_image_filename !== currentFilename) {
+      prevImageLast = i
+      break
+    }
+  }
+  if (prevImageLast < 0) return
+  const prevFilename = list[prevImageLast].source_image_filename
+  let prevImageFirst = prevImageLast
+  for (let i = prevImageLast - 1; i >= 0; i--) {
+    if (list[i].source_image_filename !== prevFilename) break
+    prevImageFirst = i
+  }
+  selectedId.value = list[prevImageFirst].id
+  anchorId.value = list[prevImageFirst].id
+  stableBulkIds.value = new Set(bulkIds.value)
+}
+
+// The list left/right arrow nav and shift-range selection walk. Image-first
+// uses spatial order (filteredDetections) so arrows match the crops sidebar
+// and the bbox order on the image; crop-first uses the grouped grid order
+// (flatVisible) so arrows match the rendered tile grid. Both navigate() and
+// setShiftRange() MUST read the same list since navigate computes indices
+// it hands to setShiftRange.
+const navList = computed(() =>
+  settings.reviewLayout === 'image-first' ? filteredDetections.value : flatVisible.value,
+)
+
 function navigate(delta: number, extend: boolean) {
-  const list = flatVisible.value
+  const list = navList.value
   const idx = list.findIndex((d) => d.id === selectedId.value)
   if (idx < 0) return
   const newIdx = Math.max(0, Math.min(list.length - 1, idx + delta))
@@ -1886,14 +2568,23 @@ function onTileClick(d: Detection, e: MouseEvent | KeyboardEvent) {
 }
 
 function onKeydown(e: KeyboardEvent) {
-  if (!selected.value) return
-  if (zoomDialog.value?.open) return
+  // Inputs keep their own typing + native undo.
   if (
     e.target instanceof HTMLElement &&
     ['INPUT', 'SELECT', 'TEXTAREA'].includes(e.target.tagName)
   ) {
     return
   }
+  // Ctrl/Cmd+Z reverts the last classify gesture. Handled before the
+  // `selected` guard because a keyboard action auto-advances off the
+  // crop it changed, so nothing may be selected when the user undoes.
+  if ((e.ctrlKey || e.metaKey) && !e.shiftKey && (e.key === 'z' || e.key === 'Z')) {
+    e.preventDefault()
+    void undoLast()
+    return
+  }
+  if (!selected.value) return
+  if (zoomDialog.value?.open) return
   // Escape clears any bulk selection without losing the currently-focused tile.
   if (e.key === 'Escape' && bulkIds.value.size > 0) {
     clearBulk()
@@ -1908,7 +2599,7 @@ function onKeydown(e: KeyboardEvent) {
   // Keyboard actions auto-advance to the next tile so the reviewer can
   // fly through a queue without touching the mouse. Mouse-driven actions
   // (Label panel clicks, footer buttons) stay put — see applyAction.
-  const classKeyAction = (cls: ClassName) =>
+  const classKeyAction = (cls: PollinatorClass) =>
     bulkMode ? applyToBulk('corrected', cls) : confirmAs(cls, true)
   switch (e.key) {
     case '1':
@@ -1945,12 +2636,22 @@ function onKeydown(e: KeyboardEvent) {
       break
     case 'ArrowDown':
     case 'j':
-      navigate(GRID_COLS.value, e.shiftKey)
+      // Image-first: up/down cycle SOURCE IMAGES, left/right cycle
+      // crops within the current image. Crop-first keeps its grid nav.
+      if (settings.reviewLayout === 'image-first') {
+        navigateImage(1)
+      } else {
+        navigate(colsPerRow.value, e.shiftKey)
+      }
       e.preventDefault()
       break
     case 'ArrowUp':
     case 'k':
-      navigate(-GRID_COLS.value, e.shiftKey)
+      if (settings.reviewLayout === 'image-first') {
+        navigateImage(-1)
+      } else {
+        navigate(-colsPerRow.value, e.shiftKey)
+      }
       e.preventDefault()
       break
     case 'ArrowRight':
@@ -1963,12 +2664,21 @@ function onKeydown(e: KeyboardEvent) {
       navigate(-1, e.shiftKey)
       e.preventDefault()
       break
+    case 'Delete':
+      // Image-first only: reject the active image's unreviewed crops,
+      // same as the rail's trash button. Undoable via Ctrl+Z.
+      if (settings.reviewLayout === 'image-first' && selected.value) {
+        onDeleteImage(selected.value.source_image_filename)
+        e.preventDefault()
+      }
+      break
   }
 }
 
 onMounted(() => window.addEventListener('keydown', onKeydown))
 onUnmounted(() => {
   window.removeEventListener('keydown', onKeydown)
+  gridResizeObserver?.disconnect()
   // If the user navigates away mid-drag, the move/up listeners would leak.
   window.removeEventListener('mousemove', onPreviewDragMove)
   window.removeEventListener('mouseup', onPreviewDragEnd)
@@ -1976,5 +2686,9 @@ onUnmounted(() => {
   window.removeEventListener('mouseup', onResizerUp)
   document.body.style.cursor = ''
   document.body.style.userSelect = ''
+  // Persist any threshold/toggle change still sitting in the debounce
+  // window so navigating away can't drop it. recompute=false: don't reload
+  // into a component that's being torn down.
+  void flushReviewSettings(false)
 })
 </script>

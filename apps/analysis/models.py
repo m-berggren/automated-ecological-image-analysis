@@ -95,11 +95,20 @@ class ModelVersion(models.Model):
 
     def save(self, *args, **kwargs) -> None:
         if self.is_active:
-            ModelVersion.objects.filter(
+            # For seeds, only deactivate models of the same species
+            # For other modules, deactivate all of the same kind
+            species = self.parameters.get('species') if self.parameters else None
+            qs = ModelVersion.objects.filter(
                 module=self.module,
                 kind=self.kind,
                 is_active=True,
-            ).exclude(pk=self.pk).update(is_active=False)
+            ).exclude(pk=self.pk)
+
+            if species:
+                # Only deactivate same species
+                qs = qs.filter(parameters__species=species)
+
+            qs.update(is_active=False)
         super().save(*args, **kwargs)
 
     def __str__(self) -> str:
@@ -282,6 +291,7 @@ class InferenceRun(models.Model):
         blank=True,
     )
 
+    reference_seeds = models.JSONField(default=dict, blank=True)
     # Progress fields. All maintained by the worker; defaults cover the
     # pre-run state.
     image_count = models.IntegerField(default=0)
@@ -296,6 +306,13 @@ class InferenceRun(models.Model):
         help_text='List of {time, message, level} entries appended by the worker',
     )
     error_message = models.TextField(blank=True)
+
+    # Per-run reviewer/export preferences, distinct from the frozen `config`.
+    # Shape: {auto_select: bool, yolo_threshold: float, group_threshold: float}.
+    # Any missing key falls back (on the frontend) to the run's config
+    # confidence values, so a fresh run's review sliders start at whatever
+    # it was processed with rather than a hard-coded default.
+    review_settings = models.JSONField(default=dict, blank=True)
 
     initiated_by = models.ForeignKey(
         settings.AUTH_USER_MODEL,
@@ -325,6 +342,10 @@ class DetectionStatus(models.TextChoices):
     REJECTED = 'rejected', 'Rejected'
     UNSURE = 'unsure', 'Unsure'
 
+class SeedStatus(models.TextChoices):
+    ACTIVE = 'active', 'Active'
+    ABORTED = 'aborted', 'Aborted'
+    REFERENCE = 'reference', 'Reference'
 
 class Detection(models.Model):
     """A single bounding box predicted by an inference run.
@@ -356,6 +377,8 @@ class Detection(models.Model):
             'the ML pipeline in ml-pipelines/pollinator/workflows.'
         ),
     )
+    polygon = models.JSONField(null=True, blank=True)
+
     confidence = models.FloatField()
     predicted_class = models.CharField(max_length=50)
     area = models.FloatField(
@@ -379,6 +402,21 @@ class Detection(models.Model):
         help_text='Class assigned by a reviewer when correcting the prediction',
     )
 
+    seed_status = models.CharField(
+        max_length=20,
+        choices=SeedStatus.choices,
+        null=True,
+        blank=True,
+    )
+
+    reference_detection = models.ForeignKey(
+        'self',
+        on_delete=models.SET_NULL,
+        null=True,
+        blank=True,
+        related_name='classified_seeds',
+    )
+
     reviewed_by = models.ForeignKey(
         settings.AUTH_USER_MODEL,
         on_delete=models.SET_NULL,
@@ -387,6 +425,17 @@ class Detection(models.Model):
         related_name='reviewed_detections',
     )
     reviewed_at = models.DateTimeField(null=True, blank=True)
+
+    auto_accepted = models.BooleanField(
+        default=False,
+        help_text=(
+            'True when the "Suggest exports" auto-select confirmed this '
+            'detection because it cleared both confidence thresholds. '
+            'Distinguishes machine-picked acceptances from manual reviewer '
+            'confirmations: any manual review action clears it. Drives the '
+            'blue (auto) vs green (manual) cue on the Export page.'
+        ),
+    )
 
     excluded_from_export = models.BooleanField(
         default=False,
@@ -402,6 +451,17 @@ class Detection(models.Model):
             'True once a reviewer has explicitly toggled excluded_from_export '
             'from the Export page. Engulfment auto-exclude skips these rows '
             'so a manual include/exclude decision is sticky across re-runs.'
+        ),
+    )
+    exclude_from_training = models.BooleanField(
+        default=False,
+        help_text=(
+            'Reviewer flag: exclude this crop from binary/group classifier '
+            'training. Set by un-ticking the crop in the training pool drawer; '
+            'the crop stays visible (greyed) and can be re-included. Distinct '
+            'from excluded_from_export (which only affects CSV export) and from '
+            'ImageAsset.exclude_from_training (which governs YOLO detector '
+            'training at the image level).'
         ),
     )
 

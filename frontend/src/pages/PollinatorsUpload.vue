@@ -29,127 +29,124 @@
     <section class="rounded-xl border border-border bg-surface p-5 space-y-4">
       <h2 class="text-sm font-semibold">Detection settings</h2>
 
-      <!-- Models row -->
-      <div class="grid grid-cols-1 md:grid-cols-3 gap-4">
-        <label class="space-y-1">
-          <span class="flex items-center gap-1.5 text-xs text-muted-foreground">
-            <span>YOLO</span>
-            <InfoPopover>
-              The detector. Finds insect bounding boxes anywhere in the frame using a CNN trained on
-              labelled crops. Runs on every image regardless of motion.
-            </InfoPopover>
-          </span>
-          <select
-            v-model="config.yolo.model_version_id"
-            class="w-full px-2 py-1.5 rounded border border-border bg-background text-sm"
-            :disabled="!detectorModels.length"
-          >
-            <option :value="null" disabled>
-              {{ detectorModels.length ? 'Select model' : 'No models yet' }}
-            </option>
-            <option v-for="m in detectorModels" :key="m.id" :value="m.id">
-              {{ m.version_name }}{{ m.is_active ? ' (active)' : '' }}
-            </option>
-          </select>
-        </label>
-        <label class="space-y-1">
-          <span class="flex items-center gap-1.5 text-xs text-muted-foreground">
-            <span>EfficientNet</span>
-            <InfoPopover>
-              The insect/background gate. Every motion-detected crop runs through this first;
-              non-insect crops are dropped before the group classifier sees them.
-            </InfoPopover>
-          </span>
-          <select
-            v-model="config.binary_classifier.model_version_id"
-            class="w-full px-2 py-1.5 rounded border border-border bg-background text-sm"
-            :disabled="!binaryModels.length"
-          >
-            <option :value="null" disabled>
-              {{ binaryModels.length ? 'Select model' : 'No models yet' }}
-            </option>
-            <option v-for="m in binaryModels" :key="m.id" :value="m.id">
-              {{ m.version_name }}{{ m.is_active ? ' (active)' : '' }}
-            </option>
-          </select>
-        </label>
-        <label class="space-y-1">
-          <span class="flex items-center gap-1.5 text-xs text-muted-foreground">
-            <span>InsectNet</span>
-            <InfoPopover>
-              The group classifier. Assigns insect crops to one of: bumblebee, fly, butterfly,
-              other. Runs only on crops the EfficientNet gate accepted.
-            </InfoPopover>
-          </span>
-          <select
-            v-model="config.group_classifier.model_version_id"
-            class="w-full px-2 py-1.5 rounded border border-border bg-background text-sm"
-            :disabled="!groupModels.length"
-          >
-            <option :value="null" disabled>
-              {{ groupModels.length ? 'Select model' : 'No models yet' }}
-            </option>
-            <option v-for="m in groupModels" :key="m.id" :value="m.id">
-              {{ m.version_name }}{{ m.is_active ? ' (active)' : '' }}
-            </option>
-          </select>
-        </label>
-      </div>
+      <!-- Two columns: YOLO detector on the left, 2-step Classification
+           (Binary + Group, with one shared Confidence below) on the right.
+           Same card styling as the surrounding sections — no special
+           framing on the right column. -->
+      <div class="grid grid-cols-1 md:grid-cols-[1fr_2fr] gap-6">
+        <!-- YOLO column. -->
+        <div class="space-y-3">
+          <label class="space-y-1 block">
+            <span class="flex items-center gap-1.5 text-xs text-muted-foreground">
+              <span class="font-semibold">YOLO</span>
+              <InfoPopover>
+                The detector. Finds insect bounding boxes anywhere in the frame using a CNN trained
+                on labelled crops. Runs on every image regardless of motion.
+              </InfoPopover>
+            </span>
+            <select
+              v-model="config.yolo.model_version_id"
+              class="w-full px-2 py-1.5 rounded border border-border bg-background text-sm"
+              :disabled="!detectorModels.length"
+            >
+              <option :value="null" disabled>
+                {{ detectorModels.length ? 'Select model' : 'No models yet' }}
+              </option>
+              <option v-for="m in detectorModels" :key="m.id" :value="m.id">
+                {{ m.version_name }}{{ m.is_active ? ' (active)' : '' }}
+              </option>
+            </select>
+          </label>
+          <label class="space-y-1 block w-24">
+            <span class="flex items-center gap-1.5 text-xs text-muted-foreground">
+              <span>Confidence</span>
+              <InfoPopover>
+                Minimum YOLO confidence to keep a detection. Lower = more candidates and more false
+                positives surfaced for review.
+              </InfoPopover>
+            </span>
+            <input
+              v-model.number="config.yolo.confidence"
+              type="number"
+              min="0"
+              max="1"
+              step="0.05"
+              class="w-full px-2 py-1.5 rounded border border-border bg-background text-sm font-mono text-center"
+            />
+          </label>
+        </div>
 
-      <!-- Confidence row -->
-      <div class="grid grid-cols-1 md:grid-cols-3 gap-4">
-        <label class="space-y-1">
-          <span class="flex items-center gap-1.5 text-xs text-muted-foreground">
-            <span>YOLO confidence</span>
-            <InfoPopover>
-              Minimum YOLO confidence to keep a detection. Lower = more candidates and more false
-              positives surfaced for review.
-            </InfoPopover>
-          </span>
-          <input
-            v-model.number="config.yolo.confidence"
-            type="number"
-            min="0"
-            max="1"
-            step="0.05"
-            class="w-full px-2 py-1.5 rounded border border-border bg-background text-sm font-mono"
-          />
-        </label>
-        <label class="space-y-1">
-          <span class="flex items-center gap-1.5 text-xs text-muted-foreground">
-            <span>Binary confidence</span>
-            <InfoPopover>
-              Minimum probability the EfficientNet must give for "insect" to let a motion crop
-              through to the group classifier.
-            </InfoPopover>
-          </span>
-          <input
-            v-model.number="config.binary_classifier.confidence"
-            type="number"
-            min="0"
-            max="1"
-            step="0.05"
-            class="w-full px-2 py-1.5 rounded border border-border bg-background text-sm font-mono"
-          />
-        </label>
-        <label class="space-y-1">
-          <span class="flex items-center gap-1.5 text-xs text-muted-foreground">
-            <span>Group confidence</span>
-            <InfoPopover>
-              Minimum probability the group classifier must give for its top class. Below this the
-              detection is kept but the class is stripped so a reviewer assigns one. 0 = always
-              trust the top class.
-            </InfoPopover>
-          </span>
-          <input
-            v-model.number="config.group_classifier.confidence"
-            type="number"
-            min="0"
-            max="1"
-            step="0.05"
-            class="w-full px-2 py-1.5 rounded border border-border bg-background text-sm font-mono"
-          />
-        </label>
+        <!-- 2-step Classification column: two model selects in a row,
+             then a single shared Confidence input centered below. -->
+        <div class="space-y-3 md:border-l md:border-border md:pl-6">
+          <div class="grid grid-cols-2 gap-4">
+            <label class="space-y-1 block">
+              <span class="flex items-center gap-1.5 text-xs text-muted-foreground">
+                <span>Binary Classifier</span>
+                <InfoPopover>
+                  The insect/background gate (formerly "EfficientNet"). Every motion-detected crop
+                  runs through this first; non-insect crops are dropped before the group classifier
+                  sees them.
+                </InfoPopover>
+              </span>
+              <select
+                v-model="config.binary_classifier.model_version_id"
+                class="w-full px-2 py-1.5 rounded border border-border bg-background text-sm"
+                :disabled="!binaryModels.length"
+              >
+                <option :value="null" disabled>
+                  {{ binaryModels.length ? 'Select model' : 'No models yet' }}
+                </option>
+                <option v-for="m in binaryModels" :key="m.id" :value="m.id">
+                  {{ m.version_name }}{{ m.is_active ? ' (active)' : '' }}
+                </option>
+              </select>
+            </label>
+            <label class="space-y-1 block">
+              <span class="flex items-center gap-1.5 text-xs text-muted-foreground">
+                <span>Group Classifier</span>
+                <InfoPopover>
+                  Assigns insect crops to one of: bumblebee, fly, butterfly, other (formerly
+                  "InsectNet"). Runs only on crops the Binary Classifier accepted.
+                </InfoPopover>
+              </span>
+              <select
+                v-model="config.group_classifier.model_version_id"
+                class="w-full px-2 py-1.5 rounded border border-border bg-background text-sm"
+                :disabled="!groupModels.length"
+              >
+                <option :value="null" disabled>
+                  {{ groupModels.length ? 'Select model' : 'No models yet' }}
+                </option>
+                <option v-for="m in groupModels" :key="m.id" :value="m.id">
+                  {{ m.version_name }}{{ m.is_active ? ' (active)' : '' }}
+                </option>
+              </select>
+            </label>
+          </div>
+          <!-- Single Confidence centered under the two selectors. Writes
+               to both stage thresholds. -->
+          <label class="space-y-1 block w-24 mx-auto">
+            <span class="flex items-center gap-1.5 text-xs text-muted-foreground justify-center">
+              <span>Confidence</span>
+              <InfoPopover>
+                Applied to both stages: the Binary Classifier must exceed this for "insect", AND the
+                Group Classifier's top-class probability must exceed it to keep the assigned class.
+                Below this the detection is kept but the class is stripped so a reviewer assigns
+                one.
+              </InfoPopover>
+            </span>
+            <input
+              :value="twoStepConfidence"
+              type="number"
+              min="0"
+              max="1"
+              step="0.05"
+              class="w-full px-2 py-1.5 rounded border border-border bg-background text-sm font-mono text-center"
+              @input="onTwoStepConfidenceInput(($event.target as HTMLInputElement).value)"
+            />
+          </label>
+        </div>
       </div>
 
       <!-- Misc row -->
@@ -285,17 +282,18 @@
             <input v-model="config.preprocessing.skip_flash" type="checkbox" />
             <span>Skip flash frames</span>
             <InfoPopover>
-              Drop motion candidates from frames where the EXIF flash flag fired. The flash washes
-              out colour and creates spurious motion edges relative to the previous (un-flashed)
-              frame.
+              Skip frames where the EXIF flash flag fired. The flash washes out colour and creates
+              spurious motion edges. Skipped frames produce zero detections from both YOLO and the
+              motion branch.
             </InfoPopover>
           </label>
           <label class="flex items-center gap-2 text-sm">
             <input v-model="config.preprocessing.skip_foggy" type="checkbox" />
             <span>Skip foggy frames</span>
             <InfoPopover>
-              Drop motion candidates from frames whose Laplacian variance is below the foggy
-              threshold (low edge contrast = likely fog or extreme blur).
+              Skip frames whose Laplacian variance is below the foggy threshold (low edge contrast =
+              likely fog or extreme blur). Skipped frames produce zero detections from both YOLO and
+              the motion branch.
             </InfoPopover>
           </label>
           <label class="flex items-center gap-2 text-sm">
@@ -350,6 +348,14 @@
         </div>
         <div class="flex items-center gap-2">
           <button
+            v-if="submitting"
+            :disabled="cancelling"
+            class="px-3 py-1.5 rounded-md text-sm font-medium border border-red-300 text-red-700 hover:bg-red-50 disabled:opacity-50 disabled:cursor-not-allowed"
+            @click="cancelUpload"
+          >
+            {{ cancelling ? 'Cancelling…' : 'Cancel' }}
+          </button>
+          <button
             :disabled="!canStart"
             :title="startDisabledReason"
             class="px-3 py-1.5 rounded-md text-sm font-medium bg-primary text-primary-foreground hover:bg-primary/90 disabled:opacity-50 disabled:cursor-not-allowed"
@@ -359,7 +365,14 @@
           </button>
         </div>
       </header>
-      <div v-if="submitting" class="px-5 pb-3">
+      <div v-if="submitting" class="px-5 pb-3 space-y-1">
+        <div class="flex items-center gap-2 text-[11px] font-mono text-muted-foreground">
+          <span class="tabular-nums">
+            {{ uploadedCount.toLocaleString() }} / {{ pickedFiles.length.toLocaleString() }}
+          </span>
+          <span>images</span>
+          <span class="ml-auto tabular-nums">{{ uploadPercent }}%</span>
+        </div>
         <div class="h-1.5 rounded-full bg-muted overflow-hidden">
           <div class="h-full bg-primary transition-all" :style="{ width: uploadPercent + '%' }" />
         </div>
@@ -450,7 +463,10 @@ interface PipelineConfig {
   start_at_image: number
   preprocessing: {
     use_roi: boolean
-    roi_bbox: null | RoiBBox
+    // Persisted as [x, y, width, height] in source-image pixels — the shape
+    // both the backend burn-in and ROIOverlay expect. ROIDrawer emits an
+    // {x,y,width,height} object, converted at assignment below.
+    roi_bbox: null | [number, number, number, number]
     crop_pad_frac: number
     background_sample_size: number
     min_contour_area: number
@@ -487,6 +503,21 @@ const config = ref<PipelineConfig>({
     enable_large_motion: true,
   },
 })
+
+// Single "Confidence" knob inside the 2-step Classification frame:
+// writes to BOTH the binary and group thresholds so the two-stage
+// classifier reads with one number from the reviewer's perspective.
+// Displays the binary value (they're kept in sync, so either works as
+// the source of truth for the input).
+const twoStepConfidence = computed(() => config.value.binary_classifier.confidence)
+
+function onTwoStepConfidenceInput(raw: string) {
+  const v = Number.parseFloat(raw)
+  if (Number.isNaN(v)) return
+  const clamped = Math.max(0, Math.min(1, v))
+  config.value.binary_classifier.confidence = clamped
+  config.value.group_classifier.confidence = clamped
+}
 
 // "Start at image" must point into the picked file list. Recomputes
 // any time pickedFiles or the input value changes.
@@ -671,6 +702,32 @@ async function abortDraft(): Promise<void> {
   }
 }
 
+// In-page cancel: prompts, then tears down the draft (aborts the in-
+// flight upload, calls the abort endpoint to drop uploaded files + DB
+// trace). Re-enables the form so the user can adjust and retry.
+const cancelling = ref(false)
+async function cancelUpload(): Promise<void> {
+  if (!submitting.value || cancelling.value) return
+  const ok = await confirm({
+    title: 'Cancel the upload?',
+    message: 'The run and any images already uploaded will be discarded.',
+    confirmLabel: 'Cancel upload',
+    cancelLabel: 'Keep uploading',
+    variant: 'danger',
+  })
+  if (!ok) return
+  cancelling.value = true
+  try {
+    await abortDraft()
+  } finally {
+    cancelling.value = false
+    // startDetection's finally clears submitting, but the upload loop is
+    // already aborted via the signal — clear here too in case the loop
+    // hadn't started yet (e.g. user cancelled during the ROI modal).
+    submitting.value = false
+  }
+}
+
 async function startDetection() {
   if (!canStart.value) return
   error.value = ''
@@ -688,7 +745,7 @@ async function startDetection() {
         error.value = 'ROI selection was cancelled.'
         return
       }
-      config.value.preprocessing.roi_bbox = bbox
+      config.value.preprocessing.roi_bbox = [bbox.x, bbox.y, bbox.width, bbox.height]
     } else {
       config.value.preprocessing.roi_bbox = null
     }

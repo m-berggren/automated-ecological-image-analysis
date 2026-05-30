@@ -10,7 +10,7 @@ DEFAULT_CONFIG = {
     # 0 = skip global background entirely, use frame-to-frame diff only.
     'background_sample_size': 0,
     # Background subtraction threshold.
-    'darker_threshold': 30,
+    'darker_threshold': 15,
     # Contour filtering.
     'min_contour_area': 400,
     'max_contour_area': 35000,
@@ -42,7 +42,8 @@ DEFAULT_CONFIG = {
     # valid background reference (lighting/camera changed); the next frame
     # restarts from the global background or skips detection.
     'max_gap_seconds': 3600,
-    # Quality filtering.
+    # Quality filtering. A flagged frame is skipped entirely: no YOLO, no
+    # motion-branch crops, zero detections recorded.
     'skip_flash': True,
     'skip_foggy': True,
     'foggy_threshold': 50,

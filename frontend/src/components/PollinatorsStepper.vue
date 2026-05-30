@@ -6,6 +6,7 @@
           <component
             :is="hrefFor(step) ? RouterLink : 'div'"
             :to="hrefFor(step) ?? undefined"
+            :data-step="step.key"
             class="flex items-center gap-2"
             :class="{
               'cursor-pointer hover:opacity-80': hrefFor(step),

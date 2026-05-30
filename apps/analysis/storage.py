@@ -14,10 +14,27 @@ from __future__ import annotations
 
 import logging
 import os
+import shutil
 from pathlib import Path
 from urllib.parse import urlparse
 
 logger = logging.getLogger(__name__)
+
+
+def link_or_copy(src: Path, dst: Path) -> None:
+    """Materialise `src` at `dst` cheaply.
+
+    Tries a hardlink first (instant, zero disk cost) and falls back to a
+    full copy when the two paths live on different filesystems — typical
+    when a system tempdir lives on a separate mount from MEDIA_ROOT.
+    Idempotent: if `dst` already exists the link/copy is skipped.
+    """
+    if dst.exists():
+        return
+    try:
+        os.link(src, dst)
+    except OSError:
+        shutil.copy2(src, dst)
 
 
 # Where downloaded cloud-backed model files are cached on the local machine.

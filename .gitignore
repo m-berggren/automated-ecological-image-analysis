@@ -20,13 +20,15 @@ cohens_kappa/
 
 # Jupyter notebook checkpoints
 data/seed/.ipynb_checkpoints/
-ml-pipelines/notebooks/seed-counting/.ipynb_checkpoints/
+ml_pipelines/notebooks/seed-counting/.ipynb_checkpoints/
 
 # YOLO outputs
 runs/
 sahi_results/
 prediction_images/
 predictions/
+ml_pipelines/debug_outputs/
+ml_pipelines/evaluations/
 
 # Django
 db.sqlite3

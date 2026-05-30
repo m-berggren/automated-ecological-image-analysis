@@ -3,6 +3,9 @@ from django.urls import path
 from .views import (
     PollinatorDetectionDetailView,
     PollinatorDetectionListView,
+    PollinatorDetectionSummaryView,
+    PollinatorDetectorDatasetUploadView,
+    PollinatorRunAutoSelectView,
     PollinatorRunExportAnnotatedView,
     PollinatorRunExportCropsView,
     PollinatorRunExportCSVView,
@@ -15,6 +18,16 @@ urlpatterns = [
         'runs/<int:run_id>/detections/',
         PollinatorDetectionListView.as_view(),
         name='pollinator-run-detections',
+    ),
+    path(
+        'runs/<int:run_id>/detections/summary/',
+        PollinatorDetectionSummaryView.as_view(),
+        name='pollinator-run-detections-summary',
+    ),
+    path(
+        'runs/<int:run_id>/auto-select/',
+        PollinatorRunAutoSelectView.as_view(),
+        name='pollinator-run-auto-select',
     ),
     path(
         'runs/<int:run_id>/export.csv',
@@ -45,5 +58,10 @@ urlpatterns = [
         'training/pool/',
         PollinatorTrainingPoolView.as_view(),
         name='pollinator-training-pool',
+    ),
+    path(
+        'training/detector-dataset/',
+        PollinatorDetectorDatasetUploadView.as_view(),
+        name='pollinator-detector-dataset-upload',
     ),
 ]
