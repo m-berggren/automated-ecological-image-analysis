@@ -35,7 +35,7 @@ def calculate_tp_fp_fn(preds, gts, iou_threshold=0.5):
         for i, g_box in enumerate(gts):
             if i in matched_gt_indices:
                 continue
-            iou = get_iou(p_box["poly"], g_box)
+            iou = get_iou(p_box['poly'], g_box)
             if iou > best_iou:
                 best_iou = iou
                 best_gt_idx = i
@@ -53,5 +53,9 @@ def calculate_tp_fp_fn(preds, gts, iou_threshold=0.5):
 def calculate_precision_recall_f1_score(tp, fp, fn):
     precision = tp / (tp + fp) if (tp + fp) > 0 else 0.0
     recall = tp / (tp + fn) if (tp + fn) > 0 else 0.0
-    f1 = 2 * precision * recall / (precision + recall) if (precision + recall) > 0 else 0.0
+    f1 = (
+        2 * precision * recall / (precision + recall)
+        if (precision + recall) > 0
+        else 0.0
+    )
     return precision, recall, f1
