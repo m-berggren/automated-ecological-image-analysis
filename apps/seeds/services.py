@@ -20,52 +20,6 @@ from apps.datasets.models import ImageAsset
 logger = logging.getLogger(__name__)
 
 
-def _base_data() -> Path:
-    from django.conf import settings
-
-    return settings.BASE_DIR / 'data' / 'seed'
-
-
-def bootstrap_species_dataset(species: str) -> Path:
-    """Create the folder structure and YAML config for a new seed species.
-
-    Creates:
-        root/data/seed/<species>_model/
-        root/data/seed/<species>_model/train_sliced/
-        root/data/seed/<species>_model/val/images/
-        root/data/seed/<species>_model/<species>.yaml
-
-    Returns the path to the YAML file.
-    """
-    BASE_DATA = _base_data()
-    species = species.lower()
-    species_dir = BASE_DATA / f'{species}_model'
-
-    # Always create dirs if missing
-    (species_dir / 'train_sliced').mkdir(parents=True, exist_ok=True)
-    (species_dir / 'val' / 'images').mkdir(parents=True, exist_ok=True)
-    (species_dir / 'val' / 'labels').mkdir(parents=True, exist_ok=True)
-
-    # Always write YAML (overwrites if exists, fixing stale relative paths)
-    yaml_path = species_dir / f'{species}.yaml'
-    yaml_path.write_text(
-        f'path: {species_dir}\n'
-        f'train: train_sliced\n'
-        f'val: val/images\n'
-        f'\n'
-        f'names:\n'
-        f'  0: {species}\n'
-    )
-
-    logger.info(f'Dataset folder ready at {species_dir}')
-    return yaml_path
-
-
-def species_dataset_exists(species: str) -> bool:
-    """Check if a species dataset folder already exists."""
-    return (_base_data() / f'{species.lower()}_model').exists()
-
-
 def process_seeds_run(run_id: int):
     try:
         run = InferenceRun.objects.get(pk=run_id)
@@ -91,12 +45,8 @@ def process_seeds_run(run_id: int):
         model_path = model_version.model_file_path
 
         # Load the model
-        from django.core.files import File
         from sahi.predict import get_sliced_prediction
-        from seed_src.inference.inference import generate_prediction_visuals
         from seed_src.utils.helpers import load_model
-
-        from apps.datasets.models import ImageAsset
 
         model = load_model(model_path)
 
@@ -120,29 +70,9 @@ def process_seeds_run(run_id: int):
                 postprocess_match_threshold=conf_thresh,
             )
 
-            # Extract just the filename
-            base_filename = os.path.basename(image_asset.file.name)
-
-            # Generate the path to the annotated prediction image
-            annotated_img_path = generate_prediction_visuals(
-                result,
-                img_path,
-                base_filename,
-                'ml_pipelines/seed_src/prediction_images/',
-            )
-
-            # Save the annotated prediction image to Django's media storage
-            with open(annotated_img_path, 'rb') as f:
-                annotated_asset = ImageAsset.objects.create(
-                    module='seeds', purpose='inference_output', upload=run.upload
-                )
-                annotated_asset.file.save(f'annotated_{base_filename}', File(f))
-
-            # Link this to the original image for easy access in the UI
-            image_asset.metadata['annotated_image_id'] = annotated_asset.id
-            image_asset.save()
-
-            # Save detections to DB
+            # Save detections to DB. SeedsReview / SeedsSetReference render
+            # polygons as SVG overlays on the original image, so we don't
+            # also persist a copy with boxes burned in.
             for pred in result.object_prediction_list:
                 poly = None
 
