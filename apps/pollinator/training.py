@@ -33,7 +33,11 @@ from apps.analysis.models import (
     ModelVersion,
     TrainingJob,
 )
-from apps.analysis.storage import link_or_copy, resolve_model_path
+from apps.analysis.storage import (
+    link_or_copy,
+    move_weights_into_place,
+    resolve_model_path,
+)
 from apps.datasets.models import Module
 
 logger = logging.getLogger(__name__)
@@ -867,7 +871,10 @@ def run_training_job(job: TrainingJob) -> None:
         # Falling back on collision avoids failing a finished training run just
         # because the chosen name was taken between submit and completion.
         desired_name = (config.get('version_name') or '').strip()
-        if not desired_name or ModelVersion.objects.filter(version_name=desired_name).exists():
+        if (
+            not desired_name
+            or ModelVersion.objects.filter(version_name=desired_name).exists()
+        ):
             desired_name = _next_version_name(track)
 
         with transaction.atomic():
@@ -907,6 +914,8 @@ def run_training_job(job: TrainingJob) -> None:
         # classifiers read the trainer's output dir (*_results.json +
         # confusion_matrix.png). Parsed metrics replace the model card's
         # metrics; the job keeps its original (nested/raw) metrics for history.
+        # Capture run_dir BEFORE moving the weights file, since the dir is
+        # derived from the weights path.
         from apps.analysis.artifacts import ingest_run_dir
 
         if track == 'detector':
@@ -914,6 +923,17 @@ def run_training_job(job: TrainingJob) -> None:
         else:
             run_dir = Path(weights_path).parent  # classifier output dir
         ingested, run_metrics, run_params = ingest_run_dir(new_mv, run_dir)
+
+        # Move weights into the canonical models/<module>/<id>/weights<ext>
+        # location and update the row. The training/<job_pk>/ tree is wiped
+        # by the finally block below; weights need to be out of it first.
+        weights_src = Path(weights_path)
+        ext = weights_src.suffix or '.pt'
+        canonical = move_weights_into_place(
+            weights_src, Module.POLLINATORS, new_mv.id, ext
+        )
+        new_mv.model_file_path = str(canonical)
+        new_mv.save(update_fields=['model_file_path'])
         update_fields: list[str] = []
         if run_metrics:
             new_mv.metrics = run_metrics
@@ -950,22 +970,13 @@ def run_training_job(job: TrainingJob) -> None:
         if uploaded_dir is not None:
             shutil.rmtree(uploaded_dir, ignore_errors=True)
         if dataset_dir is not None:
-            shutil.rmtree(dataset_dir, ignore_errors=True)
-            # retrain_yolo slices the source dataset into a sibling
-            # `<name>_tiled` dir (training_yolo.py); remove it too or the
-            # tiled images/labels (the larger pile) orphan under MEDIA_ROOT.
-            shutil.rmtree(
-                dataset_dir.parent / f'{dataset_dir.name}_tiled', ignore_errors=True
-            )
-            # If the job failed before any weights were written, the sibling
-            # weights/ dir and its parent training/<job_pk>/ are now empty
-            # and just clutter MEDIA_ROOT. rmdir only succeeds when empty,
-            # so a successful job (weights present) leaves them intact.
-            for d in (dataset_dir.parent / 'weights', dataset_dir.parent):
-                try:
-                    d.rmdir()
-                except OSError:
-                    pass
+            # Successful runs already moved weights into the canonical
+            # models/<module>/<id>/ location, so the entire training/<job_pk>/
+            # tree (dataset, tiled slices, leftover Ultralytics run outputs)
+            # is disposable. On failure before the move we lose the
+            # intermediate weights too, but a failed run produced no
+            # ModelVersion that depends on them.
+            shutil.rmtree(dataset_dir.parent, ignore_errors=True)
 
 
 def _run_in_thread(job_id: int) -> None:
