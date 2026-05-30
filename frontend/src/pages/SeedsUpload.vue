@@ -88,64 +88,47 @@
           v-if="!selectedSeed"
           class="rounded-lg border border-border bg-muted/20 p-4 text-sm text-muted-foreground"
         >
-          Select a seed type above to see available models
+          Select a seed type above to see the active model.
         </div>
 
         <div
-          v-else-if="!activeModelVersions.length"
+          v-else-if="!activeModel"
           class="rounded-lg border border-border bg-muted/20 p-4 text-sm"
         >
-          <span class="text-muted-foreground"> No active models found for {{ selectedSeed }}. </span>
-
-          <RouterLink to="/seeds/training" class="ml-1 text-primary hover:underline font-medium">
-            Go to the training page
+          <span class="text-muted-foreground">
+            No active model for {{ selectedSeed }}.
+          </span>
+          <RouterLink to="/seeds/models" class="ml-1 text-primary hover:underline font-medium">
+            Set one on the Models page
           </RouterLink>
-
-          <span class="text-muted-foreground"> to create one. </span>
+          <span class="text-muted-foreground"> or </span>
+          <RouterLink to="/seeds/training" class="text-primary hover:underline font-medium">
+            train a new one
+          </RouterLink>
+          <span class="text-muted-foreground">.</span>
         </div>
 
-        <!-- Cards -->
-        <div v-else class="space-y-2">
-          <label
-            v-for="model in activeModelVersions"
-            :key="model.id"
-            class="flex items-start gap-3 p-3 rounded-lg border cursor-pointer transition-colors"
-            :class="
-              config.model_version_id === model.id
-                ? 'border-primary bg-primary/5'
-                : 'border-border hover:border-primary/40'
-            "
-          >
-            <input
-              type="radio"
-              name="model-version"
-              class="mt-0.5"
-              :checked="config.model_version_id === model.id"
-              @change="config.model_version_id = model.id"
-            />
-
-            <div class="flex-1 min-w-0">
-              <!-- Top row -->
-              <div class="flex items-baseline gap-2 flex-wrap">
-                <span class="font-medium text-sm">
-                  {{ model.version_name }}
-                </span>
-
-                <span class="text-xs text-muted-foreground italic">
-                  {{ model.version_name?.split('-')[0] }}
-                </span>
-
-                <span class="text-xs px-2 py-0.5 rounded-full bg-green-300 text-green-900 font-medium">
-                  Active
-                </span>
-              </div>
-
-              <!-- Subtitle -->
-              <div class="text-xs text-muted-foreground mt-1">
-                Seed detection model ready for inference
-              </div>
+        <!-- Active model display (read-only; default is chosen on the Models page) -->
+        <div
+          v-else
+          class="flex items-start gap-3 p-3 rounded-lg border border-primary bg-primary/5"
+        >
+          <div class="flex-1 min-w-0">
+            <div class="flex items-baseline gap-2 flex-wrap">
+              <span class="font-medium text-sm">{{ activeModel.version_name }}</span>
+              <span class="text-xs text-muted-foreground italic">
+                {{ String(activeModel.parameters?.species ?? '').toUpperCase() }}
+              </span>
+              <span class="text-xs px-2 py-0.5 rounded-full bg-green-300 text-green-900 font-medium">
+                Active
+              </span>
             </div>
-          </label>
+            <div class="text-xs text-muted-foreground mt-1">
+              Default for {{ selectedSeed }}. Change on the
+              <RouterLink to="/seeds/models" class="text-primary hover:underline">
+                Models page</RouterLink>.
+            </div>
+          </div>
         </div>
       </div>
 
@@ -365,7 +348,7 @@
 </template>
 
 <script setup lang="ts">
-import { computed, onMounted, ref } from 'vue'
+import { computed, onMounted, ref, watch } from 'vue'
 import { useRouter } from 'vue-router'
 import { RouterLink } from 'vue-router'
 
@@ -383,6 +366,8 @@ interface ModelVersion {
   kind: string
   version_name: string
   is_active: boolean
+  parameters?: Record<string, unknown>
+  trained_at?: string
 }
 
 interface PipelineConfig {
@@ -420,14 +405,26 @@ const config = ref<PipelineConfig>({
   models: {},
 })
 
-// Filter models to match the selected seed species
-const activeModelVersions = computed(() => {
-  if (!selectedSeed.value) return []
-  return modelVersions.value.filter((m) => {
-    // Extract species from version_name
-    const modelSpecies = m.version_name?.split('-')[0]
-    return m.module === 'seeds' && m.is_active && modelSpecies === selectedSeed.value
-  })
+// Pick the single active model for the selected species. We source the
+// species from parameters.species (set by the training job and the model
+// upload dialog) rather than the version_name prefix, which broke for
+// hand-uploaded models with arbitrary names. The model picker lives on
+// the Models page — here we just display whatever's currently active.
+const activeModel = computed(() => {
+  if (!selectedSeed.value) return null
+  const target = selectedSeed.value.toLowerCase()
+  return (
+    modelVersions.value.find((m) => {
+      if (m.module !== 'seeds' || !m.is_active) return false
+      return String(m.parameters?.species ?? '').toLowerCase() === target
+    }) ?? null
+  )
+})
+
+// Keep config.model_version_id in sync with the active model so the
+// "Run" button has a value to submit without user interaction.
+watch([selectedSeed, activeModel], () => {
+  config.value.model_version_id = activeModel.value?.id ?? null
 })
 
 const uploadingCount = computed(() => {
@@ -472,24 +469,25 @@ onMounted(async () => {
     if (res.ok) {
       modelVersions.value = await res.json()
 
-      // Extract unique species from available models
+      // Source the type buttons from each model's parameters.species. The
+      // older `version_name.split('-')[0]` heuristic broke for any model
+      // whose name didn't follow the SPECIES-NN convention (e.g. a hand-
+      // uploaded "yolo-v1" became a "yolo" type button).
       const uniqueSpecies = Array.from(
-        new Set(modelVersions.value.map((m) => m.version_name?.split('-')[0]).filter(Boolean))
-      )
+        new Set(
+          modelVersions.value
+            .map((m) => String(m.parameters?.species ?? '').toLowerCase())
+            .filter(Boolean),
+        ),
+      ).sort()
 
-      // Build the UI buttons
+      // Build the UI buttons. Display in upper-case for readability,
+      // matching the SeedsModels track-header style.
       seedTypes.value = uniqueSpecies.map((species) => ({
-        id: species,
-        species: '',
+        id: species.toUpperCase(),
+        species,
         isCustom: false,
       }))
-
-      // Build the configuration tracking object
-      const dynamicModels: Record<string, SeedModelConfig> = {}
-      uniqueKinds.forEach((kind) => {
-        dynamicModels[kind] = { model_version_id: null }
-      })
-      config.value.models = dynamicModels
     }
   } catch {}
 })
