@@ -64,7 +64,13 @@
                 Active Seeds
               </span>
               <div class="text-xs text-muted-foreground font-mono">
+                <!-- Model's automated count, immutable. The adjustment
+                     input below tweaks the actual count saved/exported. -->
                 <span class="font-bold text-foreground">{{ initialAutomatedActiveCount }}</span>
+                <template v-if="manualActiveDelta !== 0">
+                  <span class="mx-1">-></span>
+                  <span class="font-bold text-foreground">{{ actualActiveCount }}</span>
+                </template>
               </div>
             </div>
 
@@ -72,18 +78,17 @@
               <input
                 id="manual-count"
                 type="number"
-                min="0"
-                v-model.number="manualActiveCount"
+                v-model.number="manualActiveDelta"
+                title="Adjustment to the model's count. Negative removes, positive adds."
+                placeholder="0"
                 class="w-14 px-1 py-1 rounded border border-border bg-background text-xs text-center font-bold focus:outline-none focus:ring-2 focus:ring-primary"
               />
-              <button
-                type="button"
-                class="px-2 py-1 bg-primary text-primary-foreground rounded text-[10px] font-medium hover:bg-primary/90 transition-colors shadow-sm"
-                @click="saveCurrentPageCount"
-                :disabled="savingCount"
+              <span
+                v-if="saveStatus"
+                class="text-[10px] text-muted-foreground italic"
               >
-                {{ savingCount ? '...' : 'Save' }}
-              </button>
+                {{ saveStatus }}
+              </span>
             </div>
           </div>
         </div>
@@ -212,7 +217,7 @@
 </template>
 
 <script setup lang="ts">
-import { computed, onMounted, ref, watch } from 'vue'
+import { computed, onMounted, onBeforeUnmount, ref, watch } from 'vue'
 import { useRoute, useRouter } from 'vue-router'
 import PageHeader from '@/components/PageHeader.vue'
 import SeedsStepper from '@/components/SeedsStepper.vue'
@@ -256,7 +261,17 @@ const router = useRouter()
 const loading = ref(true)
 const loadError = ref('')
 const zoom = ref(1)
-const savingCount = ref(false)
+// Auto-save state. saveStatus is a short user-visible string ("Saving…",
+// "Saved", "Error: …") that the header chip surfaces; null hides it.
+const saveStatus = ref<string | null>(null)
+let pendingSaveTimer: ReturnType<typeof setTimeout> | null = null
+let inFlightSave: Promise<void> | null = null
+// True while the image-change watch is mutating manualActiveDelta back to
+// the baseline-derived value. The delta-watch checks this so loading a
+// new image doesn't trigger a spurious save.
+let loadingBaseline = false
+const SAVE_DEBOUNCE_MS = 600
+const SAVED_PILL_MS = 1500
 
 const run = ref<ClassificationBundle['run'] | null>(null)
 const imagesList = ref<ReviewImage[]>([])
@@ -264,8 +279,14 @@ const currentImageIndex = ref(0)
 
 const imageDetectionsMap = ref<Record<string, Detection[]>>({})
 const initialMetricsLookupMap = ref<Record<string, BaselineMetrics>>({})
-const manualActiveCount = ref<number>(0)
+// Delta from the model's automated count, not an absolute. 0 means "model
+// got it right". Negative means the user is removing seeds, positive means
+// they're adding. The actual count saved/exported is initial + delta.
+const manualActiveDelta = ref<number>(0)
 const initialAutomatedActiveCount = ref<number>(0)
+const actualActiveCount = computed(
+  () => initialAutomatedActiveCount.value + manualActiveDelta.value,
+)
 const initialOverallConfidenceScore = ref<number>(0)
 const initialSeedRangeMin = ref<number>(0)
 const initialSeedRangeMax = ref<number>(0)
@@ -300,10 +321,7 @@ watch(
   (newImage) => {
     if (!newImage) return
 
-    // Fetch current number of detections to set the manual input counter value correctly
     const currentList = imageDetectionsMap.value[newImage.filename] || []
-
-    manualActiveCount.value = currentList.filter((d) => isActiveSeed(d)).length
 
     // Fetch initial model metrics from permanent lookup map
     const baseline = initialMetricsLookupMap.value[newImage.filename]
@@ -313,11 +331,21 @@ watch(
       initialSeedRangeMin.value = baseline.seedRangeMin
       initialSeedRangeMax.value = baseline.seedRangeMax
     }
-    if (baseline.savedManualCount !== null) {
-      manualActiveCount.value = baseline.savedManualCount
+    // Delta is the difference between what we'll actually save and the
+    // model's automated count. If the user already saved a manual count
+    // for this image, restore the delta that yields it. Otherwise default
+    // to 0 (no adjustment from the model). loadingBaseline shields the
+    // delta-watch from treating this assignment as a user edit.
+    loadingBaseline = true
+    if (baseline?.savedManualCount !== null && baseline?.savedManualCount !== undefined) {
+      manualActiveDelta.value = baseline.savedManualCount - initialAutomatedActiveCount.value
     } else {
-      manualActiveCount.value = currentList.filter((d) => isActiveSeed(d)).length
+      manualActiveDelta.value = 0
     }
+    loadingBaseline = false
+    // Suppress unused warning while keeping the variable in scope for
+    // future per-detection-driven UI cues.
+    void currentList
   },
   { immediate: true },
 )
@@ -350,12 +378,15 @@ function toggleSeedStatus(detectionId: number) {
     if (currentClass === 'active') {
       target.predicted_class = 'aborted'
       target.reviewer_status = 'confirmed'
-      manualActiveCount.value = Math.max(0, manualActiveCount.value - 1)
+      // Lose one active seed → delta goes down by one. Allow negative
+      // values: the user can keep removing past the model's count.
+      manualActiveDelta.value -= 1
     } else {
       target.predicted_class = 'active'
       target.reviewer_status = 'confirmed'
-      manualActiveCount.value++
+      manualActiveDelta.value += 1
     }
+    scheduleSave()
 
     console.log(`Box #${detectionId} successfully toggled to: ${target.predicted_class}`)
   }
@@ -424,9 +455,9 @@ async function initializeReviewBundle() {
         initialOverallConfidenceScore.value = baseline.overallConfidenceScore
         initialSeedRangeMin.value = baseline.seedRangeMin
         initialSeedRangeMax.value = baseline.seedRangeMax
-        manualActiveCount.value = prodMap[firstImg.filename].filter((d: any) =>
-          isActiveSeed(d),
-        ).length
+        // First-image bootstrap before the watch fires. No saved manual
+        // count yet, so start with zero delta.
+        manualActiveDelta.value = 0
       }
     }
   } catch (error) {
@@ -436,20 +467,25 @@ async function initializeReviewBundle() {
   }
 }
 
-// Saves edits on current image
-async function saveCurrentPageCount() {
-  if (!currentImage.value || !run.value) return
-  savingCount.value = true
+// Save the current image's edits (per-detection statuses + manual count).
+// Awaits the previous in-flight save so two debounced saves can't race a
+// stale payload over a fresh one.
+async function persistCurrentImage(filename: string, imageId: number) {
+  if (inFlightSave) {
+    try { await inFlightSave } catch { /* swallow: handled by its caller */ }
+  }
+  const work = (async () => {
+    const list = imageDetectionsMap.value[filename] || []
+    const activeIds = list.filter((d) => isActiveSeed(d)).map((d) => d.id)
+    const abortedIds = list.filter((d) => !isActiveSeed(d)).map((d) => d.id)
+    // Backend stores manual_count as an absolute; the delta is UI-only.
+    const baseline = initialMetricsLookupMap.value[filename]
+    const initial = baseline?.automatedActiveCount ?? 0
+    const savedCount = initial + manualActiveDelta.value
 
-  try {
-    const confirmedDetections = currentDetections.value
-    const activeIds = confirmedDetections.filter((d) => isActiveSeed(d)).map((d) => d.id)
-    const abortedIds = confirmedDetections.filter((d) => !isActiveSeed(d)).map((d) => d.id)
-
-    const apiPromises = []
-
+    const requests: Promise<Response>[] = []
     if (activeIds.length > 0) {
-      apiPromises.push(
+      requests.push(
         api(`/api/analysis/detections/bulk/`, {
           method: 'POST',
           headers: { 'Content-Type': 'application/json' },
@@ -457,9 +493,8 @@ async function saveCurrentPageCount() {
         }),
       )
     }
-
     if (abortedIds.length > 0) {
-      apiPromises.push(
+      requests.push(
         api(`/api/analysis/detections/bulk/`, {
           method: 'POST',
           headers: { 'Content-Type': 'application/json' },
@@ -467,44 +502,97 @@ async function saveCurrentPageCount() {
         }),
       )
     }
-
-    apiPromises.push(
-      api(`/api/seeds/images/${currentImage.value.id}/manual-count/`, {
+    requests.push(
+      api(`/api/seeds/images/${imageId}/manual-count/`, {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ manual_count: manualActiveCount.value }),
+        body: JSON.stringify({ manual_count: savedCount }),
       }),
     )
 
-    if (initialMetricsLookupMap.value[currentImage.value.filename]) {
-      initialMetricsLookupMap.value[currentImage.value.filename].savedManualCount =
-        manualActiveCount.value
+    const responses = await Promise.all(requests)
+    for (const res of responses) {
+      if (!res.ok) throw new Error(`HTTP ${res.status}`)
     }
-
-    // Await all queued requests
-    if (apiPromises.length > 0) {
-      const responses = await Promise.all(apiPromises)
-
-      for (const res of responses) {
-        if (!res.ok) throw new Error(`HTTP ${res.status}: Failed to update database`)
-      }
-    }
-
-    alert('Active counts updated.')
-  } catch (error) {
-    console.error(error)
-    alert('Failed to execute bulk counts persistence transactions.')
+    if (baseline) baseline.savedManualCount = savedCount
+  })()
+  inFlightSave = work
+  try {
+    await work
   } finally {
-    savingCount.value = false
+    if (inFlightSave === work) inFlightSave = null
   }
 }
 
-function navigateImage(direction: number) {
-  const nextIndex = currentImageIndex.value + direction
-  if (nextIndex >= 0 && nextIndex < totalImagesCount.value) {
-    currentImageIndex.value = nextIndex
+// Track which image a pending save belongs to so a navigate that fires
+// while the timer is queued doesn't accidentally save the new image's
+// state under the old image's key.
+let pendingSaveTarget: { filename: string; imageId: number } | null = null
+
+function scheduleSave() {
+  if (!currentImage.value || !run.value) return
+  pendingSaveTarget = {
+    filename: currentImage.value.filename,
+    imageId: currentImage.value.id,
+  }
+  if (pendingSaveTimer) clearTimeout(pendingSaveTimer)
+  saveStatus.value = 'Saving…'
+  pendingSaveTimer = setTimeout(() => {
+    pendingSaveTimer = null
+    void runSave()
+  }, SAVE_DEBOUNCE_MS)
+}
+
+async function runSave() {
+  const target = pendingSaveTarget
+  if (!target) return
+  pendingSaveTarget = null
+  try {
+    await persistCurrentImage(target.filename, target.imageId)
+    saveStatus.value = 'Saved'
+    setTimeout(() => {
+      if (saveStatus.value === 'Saved') saveStatus.value = null
+    }, SAVED_PILL_MS)
+  } catch (error) {
+    console.error('Auto-save failed:', error)
+    saveStatus.value = 'Save failed'
   }
 }
+
+// Run any pending debounced save immediately. Used before navigating
+// away from an image and on component teardown.
+async function flushSave() {
+  if (pendingSaveTimer) {
+    clearTimeout(pendingSaveTimer)
+    pendingSaveTimer = null
+    await runSave()
+  } else if (inFlightSave) {
+    try { await inFlightSave } catch { /* surfaced via saveStatus */ }
+  }
+}
+
+async function navigateImage(direction: number) {
+  const nextIndex = currentImageIndex.value + direction
+  if (nextIndex < 0 || nextIndex >= totalImagesCount.value) return
+  // Flush before swapping currentImage so the still-pending edits are
+  // saved against the old image, not the new one.
+  await flushSave()
+  currentImageIndex.value = nextIndex
+}
+
+// Auto-save when the delta input changes. Toggling a detection already
+// calls scheduleSave from toggleSeedStatus, so this watcher covers the
+// direct-input path. loadingBaseline suppresses saves caused by the
+// image-change watcher resetting the delta back to its baseline.
+watch(manualActiveDelta, () => {
+  if (loadingBaseline) return
+  if (!currentImage.value) return
+  scheduleSave()
+})
+
+onBeforeUnmount(() => {
+  void flushSave()
+})
 
 function goBack() {
   router.push({ path: `/seeds/runs/${route.params.id}/set-reference` })
