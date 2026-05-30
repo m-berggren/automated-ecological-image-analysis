@@ -24,6 +24,13 @@
         {{ totalVersions }} {{ totalVersions === 1 ? 'version' : 'versions' }} ·
         {{ activeCount }} active
       </span>
+      <button
+        v-if="canUploadModels"
+        class="px-3 py-1.5 rounded-md text-xs font-medium bg-primary text-primary-foreground hover:bg-primary/90"
+        @click="openUpload"
+      >
+        Upload model
+      </button>
     </div>
 
     <!-- Body -->
@@ -109,7 +116,24 @@
                     {{ formatRelative(v.trained_at) }}
                   </td>
                   <td class="px-3 py-3 text-right text-muted-foreground">
-                    {{ expandedIds.has(v.id) ? '▾' : '▸' }}
+                    <div class="flex items-center justify-end gap-3" @click.stop>
+                      <button
+                        v-if="canDeleteModels"
+                        :disabled="deletingId === v.id"
+                        :title="
+                          v.is_active
+                            ? 'Cannot delete the active version. Pick another default first.'
+                            : `Delete ${v.version_name}`
+                        "
+                        class="text-muted-foreground hover:text-red-600 disabled:opacity-40 disabled:cursor-not-allowed"
+                        @click="confirmDelete(v)"
+                      >
+                        <Trash2 class="w-4 h-4" />
+                      </button>
+                      <span @click="toggleExpanded(v.id)" class="cursor-pointer">
+                        {{ expandedIds.has(v.id) ? '▾' : '▸' }}
+                      </span>
+                    </div>
                   </td>
                 </tr>
                 <tr v-if="expandedIds.has(v.id)" class="border-t border-border bg-muted/10">
@@ -150,15 +174,59 @@
                       </template>
                       · {{ v.sample_count.toLocaleString() }} samples
                     </div>
-                    <div class="mt-3 pt-3 border-t border-border">
+                    <div v-if="v.artifacts.length > 0" class="mt-4 pt-3 border-t border-border">
                       <button
-                        class="text-[11px] font-semibold uppercase tracking-wider text-muted-foreground hover:text-foreground"
-                        @click="toggleCharts(v.id)"
+                        class="flex w-full items-center gap-1.5 text-left text-[11px] font-semibold uppercase tracking-wider text-muted-foreground hover:text-foreground"
+                        @click="toggleArtifacts(v.id)"
                       >
-                        {{ chartsExpanded.has(v.id) ? '▾' : '▸' }} Charts
+                        <span>{{ artifactsExpanded.has(v.id) ? '▾' : '▸' }}</span>
+                        <span>Training artifacts ({{ v.artifacts.length }})</span>
                       </button>
-                      <div v-if="chartsExpanded.has(v.id)" class="mt-3">
-                        <TrainingCharts :charts="v.charts ?? null" />
+                      <div v-if="artifactsExpanded.has(v.id)" class="mt-3 space-y-4">
+                        <div v-for="group in groupedArtifacts(v)" :key="group.kind">
+                          <div class="text-xs font-medium text-foreground mb-1.5">
+                            {{ group.label }}
+                          </div>
+                          <div v-if="group.isImage" class="flex flex-wrap gap-3">
+                            <a
+                              v-for="a in group.items"
+                              :key="a.id"
+                              :href="a.url ?? '#'"
+                              target="_blank"
+                              rel="noopener"
+                              class="block border border-border rounded-md overflow-hidden hover:border-primary"
+                              :title="a.caption || ''"
+                            >
+                              <img
+                                v-if="a.url"
+                                :src="a.url"
+                                :alt="a.caption || group.label"
+                                class="block w-60 h-auto bg-background"
+                                loading="lazy"
+                              />
+                              <div
+                                v-if="a.caption"
+                                class="px-2 py-1 text-[10px] text-muted-foreground bg-muted/40"
+                              >
+                                {{ a.caption }}
+                              </div>
+                            </a>
+                          </div>
+                          <ul v-else class="text-xs space-y-1">
+                            <li v-for="a in group.items" :key="a.id">
+                              <a
+                                v-if="a.url"
+                                :href="a.url"
+                                target="_blank"
+                                rel="noopener"
+                                class="text-primary hover:underline font-mono"
+                                :download="true"
+                              >
+                                Download{{ a.caption ? ` (${a.caption})` : '' }}
+                              </a>
+                            </li>
+                          </ul>
+                        </div>
                       </div>
                     </div>
                   </td>
@@ -169,6 +237,14 @@
         </section>
       </div>
     </div>
+
+    <ModelUploadDialog
+      v-model:open="uploadOpen"
+      module="seeds"
+      :kind-options="UPLOAD_KIND_OPTIONS"
+      :extra-fields="UPLOAD_EXTRA_FIELDS"
+      @uploaded="onModelUploaded"
+    />
   </div>
 </template>
 
@@ -176,13 +252,17 @@
 import { computed, onMounted, ref } from 'vue'
 import { RouterLink, useRoute } from 'vue-router'
 import PageHeader from '@/components/PageHeader.vue'
-import TrainingCharts from '@/components/TrainingCharts.vue'
+import ModelUploadDialog from '@/components/ModelUploadDialog.vue'
+import { Trash2 } from 'lucide-vue-next'
 import { api } from '@/api'
+import { confirm, alert } from '@/lib/confirm'
+import { useAuthStore } from '@/stores/auth'
 
-interface ChartData {
-  training_curve?: Array<{ epoch: number; loss: number; val_metric: number }>
-  confusion_matrix?: { labels: string[]; values: number[][] }
-  per_class?: Array<{ label: string; value: number }>
+interface Artifact {
+  id: number
+  kind: string
+  caption: string
+  url: string | null
 }
 
 interface Version {
@@ -194,7 +274,7 @@ interface Version {
   trained_at: string
   training_duration_seconds: number
   parameters: Record<string, unknown>
-  charts?: ChartData | null
+  artifacts: Artifact[]
 }
 
 interface Track {
@@ -204,20 +284,104 @@ interface Track {
   versions: Version[]
 }
 
-interface VersionMock extends Omit<Version, 'trained_at'> {
+interface VersionMock extends Omit<Version, 'trained_at' | 'artifacts'> {
   trained_at_offset_seconds: number
+  artifacts?: Artifact[]
 }
 interface TrackMock extends Omit<Track, 'versions'> {
   versions: VersionMock[]
 }
 
 const route = useRoute()
+const auth = useAuthStore()
 const loading = ref(true)
 const loadError = ref('')
 const tracks = ref<Track[]>([])
 const speciesFilter = ref<string>('all')
 const expandedIds = ref<Set<number>>(new Set())
-const chartsExpanded = ref<Set<number>>(new Set())
+const artifactsExpanded = ref<Set<number>>(new Set())
+const deletingId = ref<number | null>(null)
+
+// Mirrors REQUIRE_STAFF_FOR_UPLOAD in PollinatorsModels.vue and the backend
+// gate in ModelVersionListCreateView. Flip both to True to restore the
+// staff-only check.
+const REQUIRE_STAFF_FOR_UPLOAD = false
+const canUploadModels = computed(() =>
+  REQUIRE_STAFF_FOR_UPLOAD ? auth.user?.is_staff === true : !!auth.user,
+)
+const canDeleteModels = canUploadModels
+
+// Display labels + ordering per ModelArtifactKind. Image kinds render as
+// thumbnails; non-image kinds (results.csv) render as a download link.
+// Same list as PollinatorsModels.vue — keep them in sync if you extend it.
+const ARTIFACT_GROUPS: Array<{ kind: string; label: string; isImage: boolean }> = [
+  { kind: 'training_curve', label: 'Training curves (results.png)', isImage: true },
+  { kind: 'confusion_matrix', label: 'Confusion matrix', isImage: true },
+  { kind: 'f1_curve', label: 'F1 vs confidence', isImage: true },
+  { kind: 'pr_curve', label: 'Precision-Recall', isImage: true },
+  { kind: 'precision_curve', label: 'Precision vs confidence', isImage: true },
+  { kind: 'recall_curve', label: 'Recall vs confidence', isImage: true },
+  { kind: 'labels', label: 'Label distribution', isImage: true },
+  { kind: 'sample_predictions', label: 'Sample predictions', isImage: true },
+  { kind: 'results_csv', label: 'Per-epoch metrics CSV', isImage: false },
+  { kind: 'other', label: 'Other', isImage: false },
+]
+
+function groupedArtifacts(v: Version) {
+  const byKind = new Map<string, Artifact[]>()
+  for (const a of v.artifacts) {
+    if (!byKind.has(a.kind)) byKind.set(a.kind, [])
+    byKind.get(a.kind)!.push(a)
+  }
+  return ARTIFACT_GROUPS.filter((g) => byKind.has(g.kind)).map((g) => ({
+    ...g,
+    items: byKind.get(g.kind)!,
+  }))
+}
+
+function toggleArtifacts(id: number) {
+  const next = new Set(artifactsExpanded.value)
+  if (next.has(id)) next.delete(id)
+  else next.add(id)
+  artifactsExpanded.value = next
+}
+
+// Seeds only have one model kind today; the dialog hides the kind selector
+// when there's a single option.
+const UPLOAD_KIND_OPTIONS = [{ value: 'detector', label: 'YOLO detector' }]
+
+// Existing species the user might pick from; the input is free-text so
+// typing a brand-new species creates a new track on the next reload.
+const knownSpecies = computed<string[]>(() => {
+  const set = new Set<string>()
+  for (const t of tracks.value) {
+    const s = String(t.species ?? t.id ?? '').toLowerCase()
+    if (s) set.add(s)
+  }
+  return Array.from(set).sort()
+})
+
+const UPLOAD_EXTRA_FIELDS = computed(() => [
+  {
+    name: 'species',
+    label: 'Species',
+    required: true,
+    placeholder: 'e.g. phyca',
+    options: knownSpecies.value,
+    help: 'Pick an existing species or type a new one. Drives the grouping on this page.',
+  },
+])
+
+const uploadOpen = ref(false)
+
+function openUpload() {
+  uploadOpen.value = true
+}
+
+async function onModelUploaded() {
+  loading.value = true
+  await loadFromApi()
+}
 
 const previewMode = computed<string | null>(() => {
   const value = route.query.preview
@@ -287,7 +451,7 @@ async function loadFromApi() {
         trained_at: v.trained_at ?? v.created_at,
         training_duration_seconds: v.training_duration_seconds ?? 0,
         parameters: v.parameters ?? {},
-        charts: v.charts ?? null,
+        artifacts: v.artifacts ?? [],
       })
     }
 
@@ -366,10 +530,35 @@ function toggleExpanded(id: number) {
   else next.add(id)
   expandedIds.value = next
 }
-function toggleCharts(id: number) {
-  const next = new Set(chartsExpanded.value)
-  if (next.has(id)) next.delete(id)
-  else next.add(id)
-  chartsExpanded.value = next
+
+async function confirmDelete(v: Version) {
+  if (v.is_active) {
+    await alert({
+      title: 'Cannot delete active model',
+      message: `"${v.version_name}" is the active version. Pick another default first, then delete it.`,
+    })
+    return
+  }
+  if (deletingId.value !== null) return
+  const ok = await confirm({
+    title: 'Delete model',
+    message: `Delete model "${v.version_name}"?\nThis removes the weights file and all artifacts. This cannot be undone.`,
+    confirmLabel: 'Delete',
+    variant: 'danger',
+  })
+  if (!ok) return
+  deletingId.value = v.id
+  try {
+    const res = await api(`/api/analysis/models/${v.id}/`, { method: 'DELETE' })
+    if (!res.ok) {
+      const data = await res.json().catch(() => ({}))
+      throw new Error(data.error || data.detail || `HTTP ${res.status}`)
+    }
+    await loadFromApi()
+  } catch (e) {
+    loadError.value = e instanceof Error ? e.message : String(e)
+  } finally {
+    deletingId.value = null
+  }
 }
 </script>

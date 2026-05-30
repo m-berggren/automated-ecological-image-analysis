@@ -27,6 +27,27 @@
             </option>
           </select>
         </label>
+        <label
+          v-for="f in extraFields"
+          :key="f.name"
+          class="block"
+        >
+          <span class="text-xs font-medium text-muted-foreground">
+            {{ f.label }}
+            <span v-if="f.required" class="text-red-600">*</span>
+          </span>
+          <input
+            v-model="extraValues[f.name]"
+            type="text"
+            :placeholder="f.placeholder"
+            :list="f.options && f.options.length ? `extra-${f.name}-options` : undefined"
+            class="mt-1 w-full px-2 py-1.5 rounded border border-border bg-background"
+          />
+          <datalist v-if="f.options && f.options.length" :id="`extra-${f.name}-options`">
+            <option v-for="opt in f.options" :key="opt" :value="opt" />
+          </datalist>
+          <span v-if="f.help" class="text-[11px] text-muted-foreground">{{ f.help }}</span>
+        </label>
         <label class="block">
           <span class="text-xs font-medium text-muted-foreground">
             Version name
@@ -140,6 +161,22 @@ export interface ModelKindOption {
   label: string
 }
 
+// Caller-defined extra inputs (e.g. seeds passes a species datalist).
+// Rendered as text inputs with an optional <datalist> for autocomplete +
+// free-text. Submitted to the backend as a parameters_extra JSON blob that
+// gets merged into ModelVersion.parameters.
+export interface ModelUploadExtraField {
+  name: string
+  label: string
+  required?: boolean
+  placeholder?: string
+  // When non-empty, renders a datalist of suggested values; users can pick
+  // one or type their own.
+  options?: string[]
+  defaultValue?: string
+  help?: string
+}
+
 const props = withDefaults(
   defineProps<{
     open: boolean
@@ -150,8 +187,11 @@ const props = withDefaults(
     // Per-kind expected folder layout, shown in the info popover. A built-in
     // YOLO detector layout covers any kind not present here.
     structures?: Record<string, string>
+    // Extra fields stored in ModelVersion.parameters. Seeds uses this for
+    // a `species` datalist so a hand-uploaded model is grouped correctly.
+    extraFields?: ModelUploadExtraField[]
   }>(),
-  { structures: () => ({}) },
+  { structures: () => ({}), extraFields: () => [] },
 )
 
 const emit = defineEmits<{
@@ -162,11 +202,18 @@ const emit = defineEmits<{
 const kind = ref<string>(props.kindOptions[0]?.value ?? 'detector')
 const versionName = ref('')
 const description = ref('')
+const extraValues = ref<Record<string, string>>({})
 const file = ref<File | null>(null)
 const folderFiles = ref<File[]>([])
 const mode = ref<'file' | 'folder'>('file')
 const submitting = ref(false)
 const error = ref('')
+
+function resetExtras() {
+  const next: Record<string, string> = {}
+  for (const f of props.extraFields) next[f.name] = f.defaultValue ?? ''
+  extraValues.value = next
+}
 
 // Reset the form each time the dialog opens.
 watch(
@@ -180,6 +227,7 @@ watch(
     folderFiles.value = []
     mode.value = 'file'
     error.value = ''
+    resetExtras()
   },
 )
 
@@ -325,11 +373,30 @@ async function submit() {
     error.value = 'Version name is required.'
     return
   }
+  // Required-extra-field validation before opening a network request.
+  for (const f of props.extraFields) {
+    if (f.required && !(extraValues.value[f.name] ?? '').trim()) {
+      error.value = `${f.label} is required.`
+      return
+    }
+  }
   const form = new FormData()
   form.append('module', props.module)
   form.append('kind', kind.value)
   form.append('version_name', versionName.value.trim())
   form.append('description', description.value.trim())
+  // Send extra fields as one JSON blob so the backend can merge them into
+  // ModelVersion.parameters without per-field special-casing.
+  if (props.extraFields.length) {
+    const extra: Record<string, string> = {}
+    for (const f of props.extraFields) {
+      const v = (extraValues.value[f.name] ?? '').trim()
+      if (v) extra[f.name] = v
+    }
+    if (Object.keys(extra).length) {
+      form.append('parameters_extra', JSON.stringify(extra))
+    }
+  }
 
   if (mode.value === 'file') {
     if (!file.value) {
