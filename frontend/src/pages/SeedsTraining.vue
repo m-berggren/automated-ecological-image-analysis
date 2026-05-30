@@ -61,42 +61,46 @@
           <div
             class="text-[11px] font-semibold uppercase tracking-wider text-muted-foreground mb-3"
           >
-            {{ trainingMode === 'scratch' ? '1. Choose seed type' : '1. Choose model to retrain' }}
+            {{ trainingMode === 'scratch' ? '1. Choose seed type' : '1. Choose seed type and model' }}
           </div>
 
-          <!-- Scratch seed type -->
-          <template v-if="trainingMode === 'scratch'">
-            <div
-              class="grid grid-cols-2 min-[860px]:grid-cols-4 gap-3 min-[860px]:gap-4 pt-1 max-h-[10rem] overflow-y-auto"
-            >
-              <div v-for="seed in seedTypes" :key="seed.id" class="relative shrink-0 pt-2 pr-2">
-                <button
-                  v-if="seed.isCustom"
-                  @click.stop="removeSeed(seed.id)"
-                  class="absolute -top-0 -right-0 w-5 h-5 flex items-center justify-center rounded-full bg-green-900 text-white text-xs z-10"
+          <!-- Seed type picker — shown for both modes. In incremental
+               mode it gates which models can be picked to retrain. -->
+          <div
+            class="grid grid-cols-2 min-[860px]:grid-cols-4 gap-3 min-[860px]:gap-4 pt-1 max-h-[10rem] overflow-y-auto"
+          >
+            <div v-for="seed in visibleSeedTypes" :key="seed.id" class="relative shrink-0 pt-2 pr-2">
+              <button
+                v-if="seed.isCustom"
+                @click.stop="removeSeed(seed.id)"
+                class="absolute -top-0 -right-0 w-5 h-5 flex items-center justify-center rounded-full bg-green-900 text-white text-xs z-10"
+              >
+                ×
+              </button>
+              <button
+                @click="selectedSeed = seed.id"
+                :class="[
+                  'group w-full flex items-center px-3 py-2 rounded-lg border-2 text-left transition-all overflow-hidden',
+                  selectedSeed === seed.id
+                    ? 'border-primary bg-primary/5'
+                    : 'border-border bg-background hover:border-primary/40',
+                ]"
+              >
+                <span class="text-sm font-semibold shrink-0">{{ seed.id }}</span>
+                <span
+                  v-if="seed.species"
+                  class="ml-2 overflow-hidden whitespace-nowrap text-[11px] text-muted-foreground italic max-w-0 group-hover:max-w-[100px] opacity-0 group-hover:opacity-100 transition-all duration-200"
                 >
-                  ×
-                </button>
-                <button
-                  @click="selectedSeed = seed.id"
-                  :class="[
-                    'group w-full flex items-center px-3 py-2 rounded-lg border-2 text-left transition-all overflow-hidden',
-                    selectedSeed === seed.id
-                      ? 'border-primary bg-primary/5'
-                      : 'border-border bg-background hover:border-primary/40',
-                  ]"
-                >
-                  <span class="text-sm font-semibold shrink-0">{{ seed.id }}</span>
-                  <span
-                    v-if="seed.species"
-                    class="ml-2 overflow-hidden whitespace-nowrap text-[11px] text-muted-foreground italic max-w-0 group-hover:max-w-[100px] opacity-0 group-hover:opacity-100 transition-all duration-200"
-                  >
-                    · {{ seed.species }}
-                  </span>
-                </button>
-              </div>
+                  · {{ seed.species }}
+                </span>
+              </button>
             </div>
+          </div>
 
+          <!-- Add-new-seed UI is scratch-only. In incremental you're
+               picking among already-trained models, so adding a brand-
+               new species would have no models to extend. -->
+          <template v-if="trainingMode === 'scratch'">
             <button
               @click="showAddSeed = true"
               class="mt-3 w-full rounded-lg border-2 border-dashed border-border px-4 py-2 text-sm text-muted-foreground transition hover:border-primary hover:text-primary"
@@ -135,12 +139,15 @@
             </div>
           </template>
 
-          <!-- Incremental -->
-          <template v-else>
-            <div v-if="!allVersions.length" class="text-sm text-muted-foreground">
-              No trained models found. Train a new model first.
+          <!-- Incremental: model list, gated by the species picker above. -->
+          <template v-if="trainingMode === 'incremental'">
+            <div v-if="!selectedSeed" class="mt-3 text-sm text-muted-foreground">
+              Pick a seed type above to see available models to extend.
             </div>
-            <div v-else class="space-y-2">
+            <div v-else-if="!activeVersions.length" class="mt-3 text-sm text-muted-foreground">
+              No trained {{ selectedSeed }} models found. Train one from scratch first.
+            </div>
+            <div v-else class="mt-3 space-y-2">
               <label
                 v-for="version in activeVersions"
                 :key="version.id"
@@ -265,14 +272,14 @@
                   {{ imageFiles.length }} images
                 </span>
                 <span
-                  :class="labelFiles.length === imageFiles.length ? 'text-green-600' : 'text-amber-600'"
+                  :class="unpairedImages.length === 0 && imageFiles.length > 0 ? 'text-green-600' : 'text-amber-600'"
                 >
                   {{ labelFiles.length }} labels
                   <span v-if="imageFiles.length === 0 && labelFiles.length > 0">
                     ⚠ Labels found but no images - each label needs a matching image
                   </span>
-                  <span v-else-if="labelFiles.length !== imageFiles.length">
-                    ⚠ {{ Math.abs(imageFiles.length - labelFiles.length) }} file(s) missing {{ imageFiles.length > labelFiles.length ? 'labels' : 'images' }}
+                  <span v-else-if="unpairedImages.length > 0">
+                    ⚠ {{ unpairedImages.length }} image(s) without a matching .txt label
                   </span>
                   <span v-else>✓</span>
                 </span>
@@ -385,11 +392,11 @@
           </span>
 
           <button
-            :disabled="(trainingMode === 'scratch' ? !selectedSeed : !selectedVersionId) || hasActiveJob || (trainingMode === 'scratch' && uploadedFiles.length > 0 && !canStartTraining)"
+            :disabled="(trainingMode === 'scratch' ? !selectedSeed : !selectedVersionId) || hasActiveJob || (uploadedFiles.length > 0 && !canStartTraining)"
             class="px-4 py-2 rounded-md text-sm font-medium bg-primary text-primary-foreground disabled:opacity-50"
             @click="startTraining"
           >
-            {{ hasActiveJob ? 'A job is already running' : (trainingMode === 'scratch' && uploadedFiles.length > 0 && !canStartTraining ? 'Fix file mismatch to start' : 'Start training') }}
+            {{ hasActiveJob ? 'A job is already running' : (uploadedFiles.length > 0 && !canStartTraining ? 'Fix file mismatch to start' : 'Start training') }}
           </button>
         </div>
       </section>
@@ -433,7 +440,7 @@
                 <!-- Cancel button for running/pending jobs -->
                 <button
                   v-if="job.status === 'running' || job.status === 'pending'"
-                  @click="cancelTrainingJob(job.id)"
+                  @click="cancelTrainingJob(job)"
                   class="text-xs px-2 py-1 rounded border border-red-300 text-red-600 hover:bg-red-50 transition-colors"
                   :disabled="cancellingJobId === job.id"
                 >
@@ -547,6 +554,7 @@
 
 <script setup lang="ts">
 import { api } from '@/api'
+import { confirm } from '@/lib/confirm'
 import { computed, onMounted, onUnmounted, reactive, ref, watch } from 'vue'
 import { useRoute } from 'vue-router'
 import PageHeader from '@/components/PageHeader.vue'
@@ -609,19 +617,47 @@ const trainingUploadTabs: UploadTab[] = [
   },
 ]
 
-const canStartTraining = computed(() => {
-  // For scratch training
-  if (trainingMode.value === 'scratch' && uploadedFiles.value.length > 0) {
-    // Must have both images and labels, and counts must match
-    return imageFiles.value.length > 0 &&
-           labelFiles.value.length === imageFiles.value.length
-  }
-  // For incremental training or no files uploaded
-  return true
+// Stem-level pairing: for each image, does a matching <stem>.txt exist?
+// Matching counts alone isn't enough — the user might have N images and
+// N labels with completely different names. The backend filters out
+// unpaired uploads in _prepare_job_dataset and raises a clear error if
+// nothing's left, but we'd rather catch it here before the upload.
+function stripExt(name: string): string {
+  const i = name.lastIndexOf('.')
+  return i > 0 ? name.slice(0, i) : name
+}
+
+const unpairedImages = computed(() => {
+  const labelStems = new Set(labelFiles.value.map((f) => stripExt(f.name)))
+  return imageFiles.value.filter((f) => !labelStems.has(stripExt(f.name)))
 })
 
+const canStartTraining = computed(() => {
+  // Both modes require at least one image+label pair when files are
+  // staged. Incremental training fine-tunes on the new batch, so an
+  // unpaired-name upload there fails just like scratch.
+  if (uploadedFiles.value.length === 0) return true
+  return imageFiles.value.length > 0 &&
+         labelFiles.value.length > 0 &&
+         unpairedImages.value.length === 0
+})
+
+// Source-model options for incremental training: scoped to whichever
+// species the user has selected on this page. Shows every version, not
+// just the active one, so the user can fine-tune from an older release
+// on purpose; the card marks the active version with a badge.
 const activeVersions = computed(() => {
-  return allVersions.value.filter(v => v.is_active === true)
+  if (!selectedSeed.value) return []
+  const target = selectedSeed.value.toLowerCase()
+  return allVersions.value
+    .filter((v: any) => {
+      const species = String(v.parameters?.species ?? '').toLowerCase()
+      return species === target
+    })
+    .sort((a: any, b: any) => {
+      if (a.is_active !== b.is_active) return a.is_active ? -1 : 1
+      return new Date(b.trained_at ?? 0).getTime() - new Date(a.trained_at ?? 0).getTime()
+    })
 })
 
 function onTrainingUploadSelect(files: File[]) {
@@ -667,22 +703,32 @@ const hasActiveJob = computed(() =>
   )
 )
 
-async function cancelTrainingJob(jobId: number) {
-  if (!confirm('Are you sure you want to cancel this training job? This cannot be undone.')) {
-    return
-  }
+async function cancelTrainingJob(job: { id: number; versionName?: string; trackLabel?: string }) {
+  // Use the project's confirm modal (variant: danger), matching the
+  // pattern in PollinatorsTraining.vue. The browser-native confirm()
+  // looked out of place against the rest of the dialogs.
+  const label = job.versionName?.trim() || `${(job.trackLabel || 'seed').trim()} training`
+  const ok = await confirm({
+    title: 'Cancel running job',
+    message:
+      `Cancel "${label}"? The training worker will stop at the next ` +
+      `epoch boundary and no new model version will be created.`,
+    confirmLabel: 'Cancel job',
+    cancelLabel: 'Keep training',
+    variant: 'danger',
+  })
+  if (!ok) return
 
-  cancellingJobId.value = jobId
+  cancellingJobId.value = job.id
   try {
-    const res = await api(`/api/analysis/training/${jobId}/cancel/`, {
+    const res = await api(`/api/analysis/training/${job.id}/cancel/`, {
       method: 'POST',
     })
 
     if (res.ok) {
       formMessage.value = 'Training job cancelled'
-      // Clear the active job from tracks
       for (const t of tracks.value) {
-        if (t.active_job?.id === jobId) {
+        if (t.active_job?.id === job.id) {
           t.active_job = null
         }
       }
@@ -690,7 +736,6 @@ async function cancelTrainingJob(jobId: number) {
         clearInterval(pollHandle)
         pollHandle = null
       }
-      // Reload to get updated status
       await loadFromApi()
     } else {
       const error = await res.text()
@@ -748,6 +793,20 @@ const allVersions = computed(() =>
   )
 )
 
+// In incremental mode, only show seed types that actually have a trained
+// model — picking a type with no model would dead-end at "no trained X
+// models found." Scratch mode shows everything since the user is
+// creating a brand-new dataset (possibly for a fresh species).
+const visibleSeedTypes = computed(() => {
+  if (trainingMode.value !== 'incremental') return seedTypes.value
+  const speciesWithModels = new Set(
+    allVersions.value
+      .map((v: any) => String(v.parameters?.species ?? '').toLowerCase())
+      .filter(Boolean),
+  )
+  return seedTypes.value.filter((s) => speciesWithModels.has(s.id.toLowerCase()))
+})
+
 // Reset selection when switching mode
 watch(trainingMode, () => {
   selectedSeed.value = null
@@ -759,6 +818,18 @@ watch(trainingMode, () => {
   } else {
     settings.epochs = 90
   }
+})
+
+// Auto-pick the active version when the species changes (incremental
+// mode only). Keeps a one-click flow for the common case while still
+// letting the user pick a non-active version on purpose.
+watch([selectedSeed, activeVersions], () => {
+  if (trainingMode.value !== 'incremental') return
+  const visible = activeVersions.value
+  const current = selectedVersionId.value
+  if (current && visible.some((v: any) => v.id === current)) return
+  const active = visible.find((v: any) => v.is_active)
+  selectedVersionId.value = active ? active.id : visible[0]?.id ?? null
 })
 
 function addSeed() {
@@ -791,10 +862,19 @@ const jobRows = computed(() => {
       : new Date(now.value + (j.started_at_offset_seconds ?? 0) * 1000)
     const elapsedSec = Math.floor((now.value - startedAt.getTime()) / 1000)
     const progress = j.total_epochs > 0 ? Math.round((j.current_epoch / j.total_epochs) * 100) : 0
+    // No projected name for an in-progress job. The backend mints the
+    // name only at completion, so we render an action-style label
+    // ("Training PHYCA from PHYCA-01") instead of a fake version number.
+    const mode = j.config?.training_mode ?? 'scratch'
+    const activeLabel =
+      mode === 'incremental' && j.source_model_name
+        ? `Training ${t.label} from ${j.source_model_name}`
+        : `Training ${t.label} from scratch`
     rows.push({
       id: j.id,
-      versionName: j.version_name,
-      trackLabel: t.label,
+      versionName: activeLabel,
+      trackLabel: '',
+      isPlaceholderName: true,
       isEvaluating: j.status === 'running' && (
         ((j.current_epoch ?? 0) >= (j.total_epochs ?? 90) && (j.total_epochs ?? 0) > 0)
         || (j.current_epoch === 0 && j.total_epochs === 0 && j.hasStartedTraining)
@@ -821,10 +901,13 @@ const jobRows = computed(() => {
   rows.sort((a, b) => b._sortKey - a._sortKey)
 
   for (const h of trainingHistory.value) {
+    // Failed jobs and any legacy completed jobs that never linked a
+    // resulting_model fall back to "Job #N" rather than rendering blank.
     rows.push({
       id: h.id,
-      versionName: h.version_name,
-      trackLabel: h.track_label,
+      versionName: h.version_name ?? `Job #${h.id}`,
+      trackLabel: h.version_name ? h.track_label : '',
+      isPlaceholderName: !h.version_name,
       trainingMode: h.training_mode ?? 'scratch',
       status: h.status,
       currentEpoch: h.epochs_total,
@@ -975,26 +1058,19 @@ async function loadFromApi() {
   if (jobsRes.ok) {
     const jobs: any[] = await jobsRes.json()
 
-    const completedJobs = jobs.filter(j => j.status === 'completed').sort((a, b) => a.id - b.id)
-    const speciesCount = new Map<string, number>()
-    const versionNumbers = new Map<number, number>()
-
-    for (const j of completedJobs) {
-      const species = (j.config?.species ?? '').toLowerCase()
-      const n = (speciesCount.get(species) ?? 0) + 1
-      speciesCount.set(species, n)
-      versionNumbers.set(j.id, n)
-    }
-
-    // Active jobs
+    // Active jobs: no projected name. The backend mints the name only at
+    // completion (lineage-aware: <SPECIES>-NN for scratch, <source>.K for
+    // incremental), so we render a placeholder until the row exists.
     for (const job of jobs.filter((j) => j.status === 'running' || j.status === 'pending')) {
       const species = (job.config?.species ?? '').toLowerCase()
       const track = tracks.value.find((t) => t.id.toLowerCase() === species)
       if (track) {
-        const nextNum = (speciesCount.get(species) ?? 0) + 1
         track.active_job = {
           id: job.id,
-          version_name: `${species.toUpperCase()}-${String(nextNum).padStart(2, '0')}`,
+          // Placeholder name for the in-progress row. trainingMode +
+          // source_model_name drive the prettier label in the template.
+          version_name: '',
+          source_model_name: job.source_model_name ?? null,
           started_at: job.started_at,
           current_epoch: job.current_epoch,
           total_epochs: job.total_epochs,
@@ -1008,16 +1084,18 @@ async function loadFromApi() {
       }
     }
 
-    // History (completed + failed), newest first
+    // History (completed + failed), newest first. Use the backend's
+    // resulting_model_name so the training page and the Models page agree
+    // on the name for the same model.
     trainingHistory.value = jobs
       .filter((j) => j.status === 'completed' || j.status === 'failed')
       .sort((a, b) => b.id - a.id)
       .map((j) => {
         const species = (j.config?.species ?? '').toLowerCase()
-        const versionNum = versionNumbers.get(j.id)
         return {
           id: j.id,
-          version_name: `${species.toUpperCase()}-${String(versionNum).padStart(2, '0')}`,
+          version_name: j.resulting_model_name ?? null,
+          source_model_name: j.source_model_name ?? null,
           track_label: species.toUpperCase() || '?',
           status: j.status,
           training_mode: j.config?.training_mode ?? 'scratch',
@@ -1040,41 +1118,63 @@ async function startTraining() {
     return
   }
 
-  const payload =
+  // Backend now wants ratios in [0, 1), not percentages, and runs the
+  // split inside the job. The upload endpoint returns a staging_id we
+  // hand to /start/ so it knows which uploaded files belong to this job.
+  const valRatio = settings.val_split / 100
+  const testRatio = settings.test_split / 100
+
+  const speciesLower =
     trainingMode.value === 'scratch'
-      ? {
-          species: selectedSeed.value!.toLowerCase(),
-          training_mode: 'scratch',
-          epochs: settings.epochs,
-          val_split: settings.val_split / 100,
-        }
-      : {
-          species: allVersions.value.find((v) => v.id === selectedVersionId.value)?.track_label.toLowerCase(),
-          training_mode: 'incremental',
-          epochs: settings.epochs,
-          source_model_id: selectedVersionId.value,
-        }
+      ? selectedSeed.value!.toLowerCase()
+      : allVersions.value
+          .find((v) => v.id === selectedVersionId.value)
+          ?.track_label.toLowerCase()
+
+  const basePayload: Record<string, unknown> = {
+    species: speciesLower,
+    training_mode: trainingMode.value,
+    epochs: settings.epochs,
+    val_ratio: valRatio,
+    test_ratio: testRatio,
+  }
+  if (trainingMode.value === 'incremental') {
+    basePayload.source_model_id = selectedVersionId.value
+  }
 
   try {
-    if (actualFiles.value.length) {
-      formMessage.value = trainingMode.value === 'scratch' ? 'Uploading training data...' : 'Uploading additional training data...'
-      const formData = new FormData()
-      formData.append('species', payload.species!)
-      formData.append('val_split', String(settings.val_split / 100))
-      formData.append('training_mode', trainingMode.value)
-      for (const file of actualFiles.value) formData.append('files', file)
+    if (!actualFiles.value.length) {
+      formMessage.value = 'Upload training images before starting a job.'
+      return
+    }
 
-      const uploadRes = await api('/api/seeds/training/upload-data/', { method: 'POST', body: formData })
-      if (!uploadRes.ok) {
-        formMessage.value = (await uploadRes.text()) || 'Upload failed'
-        return
-      }
+    formMessage.value =
+      trainingMode.value === 'scratch'
+        ? 'Uploading training data...'
+        : 'Uploading additional training data...'
+    const formData = new FormData()
+    formData.append('species', speciesLower!)
+    for (const file of actualFiles.value) formData.append('files', file)
+
+    const uploadRes = await api('/api/seeds/training/upload-data/', {
+      method: 'POST',
+      body: formData,
+    })
+    if (!uploadRes.ok) {
+      formMessage.value = (await uploadRes.text()) || 'Upload failed'
+      return
+    }
+    const uploadData = await uploadRes.json()
+    const stagingId = uploadData?.staging_id
+    if (!stagingId) {
+      formMessage.value = 'Upload succeeded but staging_id was missing.'
+      return
     }
 
     formMessage.value = 'Starting training job...'
     const res = await api('/api/seeds/training/start/', {
       method: 'POST',
-      body: JSON.stringify(payload),
+      body: JSON.stringify({ ...basePayload, staging_id: stagingId }),
     })
     if (!res.ok) {
       formMessage.value = (await res.text()) || `HTTP ${res.status}`
@@ -1084,7 +1184,7 @@ async function startTraining() {
 
     // Reload to get the correct version number from the full jobs list
     await loadFromApi()
-    formMessage.value = `Job #${job.id} started — training ${(payload.species ?? '').toUpperCase()}`
+    formMessage.value = `Job #${job.id} started — training ${(speciesLower ?? '').toUpperCase()}`
     currentPage.value = 1
   } catch (e) {
     formMessage.value = e instanceof Error ? e.message : String(e)
