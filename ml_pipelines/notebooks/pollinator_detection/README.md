@@ -89,7 +89,8 @@ pollinator-classification/
 ├── data/                           ← input image data (not in git)
 │   ├── DATA.md                     ← data layout, class structure, how to add training data
 │   ├── training/                   ← data used for model training
-│   │   └── annotated_crops/        ← manually labeled crops ({class}/ sub-folders)
+│   │   ├── annotated_crops/        ← manually labeled crops ({dataset_name}/{class}/ two-level layout)
+│   │   └── web_images/             ← iNaturalist downloads (batch_YYYYMMDD_HHMMSS/{class}/ per run)
 │   └── evaluation/                 ← data used for pipeline evaluation
 │       ├── images/  ← camera folders for inference (evaluation and general runs)
 │       └── annotations/   ← CVAT YOLO 1.1 ground truth
@@ -126,14 +127,14 @@ pollinator-classification/
 → `experiments/training/prepare_retrain.ipynb` — future use once model is trustworthy; pre-filters to low-confidence crops only before labeling
 
 **Retrain classifiers with new data**
-→ Merge labeled crops into `data/training/annotated_crops/` → `experiments/training/retrain_cropbased.ipynb`
+→ Merge labeled crops into `data/training/annotated_crops/{dataset_name}/{class}/` → `experiments/training/retrain_cropbased.ipynb`
 
 **Train from scratch**
 → `experiments/training/train_binary_group.ipynb` (two-stage) or `experiments/training/train_5class.ipynb` (single model)
 → `experiments/training/train_yolo.ipynb` for the YOLO detector
 
 **Add more training images from the web**
-→ `tools/data_prep/download_web_images.py` downloads from iNaturalist into `web_images/`
+→ `tools/data_prep/download_web_images.py` downloads from iNaturalist into `data/training/web_images/`
 
 See [PIPELINE.md](PIPELINE.md) for the full data flow, annotation workflow, Colab setup,
 and how initial training differs from incremental retraining.
@@ -144,7 +145,7 @@ and how initial training differs from incremental retraining.
 
 | What | Where |
 |------|-------|
-| Labeled training crops | `data/training/annotated_crops/{class}/` |
+| Labeled training crops | `data/training/annotated_crops/{dataset_name}/{class}/` |
 | YOLO annotations (CVAT export) | `data/evaluation/annotations/` |
 | Inference results | `outputs/inference/crop_results/{run_name}/` |
 | Trained model weights (current) | `models/*.pth` / `models/*.pt` |

@@ -5,16 +5,23 @@ Input image data used by the ML pipelines. **Not tracked in git** — add `data/
 ```
 data/
 ├── training/
-│   ├── annotated_crops/        ← manually labeled crops, one sub-folder per class
-│   │   ├── bumblebee/
-│   │   ├── fly/
-│   │   ├── butterfly/
-│   │   ├── other/
-│   │   └── background/
-│   └── web_images/             ← iNaturalist downloads (fly, butterfly, other)
-│       ├── fly/
-│       ├── butterfly/
-│       └── other/
+│   ├── annotated_crops/        ← manually labeled crops, two-level layout: {dataset_name}/{class}/
+│   │   ├── labeled_ls/         ← first labeled dataset
+│   │   │   ├── bumblebee/
+│   │   │   ├── fly/
+│   │   │   ├── butterfly/
+│   │   │   ├── other/
+│   │   │   └── background/
+│   │   ├── labeled_mb/         ← second labeled dataset (same class structure)
+│   │   │   └── ...
+│   │   └── labeled_set/        ← third dataset (mostly background + some fly/other)
+│   │       └── ...
+│   └── web_images/             ← iNaturalist downloads, one sub-folder per download batch
+│       └── batch_YYYYMMDD_HHMMSS/   ← created by download_web_images.py
+│           ├── bumblebee/
+│           ├── fly/
+│           ├── butterfly/
+│           └── other/
 └── evaluation/
     ├── images/  ← camera trap images for end-to-end evaluation
     │   └── {camera_name}/
@@ -31,10 +38,20 @@ data/
 
 ## training/annotated_crops/
 
-Manually labeled insect crops used to train and fine-tune the classifiers. One sub-folder
-per class — each file is a JPG crop extracted from a camera trap frame.
+Manually labeled insect crops used to train and fine-tune the classifiers. Organised in a
+two-level hierarchy: `annotated_crops/{dataset_name}/{class}/`. Each file is a JPG crop
+extracted from a camera trap frame. The training notebooks combine all dataset sub-folders
+automatically — to include a dataset, simply place it here with the expected class structure.
 
-**Classes:**
+**Current datasets:**
+
+| Dataset folder | Description |
+|----------------|-------------|
+| `labeled_ls/` | First labeled dataset |
+| `labeled_mb/` | Second labeled dataset |
+| `labeled_set/` | Third dataset — predominantly background crops (2 052), with some fly (76) and other (45); bumblebee and butterfly are absent or near-absent. Useful as hard negatives for the binary classifier. |
+
+**Classes (same structure within each dataset):**
 
 | Sub-folder | What it contains |
 |------------|-----------------|
@@ -43,6 +60,9 @@ per class — each file is a JPG crop extracted from a camera trap frame.
 | `butterfly/` | Butterfly and moth crops (Lepidoptera) |
 | `other/` | Other insects (beetles, wasps, hoverflies, etc.) |
 | `background/` | Crops with no insect — false positives from motion detection |
+
+**Note:** the `unsure/` sub-folder (present in some datasets) is intentionally ignored by
+all training notebooks — only the five class folders above are loaded.
 
 These are the inputs for every classifier training notebook:
 - `experiments/training/train_binary_group.ipynb` — two-stage binary + group classifier
@@ -61,16 +81,16 @@ experiments/inference/infer_cropbased.ipynb  (MODE = 'preprocess' or 'infer')
            filters to low-confidence crops only → outputs/training/retrain_review/
       ↓
 tools/labeling/crop_labeler.py  or  tools/labeling/relabel.py
-      ↓  confirmed crops moved to data/training/annotated_crops/{class}/
+      ↓  confirmed crops moved to data/training/annotated_crops/{dataset_name}/{class}/
       ↓
 experiments/training/retrain_cropbased.ipynb
 ```
 
 You can also add web-downloaded images with `tools/data_prep/download_web_images.py` —
-these land in `data/training/web_images/{fly,butterfly,other}/` and are used for both
-classifiers: directly for the group classifier, and as extra `insect` data for the binary
-classifier when `USE_WEB_FOR_BINARY = True` (default). Set `WEB_DIR` in the training
-notebooks to point to this folder.
+these land in a new timestamped folder `data/training/web_images/batch_YYYYMMDD_HHMMSS/{class}/`
+and are used for both classifiers: directly for the group classifier, and as extra `insect`
+data for the binary classifier when `USE_WEB_FOR_BINARY = True` (default). Control which
+batches are included via `WEB_BATCHES` in the training notebooks (`[]` = all batches).
 
 Do not mix unlabeled or `unsure/` crops into the class folders — both training notebooks
 skip any sub-folder not in the expected class list.

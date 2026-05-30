@@ -135,7 +135,7 @@ Camera folder (raw JPG images)
          → results.csv: one row per crop with bbox coords, no predictions
       ↓  tools/labeling/crop_labeler.py
          → human labels each crop: background / bumblebee / fly / butterfly / other / unsure
-         → crops moved into annotated_crops/{class}/
+         → crops moved into annotated_crops/{dataset_name}/{class}/
 ```
 
 The preprocessing step runs without any trained models — you only need raw images.
@@ -167,7 +167,7 @@ Camera folder (raw JPG images)
       ↓  tools/labeling/crop_labeler.py
            --results retrain_review/  --output annotated_crops/
          → human confirms or corrects each uncertain crop
-         → crops moved to annotated_crops/{class}/
+         → crops moved to annotated_crops/{dataset_name}/{class}/
 ```
 
 **When model is not yet trustworthy — label everything (Method A):**
@@ -192,8 +192,8 @@ For the **binary classifier**: all web image classes count as `insect` — set
 
 ```
 download_web_images.py
-  → data/web_images/{fly,butterfly,other}/
-  → set WEB_DIR in train_binary_group.ipynb or train_5class.ipynb to include them
+  → data/training/web_images/batch_YYYYMMDD_HHMMSS/{class}/
+  → set WEB_BATCHES in train_binary_group.ipynb or train_5class.ipynb to select batches ([] = all)
 ```
 
 ---

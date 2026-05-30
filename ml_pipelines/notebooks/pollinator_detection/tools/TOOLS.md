@@ -66,7 +66,7 @@ python3 tools/labeling/crop_labeler.py \
     --output  path/to/data/training/annotated_crops
 ```
 
-Crops are **moved** (not copied) into `annotated_crops/{class}/` as you label them.
+Crops are **moved** (not copied) into `annotated_crops/{dataset_name}/{class}/` as you label them.
 The predicted class from `results.csv` is shown as a default label for each crop.
 
 ### Fix uncertain predictions — active-learning loop (future use)
@@ -184,7 +184,7 @@ Flagged frame list (JSON or flagged.txt)
       ↓  (preprocessing in infer_cropbased.ipynb → MODE = 'preprocess')
 Extracted candidate crops in crop_results/{run_name}/crops/
       ↓  (labeling: crop_labeler.py)
-Labeled crops in annotated_crops/{class}/
+Labeled crops in annotated_crops/{dataset_name}/{class}/
       ↓  (training or retraining)
 ```
 
@@ -331,8 +331,20 @@ all thresholds and queues every crop — equivalent to bypassing `prepare_retrai
 
 ### `download_web_images.py` — iNaturalist reference images
 
-**Purpose:** Downloads research-grade insect photos from iNaturalist for Sweden and
-Norway into `data/web_images/{class}/`.
+**Purpose:** Downloads research-grade insect photos from iNaturalist (Sweden + Norway)
+into `data/training/web_images/`. Each run creates a new timestamped batch folder:
+
+```
+data/training/web_images/
+├── batch_initial/               ← first download (moved from flat layout)
+│   ├── bumblebee/
+│   ├── fly/
+│   ├── butterfly/
+│   └── other/
+└── batch_20260529_143000/       ← second download (new images only)
+    ├── bumblebee/
+    └── ...
+```
 
 **When to use:** To supplement `annotated_crops/` with extra web images for both
 classifiers:
@@ -343,6 +355,26 @@ classifiers:
 **Usage:**
 ```bash
 python3 tools/data_prep/download_web_images.py
+```
+
+Just run it — no flags needed. Each run automatically creates a new `batch_YYYYMMDD_HHMMSS/`
+folder. Dedup is cross-batch: photo IDs already present in **any** existing batch folder
+are skipped, so you never re-download images from a previous round.
+
+> **`batch_initial/` limitation.** The original images were downloaded before the batch
+> system existed and use an old naming scheme (`{taxon}_{place}_{counter}.jpg`) that
+> contains no photo ID. The dedup check cannot see them, so a small number may be
+> re-downloaded into a new batch. This is a minor disk-space inefficiency — training
+> correctness is unaffected because `WEB_BATCHES` lets you pick exactly which batches
+> to include. If you want a clean slate, delete `batch_initial/` and re-run this script.
+
+To download more images for a class, increase the `n=` count for the relevant taxon at the
+bottom of the script and re-run. Only genuinely new photos are fetched.
+
+**Choosing which batches to use for training** — set `WEB_BATCHES` in the training notebook:
+```python
+WEB_BATCHES = []                           # all batches (default)
+WEB_BATCHES = ['batch_20260529_143000']    # only this batch (e.g. for retrain on new data only)
 ```
 
 **iNaturalist taxon IDs used** (verify at `https://www.inaturalist.org/taxa/<id>`):

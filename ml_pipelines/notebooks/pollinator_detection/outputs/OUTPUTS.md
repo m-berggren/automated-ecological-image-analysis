@@ -15,7 +15,7 @@ outputs/
 │   │       │   │   ├── butterfly/
 │   │       │   │   ├── other/
 │   │       │   │   └── background/
-│   │       │   └── frames/              ← original frames (symlinks or copies)
+│   │       │   └── results.csv          ← one row per crop for this camera
 │   │       └── ...
 │   └── yolo_results/
 │       └── {run_name}_{timestamp}/
@@ -73,13 +73,22 @@ the same crops in a single pass — each pipeline adds its own prefixed columns.
 
 | Column | Description |
 |--------|-------------|
-| `frame_path` | Absolute path to the source frame |
-| `camera` | Camera folder name |
-| `x1, y1, x2, y2` | Bounding box in pixels (top-left, bottom-right) |
+| `camera_folder` | Camera folder name |
+| `image_name` | Source image filename |
+| `datetime` | EXIF datetime string from the image |
+| `camera_name` | Camera model from EXIF |
+| `shutter_speed` | Shutter speed from EXIF |
+| `weather` | Weather tag (if available) |
 | `skip` | `True` if the frame was skipped before motion detection |
 | `skip_reason` | `flash` or `foggy` (only set when `skip=True`) |
 | `laplacian_var` | Laplacian variance of the frame (sharpness proxy) |
-| `pollinator_detected` | `True` if any active pipeline classified the crop as insect |
+| `pollinator_detected` | `yes` / `no` — whether any active pipeline classified the crop as insect |
+| `crop_filename` | Filename of the saved crop image |
+| `bbox_x, bbox_y, bbox_w, bbox_h` | Bounding box: top-left x/y plus width and height (pixels) |
+| `candidate_type` | How the candidate was detected (`motion`, `large_motion`, `large_motion_context`, etc.) |
+| `static_suspect` | `True` if the region was flagged as likely static background |
+| `detection_scope` | Whether detection fell inside ROI (`roi`) or outside (`full_frame`) |
+| `near_marked_flower` | `True` if the bounding box overlaps a marked flower region |
 
 **Per-pipeline columns** (one set per pipeline listed in `PIPELINES`; prefix = pipeline name):
 
@@ -87,8 +96,13 @@ the same crops in a single pass — each pipeline adds its own prefixed columns.
 |--------|-------------|
 | `{pipe}__binary_label` | `insect` or `background` (Stage 1 output) |
 | `{pipe}__binary_conf` | Binary classifier confidence [0, 1] |
-| `{pipe}__group_label` | `bumblebee` / `fly` / `butterfly` / `other` (Stage 2; empty if binary = background) |
+| `{pipe}__pollinator_type` | `bumblebee` / `fly` / `butterfly` / `other` / `background` (final class prediction) |
 | `{pipe}__group_conf` | Group classifier confidence [0, 1] |
+| `{pipe}__bumblebee_prob` | Per-class probability for bumblebee [0, 1] |
+| `{pipe}__fly_prob` | Per-class probability for fly [0, 1] |
+| `{pipe}__butterfly_prob` | Per-class probability for butterfly [0, 1] |
+| `{pipe}__other_prob` | Per-class probability for other insect [0, 1] |
+| `{pipe}__background_prob` | Per-class probability for background [0, 1] |
 
 Default pipeline names: `two_stage`, `five_class_eff`, `five_class_ins` (whichever are
 enabled in Cell 3 of `infer_cropbased.ipynb`).
