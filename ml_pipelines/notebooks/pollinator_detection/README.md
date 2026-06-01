@@ -24,12 +24,12 @@ Neither pipeline is "primary" — they are designed to be run in parallel and co
 
 All classifiers recognise the same four groups:
 
-| Class | Taxon |
-|-------|-------|
-| **bumblebee** | Bumble bees (*Bombus* spp.) |
-| **fly** | Flies (Diptera) |
-| **butterfly** | Butterflies and moths (Lepidoptera) |
-| **other** | All other insect visitors (beetles, wasps, etc.) |
+| Class               | Taxon                                            |
+| ------------------- | ------------------------------------------------ |
+| **bumblebee** | Bumble bees (*Bombus* spp.)                    |
+| **fly**       | Flies (Diptera)                                  |
+| **butterfly** | Butterflies and moths (Lepidoptera)              |
+| **other**     | All other insect visitors (beetles, wasps, etc.) |
 
 The crop-based classifiers also include a **background** class for regions with no insect.
 
@@ -38,7 +38,7 @@ The crop-based classifiers also include a **background** class for regions with 
 ## Repository layout
 
 ```
-pollinator-classification/
+pollinator_detection/
 │
 ├── experiments/                    ← standalone notebooks (run locally or in Colab)
 │   ├── NOTEBOOKS.md                ← per-notebook config reference
@@ -143,11 +143,11 @@ and how initial training differs from incremental retraining.
 
 ## Quick path reference
 
-| What | Where |
-|------|-------|
-| Labeled training crops | `data/training/annotated_crops/{dataset_name}/{class}/` |
-| YOLO annotations (CVAT export) | `data/evaluation/annotations/` |
-| Inference results | `outputs/inference/crop_results/{run_name}/` |
-| Trained model weights (current) | `models/*.pth` / `models/*.pt` |
-| Training run outputs (historical) | `outputs/training/model_runs/{name}_{timestamp}/` |
-| Helper script docs | `tools/TOOLS.md` |
+| What                              | Where                                                     |
+| --------------------------------- | --------------------------------------------------------- |
+| Labeled training crops            | `data/training/annotated_crops/{dataset_name}/{class}/` |
+| YOLO annotations (CVAT export)    | `data/evaluation/annotations/`                          |
+| Inference results                 | `outputs/inference/crop_results/{run_name}/`            |
+| Trained model weights (current)   | `models/*.pth` / `models/*.pt`                        |
+| Training run outputs (historical) | `outputs/training/model_runs/{name}_{timestamp}/`       |
+| Helper script docs                | `tools/TOOLS.md`                                        |
