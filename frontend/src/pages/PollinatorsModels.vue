@@ -74,6 +74,7 @@
               <tr>
                 <th class="text-left font-medium px-5 py-2 w-16">Default</th>
                 <th class="text-left font-medium px-3 py-2">Name</th>
+                <th class="text-right font-medium px-3 py-2 w-24">Recall</th>
                 <th class="text-right font-medium px-3 py-2 w-24">{{ track.metric_label }}</th>
                 <th class="text-right font-medium px-3 py-2 w-20">Samples</th>
                 <th class="text-right font-medium px-3 py-2 w-24">Duration</th>
@@ -138,6 +139,9 @@
                       </span>
                     </template>
                   </td>
+                  <td class="px-3 py-3 text-right font-mono text-xs text-muted-foreground">
+                    {{ formatMetric(v.metrics['recall']) }}
+                  </td>
                   <td class="px-3 py-3 text-right font-mono text-xs">
                     {{ formatMetric(mainMetric(v, track.metric_label)) }}
                   </td>
@@ -173,7 +177,7 @@
                 </tr>
                 <tr v-if="expandedIds.has(v.id)" class="border-t border-border bg-muted/40">
                   <td class="bg-muted/40"></td>
-                  <td colspan="6" class="px-3 py-4">
+                  <td colspan="7" class="px-3 py-4">
                     <div class="grid grid-cols-2 gap-x-8 gap-y-3 max-w-3xl">
                       <div>
                         <div

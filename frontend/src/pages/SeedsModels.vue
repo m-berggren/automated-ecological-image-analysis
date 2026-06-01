@@ -75,6 +75,7 @@
                 <th class="text-left font-medium px-3 py-2">Name</th>
                 <th class="text-left font-medium px-3 py-2">MAE</th>
                 <th class="text-left font-medium px-3 py-2">F1</th>
+                <th class="text-left font-medium px-3 py-2">Recall</th>
                 <th class="text-left font-medium px-3 py-2">Samples</th>
                 <th class="text-left font-medium px-3 py-2">Trained</th>
                 <th class="px-3 py-2 w-10"></th>
@@ -111,6 +112,9 @@
                   <td class="px-3 py-3 font-mono text-xs">
                     {{ formatMetric(v.metrics['f1']) }}
                   </td>
+                  <td class="px-3 py-3 font-mono text-xs">
+                    {{ formatMetric(v.metrics['recall']) }}
+                  </td>
                   <td class="px-3 py-3 text-xs">{{ v.sample_count.toLocaleString() }}</td>
                   <td class="px-3 py-3 text-xs text-muted-foreground">
                     {{ formatRelative(v.trained_at) }}
@@ -138,7 +142,7 @@
                 </tr>
                 <tr v-if="expandedIds.has(v.id)" class="border-t border-border bg-muted/10">
                   <td></td>
-                  <td colspan="6" class="px-3 py-4">
+                  <td colspan="7" class="px-3 py-4">
                     <div class="grid grid-cols-2 gap-x-8 gap-y-3 max-w-3xl">
                       <div>
                         <div

@@ -74,7 +74,13 @@
               </div>
             </div>
 
-            <div class="flex items-center gap-1">
+            <div class="relative flex items-center gap-1">
+              <span
+                v-if="saveStatus"
+                class="absolute right-full mr-2 whitespace-nowrap text-[10px] text-muted-foreground italic"
+              >
+                {{ saveStatus }}
+              </span>
               <input
                 id="manual-count"
                 type="number"
@@ -83,12 +89,6 @@
                 placeholder="0"
                 class="w-14 px-1 py-1 rounded border border-border bg-background text-xs text-center font-bold focus:outline-none focus:ring-2 focus:ring-primary"
               />
-              <span
-                v-if="saveStatus"
-                class="text-[10px] text-muted-foreground italic"
-              >
-                {{ saveStatus }}
-              </span>
             </div>
           </div>
         </div>
