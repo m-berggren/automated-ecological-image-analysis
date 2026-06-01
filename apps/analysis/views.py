@@ -24,6 +24,7 @@ from .artifacts import (
     metrics_from_results_json,
     params_from_args_yaml,
 )
+from .storage import model_dir, move_weights_into_place
 from .models import (
     Detection,
     InferenceRun,
@@ -122,9 +123,10 @@ class ModelVersionListCreateView(generics.ListAPIView):
 
     POST is multipart/form-data with fields:
         module, kind, version_name, description, weights_file
-    On success the file is written to MEDIA_ROOT/models/<module>/<version>.<ext>,
-    .pth metadata is introspected into parameters, and the new ModelVersion
-    is returned.
+    On success the file is written to
+    MEDIA_ROOT/models/<module>/<model_version_id>/weights<ext>, .pth metadata
+    is introspected into parameters, and the new ModelVersion is returned.
+    Sibling artifacts land under .../<model_version_id>/artifacts/.
     """
 
     serializer_class = ModelVersionSerializer
@@ -153,6 +155,28 @@ class ModelVersionListCreateView(generics.ListAPIView):
         version_name = (request.data.get('version_name') or '').strip()
         description = (request.data.get('description') or '').strip()
         weights_upload = request.FILES.get('weights_file')
+        # Optional dialog-driven parameters (e.g. seeds passes `species` so
+        # hand-uploaded models group correctly on SeedsModels.vue). Merged
+        # into `parameters` below after checkpoint introspection, so a
+        # user-supplied value wins over auto-extracted metadata for the
+        # same key.
+        parameters_extra: dict = {}
+        raw_extra = request.data.get('parameters_extra')
+        if raw_extra:
+            import json as _json
+
+            try:
+                parsed_extra = _json.loads(raw_extra)
+                if not isinstance(parsed_extra, dict):
+                    raise ValueError
+                parameters_extra = {
+                    str(k): v for k, v in parsed_extra.items() if v not in (None, '')
+                }
+            except (ValueError, TypeError):
+                return Response(
+                    {'detail': 'parameters_extra must be a JSON object'},
+                    status=status.HTTP_400_BAD_REQUEST,
+                )
         # Folder mode: 'artifacts' is the list of uploaded files; 'artifact_paths'
         # is a JSON array of their webkitRelativePaths in matching order. We need
         # the parallel array because browsers strip '/' from multipart
@@ -204,9 +228,25 @@ class ModelVersionListCreateView(generics.ListAPIView):
                 {'detail': 'weights_file or artifacts is required'},
                 status=status.HTTP_400_BAD_REQUEST,
             )
-        if ModelVersion.objects.filter(version_name=version_name).exists():
+        # Scope the uniqueness check by the module's grouping axis so a
+        # seeds "v1" doesn't collide with a pollinators "v1" (and a CAT
+        # "v1" doesn't collide with a PHYCA "v1"). Seeds groups by
+        # parameters.species; pollinators groups by kind. Other modules
+        # fall back to per-module uniqueness.
+        name_collision = ModelVersion.objects.filter(
+            module=module, version_name=version_name,
+        )
+        if module == 'seeds':
+            species_extra = (parameters_extra.get('species') or '').strip().lower()
+            if species_extra:
+                name_collision = name_collision.filter(
+                    parameters__species__iexact=species_extra,
+                )
+        elif module == 'pollinators' and kind:
+            name_collision = name_collision.filter(kind=kind)
+        if name_collision.exists():
             return Response(
-                {'detail': f'version_name "{version_name}" already exists'},
+                {'detail': f'version_name "{version_name}" already exists for this type'},
                 status=status.HTTP_400_BAD_REQUEST,
             )
 
@@ -254,54 +294,94 @@ class ModelVersionListCreateView(generics.ListAPIView):
                     status=status.HTTP_400_BAD_REQUEST,
                 )
 
-        dest_dir = Path(settings.MEDIA_ROOT) / 'models' / module
-        dest_dir.mkdir(parents=True, exist_ok=True)
+        # Buffer the weights to a temp file so we can introspect the checkpoint
+        # before the ModelVersion row exists. The canonical destination needs
+        # the row's id; we move into place once the row is created.
+        # Keep the temp file inside MEDIA_ROOT so the later shutil.move into
+        # the canonical models/<module>/<id>/ location is a same-filesystem
+        # rename — cross-device temp dirs would force a full copy. Ensure
+        # MEDIA_ROOT exists first, since fresh deployments have no media/.
+        import tempfile
+
+        media_root = Path(settings.MEDIA_ROOT)
+        media_root.mkdir(parents=True, exist_ok=True)
         ext = Path(chosen_weights_name or '').suffix or '.bin'
-        dest = dest_dir / f'{version_name}{ext}'
-        with dest.open('wb') as out:
+        with tempfile.NamedTemporaryFile(
+            delete=False, suffix=ext, dir=str(media_root)
+        ) as tmp:
             for chunk in chosen_weights.chunks():
-                out.write(chunk)
+                tmp.write(chunk)
+            tmp_path = Path(tmp.name)
 
-        parameters = _extract_checkpoint_metadata(dest)
+        try:
+            parameters = _extract_checkpoint_metadata(tmp_path)
 
-        # args.yaml augments parameters with the training hyperparams used by
-        # the Ultralytics trainer — useful when the checkpoint itself doesn't
-        # carry them (older runs, manual exports).
-        metrics: dict = {}
-        for f, rel in artifact_entries:
-            tail = rel.rsplit('/', 1)[-1] if '/' in rel else rel
-            if tail == 'args.yaml':
-                parameters.update(_parse_args_yaml(f))
-                try:
-                    f.seek(0)
-                except Exception:
-                    pass
-            elif tail == 'results.csv':
-                metrics.update(_parse_results_csv(f))
-                try:
-                    f.seek(0)
-                except Exception:
-                    pass
-            elif tail.endswith('results.json'):
-                raw = f.read()
-                if isinstance(raw, bytes):
-                    raw = raw.decode('utf-8', errors='replace')
-                metrics.update(metrics_from_results_json(raw))
-                try:
-                    f.seek(0)
-                except Exception:
-                    pass
+            # args.yaml augments parameters with the training hyperparams used
+            # by the Ultralytics trainer — useful when the checkpoint itself
+            # doesn't carry them (older runs, manual exports).
+            metrics: dict = {}
+            for f, rel in artifact_entries:
+                tail = rel.rsplit('/', 1)[-1] if '/' in rel else rel
+                if tail == 'args.yaml':
+                    parameters.update(_parse_args_yaml(f))
+                    try:
+                        f.seek(0)
+                    except Exception:
+                        pass
+                elif tail == 'results.csv':
+                    metrics.update(_parse_results_csv(f))
+                    try:
+                        f.seek(0)
+                    except Exception:
+                        pass
+                elif tail.endswith('results.json'):
+                    raw = f.read()
+                    if isinstance(raw, bytes):
+                        raw = raw.decode('utf-8', errors='replace')
+                    metrics.update(metrics_from_results_json(raw))
+                    try:
+                        f.seek(0)
+                    except Exception:
+                        pass
 
-        mv = ModelVersion.objects.create(
-            module=module,
-            kind=kind,
-            version_name=version_name,
-            model_file_path=str(dest),
-            description=description,
-            parameters=parameters,
-            metrics=metrics,
-            created_by=request.user if request.user.is_authenticated else None,
-        )
+            # User-supplied extras overwrite auto-extracted keys (e.g. if
+            # seeds passes species='phyca' it wins over anything in the
+            # checkpoint).
+            if parameters_extra:
+                parameters.update(parameters_extra)
+
+            mv = ModelVersion.objects.create(
+                module=module,
+                kind=kind,
+                version_name=version_name,
+                model_file_path='',
+                description=description,
+                parameters=parameters,
+                metrics=metrics,
+                created_by=request.user
+                if request.user.is_authenticated
+                else None,
+            )
+
+            try:
+                dest = move_weights_into_place(tmp_path, module, mv.id, ext)
+            except Exception:
+                # Roll back the half-created row so we don't leak a
+                # ModelVersion with no weights on disk.
+                mv.delete()
+                raise
+            mv.model_file_path = str(dest)
+            mv.save(update_fields=['model_file_path'])
+        finally:
+            # tmp_path is gone after a successful move; clean it up if we
+            # bailed before the move succeeded.
+            if tmp_path.exists():
+                try:
+                    tmp_path.unlink()
+                except OSError:
+                    logger.exception(
+                        f'Failed to clean temp upload at {tmp_path}'
+                    )
 
         ingested, skipped = 0, 0
         for f, rel in artifact_entries:
@@ -315,8 +395,9 @@ class ModelVersionListCreateView(generics.ListAPIView):
                 skipped += 1
                 continue
             artifact = ModelArtifact(model_version=mv, kind=kind_value, caption=caption)
-            # Store under the basename only so MEDIA_ROOT/model_artifacts/<module>/<version>/
-            # stays flat regardless of how the client structured the folder.
+            # Store under the basename only so the canonical
+            # models/<module>/<id>/artifacts/ folder stays flat regardless of
+            # how the client structured the upload.
             artifact.file.save(tail, f, save=True)
             ingested += 1
 
@@ -1108,9 +1189,12 @@ class ModelVersionDetailView(generics.RetrieveUpdateDestroyAPIView):
                 },
             )
 
-        weights_path = (
+        weights_file = (
             Path(instance.model_file_path) if instance.model_file_path else None
         )
+        # Canonical per-model dir under MEDIA_ROOT/models/<module>/<id>/.
+        # Captured before destroy so it survives the cascade.
+        per_model_dir = model_dir(instance.module, instance.id)
 
         # Delete artifact files explicitly; FK cascade removes the rows but
         # not the underlying storage objects.
@@ -1126,11 +1210,23 @@ class ModelVersionDetailView(generics.RetrieveUpdateDestroyAPIView):
 
         super().perform_destroy(instance)
 
-        if weights_path and weights_path.exists():
+        if weights_file and weights_file.exists():
             try:
-                weights_path.unlink()
+                weights_file.unlink()
             except OSError:
-                logger.exception(f'Failed to remove weights file at {weights_path}')
+                logger.exception(f'Failed to remove weights file at {weights_file}')
+
+        # The canonical layout puts weights + artifacts under per_model_dir.
+        # Once both are gone, the dir (and its now-empty artifacts/ child)
+        # are orphans — remove them. rmdir-style walk only succeeds when the
+        # tree is empty, so legacy rows with files elsewhere are left alone.
+        if per_model_dir.exists():
+            artifacts_dir = per_model_dir / 'artifacts'
+            for d in (artifacts_dir, per_model_dir):
+                try:
+                    d.rmdir()
+                except OSError:
+                    pass
 
 
 class ModelVersionSetActiveView(APIView):

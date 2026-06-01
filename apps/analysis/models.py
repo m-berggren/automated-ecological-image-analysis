@@ -26,7 +26,11 @@ class ModelVersion(models.Model):
 
     module = models.CharField(max_length=20, choices=Module.choices)
     kind = models.CharField(max_length=20, choices=ModelKind.choices, blank=True)
-    version_name = models.CharField(max_length=100, unique=True)
+    # Per-module-axis uniqueness, enforced at the create-view level
+    # (seeds: per parameters.species; pollinators: per kind). Cross-module
+    # name collisions don't matter — the dropdowns are scoped, so a seeds
+    # "v1" never competes with a pollinators "v1".
+    version_name = models.CharField(max_length=100)
     model_file_path = models.CharField(
         max_length=512,
         help_text="Local path, 'file://...', 's3://bucket/key', or 'gs://bucket/key'.",
@@ -131,7 +135,22 @@ class ModelArtifactKind(models.TextChoices):
 
 
 def model_artifact_path(instance: 'ModelArtifact', filename: str) -> str:
-    return f'model_artifacts/{instance.model_version.module}/{instance.model_version.version_name}/{filename}'
+    return (
+        f'models/{instance.model_version.module}/'
+        f'{instance.model_version.id}/artifacts/{filename}'
+    )
+
+
+def detection_crop_path(instance: 'Detection', filename: str) -> str:
+    """Per-run crop layout: runs/<module>/<run_pk>/crops/<filename>.
+
+    Mirrors the layout pollinator services have been building by hand via
+    default_storage.save (apps/pollinator/services.py). Funnelling both
+    write paths through the field means the model declaration is the single
+    source of truth for crop locations.
+    """
+    run = instance.inference_run
+    return f'runs/{run.module}/{run.pk}/crops/{filename}'
 
 
 class ModelArtifact(models.Model):
@@ -385,7 +404,7 @@ class Detection(models.Model):
         help_text='Pixel area of bbox; persisted to drive the seeds volume filter',
     )
     crop = models.ImageField(
-        upload_to='runs/crops/',
+        upload_to=detection_crop_path,
         null=True,
         blank=True,
         help_text='Cropped bbox image, written after inference for review and training.',

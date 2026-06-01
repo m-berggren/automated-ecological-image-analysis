@@ -22,6 +22,7 @@ def train_species_model(
     progress_callback=None,
     lr0: float | None = None,
     lrf: float | None = None,
+    project: str | None = None,
 ):
 
     print(
@@ -63,6 +64,13 @@ def train_species_model(
         train_kwargs['lr0'] = lr0
     if lrf is not None:
         train_kwargs['lrf'] = lrf
+    # `project` redirects YOLO's run output from the CWD-relative
+    # runs/obb/ default to a caller-chosen dir. The Django training job
+    # uses this to write weights straight into MEDIA_ROOT/training/<job_pk>/
+    # so nothing ever lands outside MEDIA_ROOT.
+    if project is not None:
+        train_kwargs['project'] = project
 
     model.train(**train_kwargs)
-    return os.path.join('runs', 'obb', run_name, 'weights', 'best.pt')
+    base = project if project is not None else os.path.join('runs', 'obb')
+    return os.path.join(base, run_name, 'weights', 'best.pt')

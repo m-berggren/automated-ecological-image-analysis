@@ -18,7 +18,45 @@ import shutil
 from pathlib import Path
 from urllib.parse import urlparse
 
+from django.conf import settings
+
 logger = logging.getLogger(__name__)
+
+
+def model_dir(module: str, model_version_id: int) -> Path:
+    """Canonical directory for a model version's files.
+
+    Layout: MEDIA_ROOT/models/<module>/<model_version_id>/ with weights<ext>
+    at the root and artifact files under artifacts/. Every model — uploaded
+    by hand or produced by a training job — lives here so the upload view,
+    training jobs, and future ingest paths stay in sync.
+    """
+    return Path(settings.MEDIA_ROOT) / 'models' / module / str(model_version_id)
+
+
+def weights_path(module: str, model_version_id: int, ext: str) -> Path:
+    """Canonical absolute path for a model version's weights file.
+
+    `ext` is the original checkpoint suffix (e.g. '.pt', '.pth') with or
+    without the leading dot.
+    """
+    if not ext.startswith('.'):
+        ext = f'.{ext}'
+    return model_dir(module, model_version_id) / f'weights{ext}'
+
+
+def move_weights_into_place(
+    src: Path, module: str, model_version_id: int, ext: str
+) -> Path:
+    """Move `src` to the canonical weights location and return that path.
+
+    Uses shutil.move so cross-device moves (tempdir on a separate mount from
+    MEDIA_ROOT) work without leaving the source behind.
+    """
+    dst = weights_path(module, model_version_id, ext)
+    dst.parent.mkdir(parents=True, exist_ok=True)
+    shutil.move(str(src), str(dst))
+    return dst
 
 
 def link_or_copy(src: Path, dst: Path) -> None:

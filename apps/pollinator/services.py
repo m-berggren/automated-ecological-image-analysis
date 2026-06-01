@@ -20,7 +20,6 @@ from pathlib import Path
 
 from django.conf import settings
 from django.core.files.base import ContentFile
-from django.core.files.storage import default_storage
 from django.db import close_old_connections
 from django.utils import timezone
 from PIL import Image
@@ -181,11 +180,14 @@ def _persist_image_results(
             crop_img = src_img.crop((x1, y1, x2, y2))
             buf = io.BytesIO()
             crop_img.save(buf, 'JPEG', quality=85)
-            relative_name = (
-                f'runs/{run.module}/{run.pk}/crops/{image_stem}_{idx:02d}.jpg'
+            # det.crop.save routes through Detection.crop's upload_to
+            # (detection_crop_path), keeping the on-disk layout owned by
+            # the model declaration instead of hand-built paths here.
+            det.crop.save(
+                f'{image_stem}_{idx:02d}.jpg',
+                ContentFile(buf.getvalue()),
+                save=False,
             )
-            saved = default_storage.save(relative_name, ContentFile(buf.getvalue()))
-            det.crop.name = saved
             crops_to_update.append(det)
         except Exception:
             logger.exception(f'Failed to write crop for detection {det.pk}')

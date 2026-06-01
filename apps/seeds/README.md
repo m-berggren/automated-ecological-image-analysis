@@ -43,7 +43,7 @@ However, models are highly specialized and trained per species (current species 
 |-------|----------|-----------|
 | `detector` | YOLO (OBB) | fully-reviewed **images** (+ polygon labels) |
 
-`services.bootstrap_species_dataset` dynamically builds the expected directory structures and YAML configs whenever a new species is registered. When a `TrainingJob` is spawned, it collects the eligible pool of accepted images for that specific species, triggers the `train_species_model` callback, and registers the output as a new `ModelVersion`.
+Training data is uploaded per job: the user uploads images + matching YOLO `.txt` labels via `SeedTrainingDataUploadView`, which stages them at `MEDIA_ROOT/training/seeds/staging/<staging_id>/{images,labels}/`. When `SeedTrainingJobCreateView` creates the `TrainingJob`, the staging dir is renamed into `MEDIA_ROOT/training/<job_pk>/`; the worker (`run_training_job`) then runs `_prepare_job_dataset` which splits, slices, and writes the YAML inside that per-job dir. Weights are moved to `MEDIA_ROOT/models/seeds/<model_version_id>/weights<ext>` and the rest of the per-job tree is wiped on completion.
 
 ## Active vs. Aborted Seed Filtering
 

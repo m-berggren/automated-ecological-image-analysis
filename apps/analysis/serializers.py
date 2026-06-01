@@ -319,10 +319,14 @@ class TrainingJobListSerializer(serializers.ModelSerializer):
     Lightweight (no activity_log). Includes config so the UI can map each
     job back to its track (e.g. pollinator's detector/binary/group),
     metrics so the history can show a result column without an extra
-    detail round-trip, and the initiator's username."""
+    detail round-trip, and the initiator's username. Also surfaces the
+    resulting model's version_name so the training-page history can show
+    the same name the Models page does without re-querying."""
 
     initiated_by = serializers.SerializerMethodField()
     sample_count = serializers.SerializerMethodField()
+    resulting_model_name = serializers.SerializerMethodField()
+    source_model_name = serializers.SerializerMethodField()
 
     class Meta:
         model = TrainingJob
@@ -333,6 +337,8 @@ class TrainingJobListSerializer(serializers.ModelSerializer):
             'status',
             'config',
             'resulting_model',
+            'resulting_model_name',
+            'source_model_name',
             'image_count',
             'sample_count',
             'current_epoch',
@@ -349,6 +355,24 @@ class TrainingJobListSerializer(serializers.ModelSerializer):
         if not user:
             return ''
         return user.get_username() or ''
+
+    def get_resulting_model_name(self, obj: TrainingJob) -> str | None:
+        mv = obj.resulting_model
+        return mv.version_name if mv else None
+
+    def get_source_model_name(self, obj: TrainingJob) -> str | None:
+        """Name of the model the job is/will retrain. Pulled from
+        config.source_model_id so it's available for pending and running
+        jobs too, not just after the resulting model is linked."""
+        source_id = (obj.config or {}).get('source_model_id') if obj.config else None
+        if not source_id:
+            return None
+        try:
+            return ModelVersion.objects.filter(pk=source_id).values_list(
+                'version_name', flat=True,
+            ).first()
+        except (ValueError, TypeError):
+            return None
 
     def get_sample_count(self, obj: TrainingJob) -> int:
         # Reviewed detections consumed by the job (crops for classifiers,
