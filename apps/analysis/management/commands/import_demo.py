@@ -101,13 +101,16 @@ class Command(BaseCommand):
 
     def handle(self, *args, **opts) -> None:
         sources = self._load_sources()
-        bundle = self._resolve_bundle(Path(opts['bundle']), opts.get('url'), sources)
-
         with tempfile.TemporaryDirectory(prefix='import_demo_') as tmp:
-            self._extract(bundle, tmp)
-            root = Path(tmp)
-            manifest = json.loads((root / 'manifest.json').read_text())
-            self._seed(manifest, root / 'media', opts)
+            workdir = Path(tmp)
+            bundle = self._resolve_bundle(
+                Path(opts['bundle']), opts.get('url'), sources, workdir
+            )
+            extract_dir = workdir / 'extract'
+            extract_dir.mkdir()
+            self._extract(bundle, extract_dir)
+            manifest = json.loads((extract_dir / 'manifest.json').read_text())
+            self._seed(manifest, extract_dir / 'media', opts)
 
         self._fetch_weights(sources)
 
@@ -117,21 +120,25 @@ class Command(BaseCommand):
             return {}
         return json.loads(path.read_text())
 
-    def _resolve_bundle(self, bundle: Path, url_override: str | None, sources: dict) -> Path:
-        if bundle.exists():
-            return bundle
+    def _resolve_bundle(
+        self, local: Path, url_override: str | None, sources: dict, workdir: Path
+    ) -> Path:
+        if local.exists():
+            return local
         url = url_override or sources.get('bundle_url')
         if _is_placeholder(url):
             raise CommandError(
-                f'Bundle not found: {bundle}\n'
-                'Place the demo archive there, pass --bundle/--url, or fill in '
+                f'Bundle not found: {local}\n'
+                'Mount the demo archive there, pass --bundle/--url, or fill in '
                 'bundle_url in demo_assets/sources.json.'
             )
+        # demo_assets is mounted read-only, so download into the writable
+        # workdir rather than next to the local path.
+        dest = workdir / 'demo_bundle.zip'
         self.stdout.write(f'Bundle not found locally; downloading from {url}')
-        bundle.parent.mkdir(parents=True, exist_ok=True)
-        self._download(url, bundle)
-        self._verify(bundle, sources.get('bundle_md5'))
-        return bundle
+        self._download(url, dest)
+        self._verify(dest, sources.get('bundle_md5'))
+        return dest
 
     def _download(self, url: str, dest: Path) -> None:
         tmp = dest.with_suffix(dest.suffix + '.part')
