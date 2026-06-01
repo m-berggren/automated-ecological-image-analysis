@@ -2,3 +2,8 @@
 *.JPG
 *.jpg
 *.png
+*.json
+
+*.names
+*.data
+*.xlsx

@@ -10,7 +10,7 @@ DEFAULT_CONFIG = {
     # 0 = skip global background entirely, use frame-to-frame diff only.
     'background_sample_size': 0,
     # Background subtraction threshold.
-    'darker_threshold': 30,
+    'darker_threshold': 15,
     # Contour filtering.
     'min_contour_area': 400,
     'max_contour_area': 35000,

@@ -1,32 +1,44 @@
 """
-Pollinator Crop Labeling Tool  (full-width layout)
-=======================================================
-Top: full-width debug image with numbered bounding boxes
-Bottom: horizontal strip of 6 crops  (scroll row by row)
+crop_labeler.py — Assign class labels to candidate crops.
 
-Controls:
-  R  → toggle nav mode
-
-  IMAGE_NAV (default — no header badge)
-    Left / Right / A / D  → previous / next image
-    Up / Down             → scroll the crop strip
-    b 1 2 3 4 u           → batch-label all unlabeled in this image
-                            (same key twice = undo)
-    click crop            → select it; label keys then apply to that crop only
-
-  CROP_NAV  (header shows "CROP NAV" badge)
-    Left / Right          → move crop selection left / right
-    Up / Down             → move selection up / down by row
-    b 1 2 3 4 u           → label the SELECTED crop, then advance
-
-  Labels: bg / bumblebee / fly / butterfly / other / unsure
-  Tab / E  → Label-all mode toggle (extra fine-grained control)
-  C        → clear all labels in current image
-  P        → preview selected crop
-  Q        → quit and save
+Use this after running infer_cropbased.ipynb in preprocessing mode.
+It reads the crops/ folder and results.csv produced by that notebook,
+shows each source image with its detected bounding boxes, and lets you
+assign a class label to each crop. Labeled crops are saved to
+annotated_crops/{class}/ for use in classifier training.
 
 Usage:
-  python3 crop_labeler_v2.py --results path/to/results --output path/to/annotated_crops
+  python3 crop_labeler.py --results path/to/crop_results/run_name/camera_name
+  python3 crop_labeler.py --results path/to/results --output path/to/annotated_crops
+
+Layout:
+  Top    — full source image with numbered bounding boxes
+  Bottom — scrollable strip of the extracted crops for that image
+
+Controls:
+  IMAGE_NAV mode (default):
+    Left / Right / A / D  → previous / next image
+    Up / Down             → scroll the crop strip
+    W / S                 → previous / next crop (crosses image boundaries)
+    b 1 2 3 4 u           → label ALL unlabeled crops in this image at once
+                            (press the same key again to undo)
+    click crop            → select a single crop; label key then applies to it only
+
+  CROP_NAV mode (press R to switch):
+    Left / Right          → move crop selection left / right (crosses image boundaries)
+    Up / Down             → move selection up / down by row
+    W / S                 → previous / next crop (crosses image boundaries)
+    b 1 2 3 4 u           → label the SELECTED crop and advance to the next
+
+  Label keys:
+    b = background   1 = bumblebee   2 = fly   3 = butterfly   4 = other   u = unsure
+
+  Other:
+    R      → toggle IMAGE_NAV / CROP_NAV mode
+    N      → jump to first image of the next camera folder
+    C      → clear all labels in the current image
+    P      → preview selected crop fullscreen
+    Q      → quit and save
 """
 
 import os
@@ -92,33 +104,100 @@ if sys.platform == 'win32':
 
 # ── Helpers ───────────────────────────────────────────────────────────────────
 def get_json_path(input_folder, output_dir):
-    cam_name = os.path.basename(os.fspath(input_folder))
-    return Path(output_dir) / 'progress' / f'{cam_name}_result.json'
+    cam_path = Path(os.fspath(input_folder))
+    if cam_path.is_absolute():
+        # Full path: make it relative to RESULTS_DIR to build a unique flat name.
+        # e.g. run_01/site_A/101_WSCT  →  run_01__site_A__101_WSCT_result.json
+        try:
+            rel = cam_path.relative_to(RESULTS_DIR.resolve())
+            safe_name = '__'.join(rel.parts)
+        except ValueError:
+            safe_name = cam_path.name
+    else:
+        # String cam_name (review mode) — use as-is.
+        safe_name = cam_path.name
+    return Path(output_dir) / 'progress' / f'{safe_name}_result.json'
 
 
 # ── CLI ───────────────────────────────────────────────────────────────────────
 parser = argparse.ArgumentParser()
 parser.add_argument('--results', type=Path, default=Path('results'))
-parser.add_argument('--output', type=Path, default=Path('labeled_crops'))
+parser.add_argument('--output', type=Path, default=Path('labeled_crops'),
+                    help='Destination dataset folder, e.g. data/training/annotated_crops/labeled_ls. '
+                         'Class subfolders and a progress/ folder are created inside it.')
+parser.add_argument('--image-root', type=Path, default=None,
+                    help='Root folder of the original raw images. When given (or auto-detected '
+                         'from run_config.json), the labeler shows the original JPG instead of '
+                         'a debug image. Example: data/raw_images')
 args = parser.parse_args()
 
+print()
+print('═' * 60)
+print('  Crop Labeler')
+print('═' * 60)
+print('  Assigns class labels to candidate crops extracted by')
+print('  infer_cropbased.ipynb (MODE=preprocess).')
+print()
+print(f'  Input  (--results): {args.results}')
+print(f'  Output (--output) : {args.output}')
+print()
+print('  Controls:')
+print('    b         background')
+print('    1         bumblebee')
+print('    2         fly')
+print('    3         butterfly')
+print('    4         other')
+print('    u         unsure')
+print('    a / ←    previous image')
+print('    d / →    next image')
+print('    R         toggle image-nav / crop-nav mode')
+print('    P         preview selected crop fullscreen')
+print('    C         clear all labels in current image')
+print('    Q         quit and save')
+print('═' * 60)
+print()
+
 RESULTS_DIR = args.results
-OUTPUT_DIR = (
-    args.output.with_name('labeled_crops')
-    if args.output.name == 'labeled'
-    else args.output
-)
-ANNOTATION_DIR = OUTPUT_DIR / 'progress'
-LABELED_DIR = OUTPUT_DIR / 'labeled'
+_CLASS_LABELS_TUPLE = ('bumblebee', 'fly', 'butterfly', 'other', 'background', 'unsure')
+
+# ── Mode detection ─────────────────────────────────────────────────────────────
+# REVIEW_MODE: RESULTS_DIR is itself a labeled folder (has class subfolders).
+#   → In-place relabeling: files move between class subfolders within RESULTS_DIR.
+#   → OUTPUT_DIR defaults to RESULTS_DIR.
+# INFERENCE_MODE (default): RESULTS_DIR has crops/ + results.csv sub-structure.
+#   → New labeling: files are copied to OUTPUT_DIR class subfolders.
+REVIEW_MODE = any((RESULTS_DIR / c).is_dir() for c in _CLASS_LABELS_TUPLE)
+
+if REVIEW_MODE:
+    OUTPUT_DIR = RESULTS_DIR   # review always relabels in-place
+    print(f'  Mode: REVIEW (relabeling existing labeled folder)')
+else:
+    OUTPUT_DIR = args.output
+    print(f'  Mode: INFERENCE (labeling new crops)')
+
+ANNOTATION_DIR = OUTPUT_DIR / 'progress'   # progress JSONs live inside the dataset folder
+LABELED_DIR = OUTPUT_DIR          # class subfolders go directly inside OUTPUT_DIR
 ANNOTATION_DIR.mkdir(parents=True, exist_ok=True)
 
-for sub in ('bumblebee', 'fly', 'butterfly', 'other', 'background', 'unsure'):
+for sub in _CLASS_LABELS_TUPLE:
     (LABELED_DIR / sub).mkdir(parents=True, exist_ok=True)
 
 # ── Progress ──────────────────────────────────────────────────────────────────
 progress: dict = {}
 current_progress_file = None
 _save_counter = 0
+
+# Pre-scan: build {crop_filename: label} from existing class subfolders so that
+# crops labeled in a previous session (or by another tool) are shown as labeled.
+_prescan_labels: dict = {}   # crop_filename -> label  (populated from existing class folders)
+print('  Scanning output folder for already-labeled crops...', end=' ', flush=True)
+for _cls in _CLASS_LABELS_TUPLE:
+    _cls_dir = LABELED_DIR / _cls
+    if _cls_dir.is_dir():
+        for _f in _cls_dir.iterdir():
+            if _f.is_file():
+                _prescan_labels[_f.name] = _cls
+print(f'{len(_prescan_labels)} found.')
 
 
 def save_progress(force=False):
@@ -138,8 +217,13 @@ def load_progress_for_task(task_idx):
     if not tasks:
         return
     task_idx = max(0, min(int(task_idx), len(tasks) - 1))
-    _, _, _, cam_name, _ = tasks[task_idx]
-    progress_file = Path(get_json_path(cam_name, OUTPUT_DIR))
+    # Task tuples may contain extra metadata fields, e.g. prediction_meta.
+    # Use indexing so progress loading works with both old and new task formats.
+    cam_name = tasks[task_idx][3]
+    # Use full cam_dir path from _cam_dir_keys to avoid JSON name collisions between
+    # cameras with the same folder name under different parent directories.
+    cam_key = _cam_dir_keys.get(task_idx, cam_name)
+    progress_file = Path(get_json_path(cam_key, OUTPUT_DIR))
     if current_progress_file == progress_file:
         return
     if current_progress_file is not None:
@@ -147,81 +231,296 @@ def load_progress_for_task(task_idx):
     current_progress_file = progress_file
     if current_progress_file.exists():
         progress = json.loads(current_progress_file.read_text(encoding='utf-8'))
-        print(f'Resuming -- {len(progress)} crops already labeled')
     else:
         progress = {}
+    # Merge in any crops already present on disk (from prescan) that aren't in the JSON yet
+    _, _, crops, _, _, _ = tasks[task_idx]
+    added = 0
+    for _, crop_fn in crops:
+        if crop_fn not in progress and crop_fn in _prescan_labels:
+            progress[crop_fn] = _prescan_labels[crop_fn]
+            added += 1
+    if progress:
+        print(f'Resuming {cam_name} — {len(progress)} labeled ({added} from disk)')
     _save_counter = 0
 
 
 # ── Collect tasks ─────────────────────────────────────────────────────────────
+def _find_cam_dirs(root: Path):
+    """Recursively find all camera result dirs (contain crops/ and results.csv).
+    Also checks root itself in case the user passes a single camera dir directly."""
+    def _is_cam(d: Path):
+        return (d / 'crops').exists() and (d / 'results.csv').exists()
+
+    if _is_cam(root):
+        return [root]
+
+    found = []
+    for d in sorted(root.rglob('*')):
+        if d.is_dir() and _is_cam(d):
+            found.append(d)
+    return found
+
+
+def _find_run_config(start: Path):
+    """Walk up from start until run_config.json is found (max 10 levels)."""
+    p = start.resolve()
+    for _ in range(10):
+        cfg = p / 'run_config.json'
+        if cfg.exists():
+            return cfg
+        if p.parent == p:
+            break
+        p = p.parent
+    return None
+
+
+def _parse_crop_filename(crop_fn: str):
+    """Parse '{cam}__{img_stem}_crop{N}_{type}.ext' → (cam_name, img_stem) or (None, None)."""
+    stem = Path(crop_fn).stem
+    if '__' not in stem:
+        return None, None
+    cam, rest = stem.split('__', 1)
+    # find '_crop' marker (may be '_crop0', '_crop00', '_crop_0', etc.)
+    m = _re.search(r'_crop', rest)
+    img_stem = rest[:m.start()] if m else rest
+    return cam, img_stem
+
+
+# ── Resolve IMAGE_ROOT for original images ────────────────────────────────────
+IMAGE_ROOT = None
+_run_dir = None
+
+# Always find run_config.json so we know the run root (needed for relative cam paths)
+_cfg_path = _find_run_config(RESULTS_DIR)
+if _cfg_path:
+    _run_dir = _cfg_path.parent
+
+if args.image_root:
+    IMAGE_ROOT = args.image_root.resolve()
+    print(f'  IMAGE_ROOT (--image-root): {IMAGE_ROOT}')
+elif _cfg_path:
+    _cfg_data = json.loads(_cfg_path.read_text(encoding='utf-8'))
+    _raw_root = _cfg_data.get('image_root')
+    if _raw_root:
+        IMAGE_ROOT = Path(_raw_root)
+        print(f'  IMAGE_ROOT (run_config.json): {IMAGE_ROOT}')
+
+if IMAGE_ROOT is not None and not IMAGE_ROOT.exists():
+    print(f'  WARNING: IMAGE_ROOT does not exist: {IMAGE_ROOT}')
+    print(f'           Falling back to no source image display.')
+    IMAGE_ROOT = None
+
+
+def _resolve_src_img_inference(cam_dir: Path, img_name: str) -> 'Path | None':
+    """Find original source image for inference-mode tasks."""
+    if IMAGE_ROOT is None:
+        return None
+    try:
+        cam_rel = cam_dir.resolve().relative_to(_run_dir.resolve()) if _run_dir else Path(cam_dir.name)
+        candidate = IMAGE_ROOT / cam_rel / img_name
+    except ValueError:
+        candidate = IMAGE_ROOT / cam_dir.name / img_name
+    return candidate if candidate.exists() else None
+
+
+def _resolve_src_img_review(cam_name: str, img_stem: str) -> 'Path | None':
+    """Find original source image for review-mode tasks by searching IMAGE_ROOT."""
+    if IMAGE_ROOT is None:
+        return None
+    # Try common extensions
+    for ext in ('.JPG', '.jpg', '.jpeg', '.JPEG', '.png', '.PNG'):
+        matches = list(IMAGE_ROOT.rglob(f'**/{cam_name}/{img_stem}{ext}'))
+        if matches:
+            return matches[0]
+    return None
+
+
+# ── Live path tracker (review mode: files move between class subfolders) ───────
+# Maps crop_fn -> current Path on disk.  Updated by apply_label in review mode.
+_live_paths: dict = {}   # crop_fn -> Path
+
+
+def resolve_crop_path(crop_fn: str, default_path) -> Path:
+    """Return the current on-disk path for a crop (handles review-mode moves)."""
+    return _live_paths.get(crop_fn, default_path)
+
+
+# ── Build tasks ────────────────────────────────────────────────────────────────
 tasks = []
-for cam_dir in sorted(RESULTS_DIR.iterdir()):
-    if not cam_dir.is_dir():
-        continue
-    debug_dir = cam_dir / 'debug'
-    crop_dir = cam_dir / 'crops'
-    csv_path = cam_dir / 'results.csv'
-    if not (debug_dir.exists() and crop_dir.exists() and csv_path.exists()):
-        continue
+# Maps task_idx -> absolute cam_dir Path, used only by get_json_path for unique
+# progress JSON naming.  Kept separate so the 6-element task tuple is unchanged.
+_cam_dir_keys: dict = {}
 
-    image_crops: dict = defaultdict(list)
-    seen_crops: dict = defaultdict(set)
-    bbox_map: dict = {}
-
-    with open(csv_path, encoding='utf-8') as f:
-        for row in csv.DictReader(f):
-            img_name = row.get('image_name', '')
-            crop_fn = row.get('crop_filename', '')
-            if not crop_fn or not (crop_dir / crop_fn).exists():
-                continue
-            if crop_fn in seen_crops[img_name]:
-                continue
-            seen_crops[img_name].add(crop_fn)
-            image_crops[img_name].append((crop_dir / crop_fn, crop_fn))
-            try:
-                bx = int(float(row.get('bbox_x', 0)))
-                by = int(float(row.get('bbox_y', 0)))
-                bw = int(float(row.get('bbox_w', 0)))
-                bh = int(float(row.get('bbox_h', 0)))
-                if bw > 0 and bh > 0:
-                    bbox_map[crop_fn] = (bx, by, bw, bh)
-            except (ValueError, TypeError):
-                pass
-
-    # Index debug_dir once: bucket files by the "{cam_prefix}__{img_stem}"
-    # prefix so each image becomes one dict lookup instead of up to 5 globs.
-    cam_prefix = cam_dir.name
-    debug_by_stem = defaultdict(list)
-    for entry in os.scandir(debug_dir):
-        if not entry.is_file():
+if REVIEW_MODE:
+    # ── REVIEW MODE: load from existing class subfolders ──────────────────────
+    # group_map: (cam_name, img_stem) -> [(crop_path, crop_fn), ...]
+    group_map: dict = defaultdict(list)
+    seen_review: set = set()
+    for cls in _CLASS_LABELS_TUPLE:
+        cls_dir = RESULTS_DIR / cls
+        if not cls_dir.is_dir():
             continue
-        name = entry.name
-        suffix_at = name.find('_', len(cam_prefix) + 2)
-        stem = name[:suffix_at] if suffix_at != -1 else Path(name).stem
-        debug_by_stem[stem].append(Path(entry.path))
+        for f in sorted(cls_dir.iterdir()):
+            if not f.is_file() or f.suffix.lower() not in ('.jpg', '.jpeg', '.png'):
+                continue
+            if f.name in seen_review:
+                continue
+            seen_review.add(f.name)
+            _live_paths[f.name] = f   # initial on-disk location
+            cam_name, img_stem = _parse_crop_filename(f.name)
+            key = (cam_name or '__ungrouped__', img_stem or f.stem)
+            group_map[key].append((f, f.name))
 
-    def pick_debug(candidates):
-        if not candidates:
-            return None
-        for tag in ('_4_final_saved_crops', '_3_contours', '_1_original'):
-            for p in candidates:
-                if tag in p.name:
-                    return p
-        for p in sorted(candidates):
-            if '_2_diff' not in p.name:
-                return p
-        return candidates[0]
+    # Also pick up any crops sitting directly in RESULTS_DIR (unclassified)
+    for f in sorted(RESULTS_DIR.iterdir()):
+        if not f.is_file() or f.suffix.lower() not in ('.jpg', '.jpeg', '.png'):
+            continue
+        if f.name in seen_review:
+            continue
+        seen_review.add(f.name)
+        _live_paths[f.name] = f
+        cam_name, img_stem = _parse_crop_filename(f.name)
+        key = (cam_name or '__ungrouped__', img_stem or f.stem)
+        group_map[key].append((f, f.name))
 
-    for img_name, crops in sorted(image_crops.items()):
-        img_stem = Path(img_name).stem
-        stem = f'{cam_prefix}__{img_stem}'
-        debug_img = pick_debug(debug_by_stem.get(stem, []))
-        if crops:
-            tasks.append((debug_img, img_name, crops, cam_dir.name, bbox_map))
+    for (cam_name, img_stem), crops in sorted(group_map.items()):
+        # Try to resolve source image
+        img_name = img_stem + '.JPG'   # best guess; _resolve_src_img_review tries extensions
+        src_img = _resolve_src_img_review(cam_name, img_stem)
+        # Record full path in _cam_dir_keys so get_json_path can build a unique
+        # progress JSON name without touching the 6-element task tuple.
+        cam_dir_key = (RESULTS_DIR / cam_name).resolve()
+        _cam_dir_keys[len(tasks)] = cam_dir_key
+        tasks.append((src_img, img_name, crops, cam_name, {}, {}))
+
+else:
+    # ── INFERENCE MODE: load from crops/ + results.csv ────────────────────────
+    for cam_dir in _find_cam_dirs(RESULTS_DIR):
+        crop_dir = cam_dir / 'crops'
+        csv_path = cam_dir / 'results.csv'
+
+        image_crops: dict = defaultdict(list)
+        seen_crops: dict = defaultdict(set)
+        bbox_map: dict = {}
+        prediction_meta: dict = {}
+
+        with open(csv_path, encoding='utf-8') as f:
+            for row in csv.DictReader(f):
+                img_name = row.get('image_name', '')
+                crop_fn = row.get('crop_filename', '')
+                if not crop_fn:
+                    continue
+                # Resolve crop path: check crops/ flat first, then class subfolders
+                # inside crops/ (Cell 8 moves files there), then OUTPUT_DIR class
+                # subfolders (crop already labeled in a prior session).
+                _crop_candidate = crop_dir / crop_fn
+                if not _crop_candidate.exists():
+                    _found = None
+                    for _cls in _CLASS_LABELS_TUPLE:
+                        # Cell 8 moves crops to crops/{class}/filename
+                        _cls_candidate = crop_dir / _cls / crop_fn
+                        if _cls_candidate.exists():
+                            _found = _cls_candidate
+                            break
+                        # Already labeled and moved to output folder
+                        _cls_candidate = OUTPUT_DIR / _cls / crop_fn
+                        if _cls_candidate.exists():
+                            _found = _cls_candidate
+                            break
+                    if _found is None:
+                        continue
+                    _crop_candidate = _found
+                if crop_fn in seen_crops[img_name]:
+                    continue
+                seen_crops[img_name].add(crop_fn)
+                image_crops[img_name].append((_crop_candidate, crop_fn))
+                try:
+                    bx = int(float(row.get('bbox_x', 0)))
+                    by = int(float(row.get('bbox_y', 0)))
+                    bw = int(float(row.get('bbox_w', 0)))
+                    bh = int(float(row.get('bbox_h', 0)))
+                    if bw > 0 and bh > 0:
+                        bbox_map[crop_fn] = (bx, by, bw, bh)
+                except (ValueError, TypeError):
+                    pass
+
+                def _row_float(name):
+                    try:
+                        raw = row.get(name, '')
+                        return float(raw) if raw not in ('', None) else None
+                    except (TypeError, ValueError):
+                        return None
+
+                # ── Read prediction from results.csv ──────────────────────
+                # Supports two-stage pipeline columns ({pipe}__pollinator_type,
+                # {pipe}__group_conf, {pipe}__*_prob) as well as legacy column names.
+                pred_label = ''
+                pred_conf = None
+                class_conf = {}
+
+                # Two-stage pipeline: try all {pipe}__pollinator_type columns first
+                for _col, _val in row.items():
+                    if _col.endswith('__pollinator_type') and _val.strip():
+                        pred_label = _val.strip()
+                        # Corresponding confidence: {pipe}__group_conf
+                        _pipe = _col[: -len('__pollinator_type')]
+                        pred_conf = _row_float(f'{_pipe}__group_conf')
+                        # Per-class probs: {pipe}__bumblebee_prob etc.
+                        for _cls in ('bumblebee', 'fly', 'butterfly', 'other'):
+                            _v = _row_float(f'{_pipe}__{_cls}_prob')
+                            if _v is not None:
+                                class_conf[_cls] = _v
+                        break
+
+                # If pollinator_type empty, fall back to binary label (background)
+                if not pred_label:
+                    for _col, _val in row.items():
+                        if _col.endswith('__binary_label') and _val.strip():
+                            pred_label = _val.strip()  # 'background' or 'insect'
+                            _pipe = _col[: -len('__binary_label')]
+                            pred_conf = _row_float(f'{_pipe}__binary_conf')
+                            break
+
+                # Legacy column names (older pipeline outputs)
+                if not pred_label:
+                    pred_label = (
+                        row.get('five_class_label')
+                        or row.get('predicted_class')
+                        or row.get('class_label')
+                        or row.get('group_label')
+                        or row.get('label')
+                        or ''
+                    )
+                if pred_conf is None:
+                    pred_conf = (
+                        _row_float('five_class_confidence')
+                        or _row_float('confidence')
+                        or _row_float('group_confidence')
+                        or _row_float('score')
+                    )
+                if not class_conf:
+                    for _cls in ('bumblebee', 'fly', 'butterfly_moth', 'butterfly', 'other', 'background'):
+                        _v = _row_float(f'conf_{_cls}')
+                        if _v is not None:
+                            class_conf[_cls] = _v
+                if pred_label or pred_conf is not None or class_conf:
+                    prediction_meta[crop_fn] = {
+                        'label': pred_label,
+                        'confidence': pred_conf,
+                        'class_confidences': class_conf,
+                    }
+
+        for img_name, crops in sorted(image_crops.items()):
+            src_img = _resolve_src_img_inference(cam_dir, img_name)
+            if crops:
+                # Record full cam_dir path in _cam_dir_keys for unique JSON naming.
+                _cam_dir_keys[len(tasks)] = cam_dir.resolve()
+                tasks.append((src_img, img_name, crops, cam_dir.name, bbox_map, prediction_meta))
 
 total_images = len(tasks)
-total_crops = sum(len(c) for _, _, c, _, _ in tasks)
-all_crop_fns = {cf for _, _, crops, _, _ in tasks for _, cf in crops}
+total_crops = sum(len(c) for _, _, c, _, _, _ in tasks)
+all_crop_fns = {cf for _, _, crops, _, _, _ in tasks for _, cf in crops}
 
 
 def clamp_task_idx(idx):
@@ -332,7 +631,9 @@ def save_session(task_idx):
         return
     try:
         idx = clamp_task_idx(task_idx)
-        _, img_name, _, cam_name, _ = tasks[idx]
+        # Task tuples may contain extra metadata fields, e.g. prediction_meta.
+        img_name = tasks[idx][1]
+        cam_name = tasks[idx][3]
         current_settings = normalized_settings(state if 'state' in globals() else {})
         data = {
             'results_dir': str(RESULTS_DIR),
@@ -354,7 +655,7 @@ def load_initial_task_idx():
         return 0
     cam_name = data.get('cam_name')
     image_name = data.get('image_name')
-    for i, (_, im, _, cam, _) in enumerate(tasks):
+    for i, (_, im, _, cam, _, _) in enumerate(tasks):
         if cam == cam_name and im == image_name:
             return i
     saved = data.get('task_idx', 0)
@@ -378,31 +679,33 @@ if not tasks:
     print('No tasks found. Check --results path.')
     sys.exit(0)
 
-bbox_total = sum(len(bm) for _, _, _, _, bm in tasks)
+bbox_total = sum(len(bm) for _, _, _, _, bm, _ in tasks)
 print(
     f'bbox entries: {bbox_total}/{total_crops}'
     + (' -- WARNING: no bbox data, debug sync disabled' if bbox_total == 0 else '')
 )
 
 # ── UI constants ──────────────────────────────────────────────────────────────
-# Layout (top → bottom):
-#   HEADER_H px  — title + key hints
-#   DEBUG panel  — full-width debug image, centred horizontally
-#   CROP strip   — CROP_COLS thumbnails, one row at a time
-#   FOOTER_H px  — toggle buttons + status
+# Layout — two modes toggled with L key:
+#   'horizontal' — source image above (full-width), crop strip below (6-up row)
+#   'vertical'   — source image on left, scrollable crop panel on right
 WIN_W, WIN_H = 1800, 1100
 PAD = 8
-CROP_COLS = 6
+CROP_COLS = 6          # columns in horizontal mode
 CROP_SIZE = 220
 CROP_META_H = 60
 HEADER_H = 86
 FOOTER_H = 155
-CROP_STRIP_H = CROP_SIZE + CROP_META_H + PAD
+CROP_STRIP_H = CROP_SIZE + CROP_META_H + PAD   # per-row height in horizontal strip
 DEBUG_TOP = HEADER_H
-DEBUG_BOTTOM = WIN_H - FOOTER_H - CROP_STRIP_H
-ROWS_VISIBLE = 1
-# Equal horizontal gap left / between / right of the 6 crops
+DEBUG_BOTTOM = WIN_H - FOOTER_H - CROP_STRIP_H  # bottom of image panel (horizontal)
+ROWS_VISIBLE = 1                                  # horizontal: 1 row at a time
+# Equal horizontal gap left / between / right of the 6 crops (horizontal mode)
 CROP_PAD_X = max(PAD, (WIN_W - CROP_SIZE * CROP_COLS) // (CROP_COLS + 1))
+
+# Vertical layout constants
+_V_LEFT_W = 1300        # main image panel width in vertical mode
+_V_CROP_COLS = 2        # crop columns in the right panel
 
 # ── Colours & badges ──────────────────────────────────────────────────────────
 COLORS = {
@@ -435,6 +738,45 @@ def get_badge(label):
     return BADGES.get(label, (label[:3].upper() if label else ''))
 
 
+def _fmt_conf(value):
+    if value is None:
+        return ''
+    try:
+        value = float(value)
+    except (TypeError, ValueError):
+        return ''
+    if value <= 1.0:
+        return f'{value * 100:.0f}%'
+    return f'{value:.2f}'
+
+
+def get_prediction_text(crop_fn, prediction_meta, compact=False):
+    meta = prediction_meta.get(crop_fn, {}) if isinstance(prediction_meta, dict) else {}
+    label = str(meta.get('label') or '').strip()
+    conf = _fmt_conf(meta.get('confidence'))
+    if label and conf:
+        text = f'{label} {conf}'
+    elif label:
+        text = label
+    elif conf:
+        text = f'pred {conf}'
+    else:
+        return ''
+    if compact and len(text) > 24:
+        text = text[:21] + '...'
+    return text
+
+
+def get_prediction_detail(crop_fn, prediction_meta):
+    meta = prediction_meta.get(crop_fn, {}) if isinstance(prediction_meta, dict) else {}
+    confs = meta.get('class_confidences') or {}
+    parts = []
+    for cls in ('bumblebee', 'fly', 'butterfly_moth', 'butterfly', 'other', 'background'):
+        if cls in confs:
+            parts.append(f'{cls}={_fmt_conf(confs[cls])}')
+    return '  '.join(parts)
+
+
 # ── Keybindings ───────────────────────────────────────────────────────────────
 KEYS = {
     'prev_image': ('a', 'A'),
@@ -457,6 +799,7 @@ KEYS = {
     'batch_butterfly': (),
     'batch_other': (),
     'batch_unsure': (),
+    'layout_toggle': ('l', 'L'),
 }
 
 KEY_ORDS = {action: tuple(ord(c) for c in chars) for action, chars in KEYS.items()}
@@ -486,30 +829,33 @@ debug_cache: dict = {}  # str(path) -> (canvas, coord_scale, ox, oy, draw_x)
 
 def get_row_heights(task_idx: int, visible_indices=None) -> list:
     task_idx = clamp_task_idx(task_idx)
-    cache_key = task_idx if visible_indices is None else None
+    # Include layout in cache key — row count depends on number of columns
+    cc = _crop_cols()
+    cache_key = (task_idx, cc) if visible_indices is None else None
     if cache_key is not None and cache_key in row_heights_cache:
-        return row_heights_cache[task_idx]
-    _, _, crops, _, _ = tasks[task_idx]
+        return row_heights_cache[cache_key]
+    _, _, crops, _, _, _ = tasks[task_idx]
     if visible_indices is None:
         visible_indices = list(range(len(crops)))
-    n_rows = max(1, (len(visible_indices) - 1) // CROP_COLS + 1)
+    n_rows = max(1, (len(visible_indices) - 1) // cc + 1)
     heights = []
     for r in range(n_rows):
-        row_start = r * CROP_COLS
+        row_start = r * cc
         rh = CROP_SIZE
-        for crop_idx in visible_indices[row_start : row_start + CROP_COLS]:
+        for crop_idx in visible_indices[row_start : row_start + cc]:
             cp, _ = crops[crop_idx]
             entry = thumb_cache.get(str(cp))
             if entry:
                 rh = max(rh, entry[3])
         heights.append(rh)
     if cache_key is not None:
-        row_heights_cache[task_idx] = heights
+        row_heights_cache[cache_key] = heights
     return heights
 
 
 # ── ROI offset helper ─────────────────────────────────────────────────────────
 def read_debug_transform(debug_path) -> tuple:
+    # Original images are always 1:1 — no crop/offset transform needed.
     if debug_path is None:
         return 0, 0, 1.0
     stem = Path(str(debug_path)).stem
@@ -530,15 +876,17 @@ def read_debug_transform(debug_path) -> tuple:
 # ── Debug-image cache — full-width, horizontally centred ─────────────────────
 def load_debug_base(path):
     """Return (canvas_copy, coord_scale, ox, oy, draw_x).
-    The debug image is scaled to fit the full-width panel and centred;
+    The debug image is scaled to fit the image panel and centred;
     draw_x is the left pixel of the image within the canvas."""
-    tw = WIN_W
-    th = DEBUG_BOTTOM - DEBUG_TOP
+    tw = _debug_panel_w()
+    th = _debug_panel_h()
+    # Include panel width in cache key so toggling layout invalidates stale entries
+    key = f'{path}|{tw}'
     if path is None or not Path(path).exists():
         blank = np.zeros((th, tw, 3), dtype=np.uint8)
         cv2.putText(
             blank,
-            'No debug image',
+            'No source image',
             (20, th // 2),
             cv2.FONT_HERSHEY_SIMPLEX,
             0.8,
@@ -546,9 +894,8 @@ def load_debug_base(path):
             2,
         )
         return blank, 1.0, 0, 0, 0
-    key = str(path)
     if key not in debug_cache:
-        img = cv2.imread(key)
+        img = cv2.imread(str(path))
         if img is None:
             debug_cache[key] = (np.zeros((th, tw, 3), dtype=np.uint8), 1.0, 0, 0, 0)
         else:
@@ -588,13 +935,19 @@ def draw_bbox_overlay(
 
     for i, (_, crop_fn) in enumerate(crops):
         label = crops_labels.get(crop_fn)
-        if label is None or crop_fn not in bbox_map:
+        if crop_fn not in bbox_map:
             continue
         bx, by, bw, bh = bbox_map[crop_fn]
         dx = int((bx - ox) * scale) + draw_x
         dy = int((by - oy) * scale)
         dw = int(bw * scale)
         dh = int(bh * scale)
+
+        if label is None:
+            # Unlabeled crop: always draw a dim gray outline so the user can see all candidates
+            cv2.rectangle(img, (dx, dy), (dx + dw, dy + dh), (160, 160, 160), 1)
+            continue
+
         color = get_color(label)
         if show_labeled_boxes and (label != 'background' or show_background_boxes):
             cv2.rectangle(img, (dx, dy), (dx + dw, dy + dh), color, 2)
@@ -686,6 +1039,57 @@ trackbar_buf = [None]
 ui_controls = []
 
 
+# ── Layout helpers (depend on state — defined after state is initialised) ─────
+def _layout():
+    """Current layout: 'horizontal' (default) or 'vertical'."""
+    return state.get('layout', 'horizontal')
+
+
+def _crop_cols():
+    """Number of crop columns in the current layout."""
+    return _V_CROP_COLS if _layout() == 'vertical' else CROP_COLS
+
+
+def _rows_visible():
+    """Number of crop rows that fit on screen at once."""
+    if _layout() == 'vertical':
+        content_h = WIN_H - HEADER_H - FOOTER_H
+        row_h = CROP_SIZE + CROP_META_H + PAD
+        # Add PAD to be slightly generous — allows one more partially-visible row
+        return max(1, (content_h + PAD) // row_h)
+    return ROWS_VISIBLE  # horizontal: always 1
+
+
+def _debug_panel_w():
+    """Width of the main source-image panel."""
+    return _V_LEFT_W if _layout() == 'vertical' else WIN_W
+
+
+def _debug_panel_h():
+    """Height of the main source-image panel."""
+    if _layout() == 'vertical':
+        return WIN_H - HEADER_H - FOOTER_H   # full content height — crops are on the right
+    return DEBUG_BOTTOM - DEBUG_TOP           # horizontal: stop above the crop strip
+
+
+def _crop_panel_x():
+    """Left edge of the crop strip panel."""
+    return _V_LEFT_W if _layout() == 'vertical' else 0
+
+
+def _crop_panel_y():
+    """Top edge of the crop strip panel."""
+    return HEADER_H if _layout() == 'vertical' else DEBUG_BOTTOM
+
+
+def _crop_pad_x():
+    """Horizontal padding between crops in the current layout."""
+    if _layout() == 'vertical':
+        panel_w = WIN_W - _V_LEFT_W
+        return max(PAD, (panel_w - CROP_SIZE * _V_CROP_COLS) // (_V_CROP_COLS + 1))
+    return CROP_PAD_X
+
+
 def on_trackbar(val):
     trackbar_buf[0] = clamp_task_idx(val)
 
@@ -693,14 +1097,19 @@ def on_trackbar(val):
 # ── Filter / visibility helpers ───────────────────────────────────────────────
 def get_visible_crop_indices(task_idx=None):
     task_idx = state['task_idx'] if task_idx is None else clamp_task_idx(task_idx)
-    _, _, crops, _, _ = tasks[task_idx]
+    _, _, crops, _, _, prediction_meta = tasks[task_idx]
     filter_label = state.get('filter_label')
     show_only_unlabeled = state.get('show_only_unlabeled', False)
     indices = []
     for i, (_, crop_fn) in enumerate(crops):
-        label = progress.get(crop_fn)
-        if filter_label is not None and label != filter_label:
-            continue
+        user_label = progress.get(crop_fn)
+        if filter_label is not None:
+            # Use user label if already labeled; otherwise use model prediction
+            effective = user_label if user_label else (
+                prediction_meta.get(crop_fn, {}).get('label', '') if isinstance(prediction_meta, dict) else ''
+            )
+            if effective != filter_label:
+                continue
         if show_only_unlabeled and crop_fn in progress:
             continue
         indices.append(i)
@@ -710,7 +1119,7 @@ def get_visible_crop_indices(task_idx=None):
 def get_selectable_crop_indices(task_idx=None):
     indices = get_visible_crop_indices(task_idx)
     if state.get('skip_labeled_crops', False):
-        _, _, crops, _, _ = tasks[
+        _, _, crops, _, _, _ = tasks[
             state['task_idx'] if task_idx is None else clamp_task_idx(task_idx)
         ]
         indices = [i for i in indices if crops[i][1] not in progress]
@@ -728,10 +1137,12 @@ def scroll_crop_into_view(crop_idx):
     pos = get_display_position(crop_idx)
     if pos is None:
         return
-    max_scroll = max(0, get_total_rows() - ROWS_VISIBLE)
-    row = pos // CROP_COLS
-    if row >= state['scroll_row'] + ROWS_VISIBLE:
-        state['scroll_row'] = min(row - ROWS_VISIBLE + 1, max_scroll)
+    rv = _rows_visible()
+    cc = _crop_cols()
+    max_scroll = max(0, get_total_rows() - rv)
+    row = pos // cc
+    if row >= state['scroll_row'] + rv:
+        state['scroll_row'] = min(row - rv + 1, max_scroll)
     elif row < state['scroll_row']:
         state['scroll_row'] = row
 
@@ -766,9 +1177,14 @@ def get_visible_task_indices():
         _visible_tasks_cache = list(range(total_images))
     else:
         _visible_tasks_cache = []
-        for i, (_, _, crops, _, _) in enumerate(tasks):
+        for i, (_, _, crops, _, _, prediction_meta) in enumerate(tasks):
             for _, crop_fn in crops:
-                if progress.get(crop_fn) == filter_label:
+                user_label = progress.get(crop_fn)
+                # Use user label if already labeled; otherwise use model prediction
+                effective = user_label if user_label else (
+                    prediction_meta.get(crop_fn, {}).get('label', '') if isinstance(prediction_meta, dict) else ''
+                )
+                if effective == filter_label:
                     _visible_tasks_cache.append(i)
                     break
     _visible_tasks_filter = filter_label
@@ -787,15 +1203,32 @@ def navigate_task(direction):
     cur = state['task_idx']
     try:
         pos = visible.index(cur)
+        new_pos = pos + direction
     except ValueError:
-        pos = 0
-        for k, v in enumerate(visible):
-            if v > cur:
-                pos = k if direction > 0 else max(0, k - 1)
-                break
+        # cur is not in the filtered list — find the nearest target directly.
+        if direction > 0:
+            # Go to first visible task that is strictly after cur
+            candidates = [v for v in visible if v > cur]
+            new = candidates[0] if candidates else None
         else:
-            pos = len(visible) - 1
-    new_pos = pos + direction
+            # Go to last visible task that is strictly before cur
+            candidates = [v for v in visible if v < cur]
+            new = candidates[-1] if candidates else None
+        if new is None:
+            return
+        load_progress_for_task(new)
+        save_session(new)
+        state.update(
+            {
+                'task_idx': new,
+                'selected_idx': None,
+                'scroll_row': 0,
+                'last_batch': None,
+                'last_single_label': None,
+            }
+        )
+        cv2.setTrackbarPos('Image', WINDOW, new)
+        return
     if new_pos < 0 or new_pos >= len(visible):
         return
     new = visible[new_pos]
@@ -814,7 +1247,7 @@ def navigate_task(direction):
 
 
 def clamp_scroll_to_visible_rows():
-    max_scroll = max(0, get_total_rows() - ROWS_VISIBLE)
+    max_scroll = max(0, get_total_rows() - _rows_visible())
     state['scroll_row'] = max(0, min(state['scroll_row'], max_scroll))
 
 
@@ -1163,21 +1596,7 @@ def toggle_footer_control(key):
         state['filter_label'] = None if state.get('filter_label') == lbl else lbl
         invalidate_visible_tasks_cache()
         row_heights_cache.clear()
-        if state['filter_label'] is not None:
-            visible_tasks = get_visible_task_indices()
-            if visible_tasks and state['task_idx'] not in visible_tasks:
-                new = visible_tasks[0]
-                load_progress_for_task(new)
-                save_session(new)
-                state.update(
-                    {
-                        'task_idx': new,
-                        'scroll_row': 0,
-                        'last_batch': None,
-                        'last_single_label': None,
-                    }
-                )
-                cv2.setTrackbarPos('Image', WINDOW, new)
+        # Stay on the current image regardless — if it has no matching crops, show empty strip
         clamp_scroll_to_visible_rows()
         state['selected_idx'] = None
         clear_last_single_label()
@@ -1259,7 +1678,7 @@ def get_recent_single_label_crop(crops):
 # ── Overlay builders ──────────────────────────────────────────────────────────
 def build_debug_overlay(task_idx: int):
     task_idx = clamp_task_idx(task_idx)
-    debug_path, _, crops, _, bbox_map = tasks[task_idx]
+    debug_path, _, crops, _, bbox_map, _ = tasks[task_idx]
     if debug_path is None or not Path(debug_path).exists():
         return None
     img = cv2.imread(str(debug_path))
@@ -1308,7 +1727,7 @@ def build_debug_overlay(task_idx: int):
 
 def hit_debug_overlay_bbox(task_idx: int, x: int, y: int):
     task_idx = clamp_task_idx(task_idx)
-    debug_path, _, crops, _, bbox_map = tasks[task_idx]
+    debug_path, _, crops, _, bbox_map, _ = tasks[task_idx]
     if debug_path is None or not Path(debug_path).exists():
         return None
     img = cv2.imread(str(debug_path))
@@ -1340,8 +1759,8 @@ def hit_debug_overlay_bbox(task_idx: int, x: int, y: int):
     return best_i
 
 
-def build_preview_overlay(crop_path, crop_fn):
-    img = cv2.imread(str(crop_path))
+def build_preview_overlay(crop_path, crop_fn, prediction_meta=None):
+    img = cv2.imread(str(resolve_crop_path(crop_fn, crop_path)))
     if img is None:
         return None
     orig_h, orig_w = img.shape[:2]
@@ -1356,16 +1775,23 @@ def build_preview_overlay(crop_path, crop_fn):
     cy = (WIN_H - ih) // 2
     cx = (WIN_W - iw) // 2
     canvas[cy : cy + ih, cx : cx + iw] = img
-    info = f'{crop_fn}  |  {orig_w}x{orig_h}px  |  click or any key to close'
+    pred = get_prediction_text(crop_fn, prediction_meta or {})
+    detail = get_prediction_detail(crop_fn, prediction_meta or {})
+    info = f'{crop_fn}  |  {orig_w}x{orig_h}px'
+    if pred:
+        info += f'  |  prediction: {pred}'
+    info += '  |  click or any key to close'
     cv2.putText(
         canvas,
         info,
-        (10, WIN_H - 10),
+        (10, WIN_H - 28 if detail else WIN_H - 10),
         cv2.FONT_HERSHEY_SIMPLEX,
         0.4,
         (160, 160, 160),
         1,
     )
+    if detail:
+        put_fitted_text(canvas, detail, 10, WIN_H - 8, WIN_W - 20, 0.34, (190, 190, 90), 1)
     return canvas
 
 
@@ -1386,8 +1812,8 @@ def on_mouse(event, x, y, flags, param):
             state['overlay_kind'] = None
         return
 
-    _, _, crops, _, _ = tasks[state['task_idx']]
-    max_scroll = max(0, get_total_rows() - ROWS_VISIBLE)
+    _, _, crops, _, _, _ = tasks[state['task_idx']]
+    max_scroll = max(0, get_total_rows() - _rows_visible())
 
     if event == cv2.EVENT_MOUSEWHEEL:
         signed = flags if flags < 2**31 else flags - 2**32
@@ -1407,14 +1833,16 @@ def on_mouse(event, x, y, flags, param):
         handle_footer_control_click(x, y)
         return
 
-    # Debug panel (full width, between header and crop strip)
-    if DEBUG_TOP <= y < DEBUG_BOTTOM:
+    # Debug panel — left side (vertical) or full-width above strip (horizontal)
+    dpw = _debug_panel_w()
+    dph = _debug_panel_h()
+    if HEADER_H <= y < HEADER_H + dph and x < dpw:
         debug_path = tasks[state['task_idx']][0]
-        key_dp = str(debug_path) if debug_path else ''
+        key_dp = f'{debug_path}|{dpw}' if debug_path else ''
         if key_dp in debug_cache:
             _, dbg_scale, dbg_ox, dbg_oy, dbg_draw_x = debug_cache[key_dp]
-            _, _, crops_cur, _, bbox_map = tasks[state['task_idx']]
-            local_y = y - DEBUG_TOP
+            _, _, crops_cur, _, bbox_map, _ = tasks[state['task_idx']]
+            local_y = y - HEADER_H
             for i, (_, crop_fn) in enumerate(crops_cur):
                 if crop_fn not in bbox_map:
                     continue
@@ -1429,8 +1857,10 @@ def on_mouse(event, x, y, flags, param):
         click_buf[0] = -2
         return
 
-    # Crop strip
-    if DEBUG_BOTTOM <= y < WIN_H - FOOTER_H:
+    # Crop strip panel
+    cpx = _crop_panel_x()
+    cpy = _crop_panel_y()
+    if cpy <= y < WIN_H - FOOTER_H and x >= cpx:
         visible_indices = get_visible_crop_indices()
         for display_pos, i in enumerate(visible_indices):
             x1, y1, x2, y2 = crop_rect(display_pos, visible_indices)
@@ -1444,20 +1874,15 @@ def on_mouse(event, x, y, flags, param):
 
 # ── Layout helper ─────────────────────────────────────────────────────────────
 def crop_rect(display_pos: int, visible_indices=None):
-    """(x1, y1, x2, y2). Crops are in the bottom strip; only the row
-    matching state["scroll_row"] is visible — others get a sentinel."""
+    """(x1, y1, x2, y2) of a crop thumbnail in the current layout.
+    Returns a sentinel with y1=-9999 for crops outside the visible scroll window."""
     if visible_indices is None:
         visible_indices = get_visible_crop_indices()
-    col = display_pos % CROP_COLS
-    row_of_idx = display_pos // CROP_COLS
+    cc = _crop_cols()
+    col = display_pos % cc
+    row_of_idx = display_pos // cc
 
-    if row_of_idx != state['scroll_row']:
-        return 0, -9999, CROP_SIZE, -9999 + CROP_SIZE
-
-    y = DEBUG_BOTTOM + PAD
-    x1 = CROP_PAD_X + col * (CROP_SIZE + CROP_PAD_X)
-
-    _, _, crops, _, _ = tasks[state['task_idx']]
+    _, _, crops, _, _, _ = tasks[state['task_idx']]
     if display_pos < len(visible_indices):
         crop_idx = visible_indices[display_pos]
         entry = thumb_cache.get(str(crops[crop_idx][0]))
@@ -1465,24 +1890,69 @@ def crop_rect(display_pos: int, visible_indices=None):
     else:
         crop_h = CROP_SIZE
 
-    return x1, y, x1 + CROP_SIZE, y + crop_h
+    rv = _rows_visible()
+    cpx = _crop_pad_x()
+
+    if _layout() == 'vertical':
+        # All rows from scroll_row to scroll_row + rv - 1 are visible
+        if row_of_idx < state['scroll_row'] or row_of_idx >= state['scroll_row'] + rv:
+            return 0, -9999, CROP_SIZE, -9999 + crop_h
+        x1 = _V_LEFT_W + cpx + col * (CROP_SIZE + cpx)
+        y1 = HEADER_H + PAD + (row_of_idx - state['scroll_row']) * (CROP_SIZE + CROP_META_H + PAD)
+    else:
+        # Horizontal: only the row matching scroll_row is shown
+        if row_of_idx != state['scroll_row']:
+            return 0, -9999, CROP_SIZE, -9999 + crop_h
+        x1 = cpx + col * (CROP_SIZE + cpx)
+        y1 = DEBUG_BOTTOM + PAD
+
+    return x1, y1, x1 + CROP_SIZE, y1 + crop_h
 
 
 # ── Label I/O ─────────────────────────────────────────────────────────────────
 def apply_label(crop_fn, crop_path, label):
-    if crop_fn in progress:
-        old_label = progress[crop_fn]
-        for old_dest in (
-            LABELED_DIR / old_label / crop_fn,
-            LABELED_DIR / old_label / f'{state["task_idx"]}_{crop_fn}',
-        ):
-            if old_dest.exists():
-                old_dest.unlink()
-    dest = LABELED_DIR / label / crop_fn
-    if dest.exists():
-        dest = LABELED_DIR / label / f'{state["task_idx"]}_{crop_fn}'
-    shutil.copy2(crop_path, dest)
-    progress[crop_fn] = label
+    if REVIEW_MODE:
+        # In review mode: move files between class subfolders in place.
+        # No-op if label hasn't changed.
+        old_label = progress.get(crop_fn)
+        if old_label == label:
+            return
+        src = resolve_crop_path(crop_fn, crop_path)
+        dest = LABELED_DIR / label / crop_fn
+        if not src.exists():
+            # File already moved somewhere else; try to find it in class folders
+            for cls in _CLASS_LABELS_TUPLE:
+                candidate = LABELED_DIR / cls / crop_fn
+                if candidate.exists():
+                    src = candidate
+                    break
+        if src.exists():
+            dest.parent.mkdir(parents=True, exist_ok=True)
+            shutil.move(str(src), str(dest))
+            _live_paths[crop_fn] = dest
+        progress[crop_fn] = label
+    else:
+        # Inference mode: MOVE from crops/ to LABELED_DIR class subfolder.
+        # All classes (including background) are moved — no originals left scattered outside.
+        old_label = progress.get(crop_fn)
+        if old_label == label:
+            return
+        # Find current on-disk location: may already have been moved to a class folder.
+        src = resolve_crop_path(crop_fn, crop_path)
+        if not src.exists():
+            for cls in _CLASS_LABELS_TUPLE:
+                candidate = LABELED_DIR / cls / crop_fn
+                if candidate.exists():
+                    src = candidate
+                    break
+        dest = LABELED_DIR / label / crop_fn
+        if dest.exists():
+            dest = LABELED_DIR / label / f'{state["task_idx"]}_{crop_fn}'
+        if src.exists():
+            dest.parent.mkdir(parents=True, exist_ok=True)
+            shutil.move(str(src), str(dest))
+            _live_paths[crop_fn] = dest
+        progress[crop_fn] = label
     invalidate_visible_tasks_cache()
     save_progress()
 
@@ -1490,10 +1960,12 @@ def apply_label(crop_fn, crop_path, label):
 def batch_label_or_undo(
     state, label, tasks, progress, labeled_dir, save_progress, apply_label
 ):
-    _, _, crops, _, _ = tasks[state['task_idx']]
+    _, _, crops, _, _, _ = tasks[state['task_idx']]
     last = state.get('last_batch')
     if last and last['task_idx'] == state['task_idx'] and last['label'] == label:
         undone = 0
+        _, _, crops_cur, _, _, _ = tasks[state['task_idx']]
+        orig_path_map = {cf: cp for cp, cf in crops_cur}
         for crop_fn in last['crops']:
             if progress.get(crop_fn) == label:
                 old_label = progress[crop_fn]
@@ -1502,7 +1974,18 @@ def batch_label_or_undo(
                     labeled_dir / old_label / f'{state["task_idx"]}_{crop_fn}',
                 ):
                     if old.exists():
-                        old.unlink()
+                        if not REVIEW_MODE:
+                            # Move back to original crops/ location so the crop
+                            # reappears as unlabeled in the strip.
+                            orig = orig_path_map.get(crop_fn)
+                            if orig and Path(orig).parent.exists():
+                                shutil.move(str(old), str(orig))
+                                _live_paths.pop(crop_fn, None)
+                            else:
+                                old.unlink()
+                        else:
+                            old.unlink()
+                        break
                 del progress[crop_fn]
                 undone += 1
         if undone:
@@ -1511,7 +1994,13 @@ def batch_label_or_undo(
         state['last_batch'] = None
         return
     just_labeled = []
-    for crop_path, crop_fn in crops:
+    # Only label crops that are currently visible (respects active filter).
+    # If a filter is active (e.g. "fly"), batch-label applies only to those
+    # visible crops — not to every unlabeled crop in the image.
+    visible_indices = set(get_visible_crop_indices(state['task_idx']))
+    for ci, (crop_path, crop_fn) in enumerate(crops):
+        if ci not in visible_indices:
+            continue
         if crop_fn not in progress:
             apply_label(crop_fn, crop_path, label)
             just_labeled.append(crop_fn)
@@ -1530,7 +2019,7 @@ def render():
     idx = clamp_task_idx(state['task_idx'])
     state['task_idx'] = idx
     sel = state['selected_idx']
-    debug_path, img_name, crops, cam_name, bbox_map = tasks[idx]
+    debug_path, img_name, crops, cam_name, bbox_map, prediction_meta = tasks[idx]
     crops_labels = {cf: progress.get(cf) for _, cf in crops}
     visible_indices = get_visible_crop_indices(idx)
     heights = get_row_heights(idx, visible_indices)
@@ -1539,7 +2028,7 @@ def render():
 
     canvas = np.zeros((WIN_H, WIN_W, 3), dtype=np.uint8)
 
-    # ── Debug panel (full width) ──────────────────────────────────────────────
+    # ── Debug panel (left side in vertical mode, full-width in horizontal) ───
     debug_panel, dbg_scale, dbg_ox, dbg_oy, dbg_draw_x = load_debug_base(debug_path)
     draw_bbox_overlay(
         debug_panel,
@@ -1558,22 +2047,40 @@ def render():
         draw_x=dbg_draw_x,
     )
     dh, dw = debug_panel.shape[:2]
-    canvas[DEBUG_TOP : DEBUG_TOP + dh, :dw] = debug_panel
+    canvas[HEADER_H : HEADER_H + dh, :dw] = debug_panel
+    if _layout() == 'vertical':
+        # Vertical separator between image panel and crop panel
+        cv2.line(
+            canvas, (_V_LEFT_W, HEADER_H), (_V_LEFT_W, WIN_H - FOOTER_H),
+            (55, 55, 55), 1
+        )
 
     # ── Header ────────────────────────────────────────────────────────────────
     cv2.rectangle(canvas, (0, 0), (WIN_W, HEADER_H - 2), (25, 25, 25), -1)
     done_this = sum(1 for _, cf in crops if cf in progress)
     g_done = sum(1 for fn in progress if fn in all_crop_fns)
+    is_last_image = (idx == total_images - 1)
     more_txt = (
-        '  [MORE CROPS]' if total_rows > state['scroll_row'] + ROWS_VISIBLE else ''
+        '  [MORE CROPS]' if total_rows > state['scroll_row'] + _rows_visible() else ''
     )
+    last_txt = '  ★ LAST IMAGE ★' if is_last_image else ''
     title = (
         f'[{idx + 1}/{total_images}]  {cam_name} / {Path(img_name).name}'
-        f'  ({done_this}/{len(crops)} labeled){more_txt}'
+        f'  ({done_this}/{len(crops)} labeled){more_txt}{last_txt}'
     )
+    title_color = (80, 220, 255) if is_last_image else (220, 220, 220)
     cv2.putText(
-        canvas, title, (10, 24), cv2.FONT_HERSHEY_SIMPLEX, 0.55, (220, 220, 220), 1
+        canvas, title, (10, 24), cv2.FONT_HERSHEY_SIMPLEX, 0.55, title_color, 1
     )
+    # Extra banner across the top edge when on the last image
+    if is_last_image:
+        banner = '  ── LAST IMAGE — Q = save & quit  |  N = next folder  ──  '
+        (bw, bh), _ = cv2.getTextSize(banner, cv2.FONT_HERSHEY_SIMPLEX, 0.42, 1)
+        cv2.rectangle(canvas, (0, HEADER_H - 14), (WIN_W, HEADER_H - 2), (0, 130, 200), -1)
+        cv2.putText(
+            canvas, banner, (WIN_W // 2 - bw // 2, HEADER_H - 4),
+            cv2.FONT_HERSHEY_SIMPLEX, 0.42, (255, 255, 255), 1,
+        )
 
     # nav_mode badge (top-right)
     nav = state.get('nav_mode', 'image')
@@ -1612,15 +2119,58 @@ def render():
     but_k = _key_label('label_butterfly')
     oth_k = _key_label('label_other')
     un_k = _key_label('label_unsure')
+
+    # ── Layout badge (always visible, top-right below nav badge) ─────────────
+    if _layout() == 'vertical':
+        layout_label = 'Left-Right'
+        layout_switch_hint = 'L = Top-Bottom'
+        layout_color = (60, 200, 120)   # green
+    else:
+        layout_label = 'Top-Bottom'
+        layout_switch_hint = 'L = Left-Right'
+        layout_color = (60, 160, 220)   # blue
+    layout_badge_txt = f'Layout: {layout_label}  [{layout_switch_hint}]'
+    (lb_w, lb_h), _ = cv2.getTextSize(
+        layout_badge_txt, cv2.FONT_HERSHEY_SIMPLEX, 0.40, 1
+    )
+    lb_x = WIN_W - lb_w - 14
+    lb_y_top = 32
+    cv2.rectangle(
+        canvas,
+        (lb_x - 6, lb_y_top),
+        (WIN_W - 6, lb_y_top + lb_h + 8),
+        (30, 30, 30),
+        -1,
+    )
+    cv2.rectangle(
+        canvas,
+        (lb_x - 6, lb_y_top),
+        (WIN_W - 6, lb_y_top + lb_h + 8),
+        layout_color,
+        1,
+    )
+    cv2.putText(
+        canvas,
+        layout_badge_txt,
+        (lb_x, lb_y_top + lb_h + 3),
+        cv2.FONT_HERSHEY_SIMPLEX,
+        0.40,
+        layout_color,
+        1,
+    )
+
     if nav == 'crop':
-        arrow_help = '<-/-> = prev/next crop | up/down = up/down row'
+        arrow_help = '<-/-> = prev/next crop (cross-image) | up/down = by row | W/S = global prev/next'
         label_help = 'label = label selected + advance'
     else:
-        arrow_help = '<-/-> or A/D = prev/next image | up/down = scroll'
+        if _layout() == 'vertical':
+            arrow_help = '<-/-> or A/D = prev/next image | up/down = scroll crops | W/S = global prev/next'
+        else:
+            arrow_help = '<-/-> or A/D = prev/next image | up/down = scroll strip | W/S = global prev/next'
         label_help = 'label = batch all unlabeled (twice = undo)'
     instruction = (
         f'{bg_k}=bg {bb_k}=BB {fly_k}=fly {but_k}=but {oth_k}=other {un_k}=unsure'
-        f' | R=nav mode  Tab/E=label-all  {_key_label("clear_image")}=clear'
+        f' | R=nav  Tab/E=label-all  {_key_label("clear_image")}=clear'
         f' {_key_label("preview")}=preview  {_key_label("quit")}=quit'
         f' | {arrow_help} | {label_help}'
     )
@@ -1642,6 +2192,33 @@ def render():
         1,
     )
 
+    # Show model prediction for the selected crop, if available
+    if sel is not None and sel < len(crops):
+        sel_fn = crops[sel][1]
+        pred_line = get_prediction_text(sel_fn, prediction_meta)
+        pred_detail = get_prediction_detail(sel_fn, prediction_meta)
+        if pred_line:
+            cv2.putText(
+                canvas,
+                f'Model prediction: {pred_line}',
+                (10, 82),
+                cv2.FONT_HERSHEY_SIMPLEX,
+                0.34,
+                (210, 210, 120),
+                1,
+            )
+        if pred_detail:
+            put_fitted_text(
+                canvas,
+                pred_detail,
+                360,
+                82,
+                WIN_W - 370,
+                0.30,
+                (170, 170, 120),
+                1,
+            )
+
     # ── Footer ────────────────────────────────────────────────────────────────
     render_footer(canvas, g_done, total_rows)
 
@@ -1653,9 +2230,10 @@ def render():
         if y1 < 0:
             continue
 
-        entry = thumb_cache.get(str(crop_path))
+        _actual_cp = resolve_crop_path(crop_fn, crop_path)
+        entry = thumb_cache.get(str(_actual_cp))
         if entry is None:
-            raw = cv2.imread(str(crop_path))
+            raw = cv2.imread(str(_actual_cp))
             if raw is None:
                 entry = (
                     np.zeros((CROP_SIZE, CROP_SIZE, 3), dtype=np.uint8),
@@ -1672,7 +2250,7 @@ def render():
                     interpolation=cv2.INTER_AREA,
                 )
                 entry = (t, ow, oh, t.shape[0])
-            thumb_cache[str(crop_path)] = entry
+            thumb_cache[str(_actual_cp)] = entry
 
         thumb, orig_w, orig_h, _ = entry
         th_h, th_w = thumb.shape[:2]
@@ -1783,13 +2361,29 @@ def render():
 
         # Size + filename meta
         meta_y = ty + th_h + badge_h
+        pred_text = get_prediction_text(crop_fn, prediction_meta, compact=True)
+        pred_h = 0
+        if pred_text:
+            pred_fs = 0.30
+            (_, pred_h), _ = cv2.getTextSize(
+                pred_text, cv2.FONT_HERSHEY_SIMPLEX, pred_fs, 1
+            )
+            cv2.putText(
+                canvas,
+                f'pred: {pred_text}',
+                (tx, meta_y + pred_h + 6),
+                cv2.FONT_HERSHEY_SIMPLEX,
+                pred_fs,
+                (190, 190, 90),
+                1,
+            )
         if orig_w > 0:
             size_text = f'{orig_w}x{orig_h}'
             size_fs = 0.30
             (_, size_h), _ = cv2.getTextSize(
                 size_text, cv2.FONT_HERSHEY_SIMPLEX, size_fs, 1
             )
-            size_y = meta_y + size_h + 7
+            size_y = meta_y + pred_h + size_h + 18
             cv2.putText(
                 canvas,
                 size_text,
@@ -1800,7 +2394,7 @@ def render():
                 1,
             )
         else:
-            size_y = meta_y + 18
+            size_y = meta_y + pred_h + 26
         m = _re.search(r'_crop_(\d+)', crop_fn)
         prefix = f'#{m.group(1)} ' if m else ''
         short = ('..' + crop_fn[-12:]) if len(crop_fn) > 14 else crop_fn
@@ -1866,6 +2460,42 @@ def go_to_image(new_idx, overlay=None, overlay_kind=None):
     cv2.setTrackbarPos('Image', WINDOW, new_idx)
 
 
+def navigate_crop_global(direction: int):
+    """Navigate one crop forward (+1) or backward (-1) across ALL images.
+    Automatically advances to the next/previous image when reaching the edge.
+    Bound to S (forward) and W (backward)."""
+    task_idx = state['task_idx']
+    vis = get_visible_crop_indices()
+    sel = state['selected_idx']
+
+    # Find position of selected crop within visible list
+    if sel is None:
+        pos = -1 if direction > 0 else len(vis)
+    else:
+        try:
+            pos = vis.index(sel)
+        except ValueError:
+            pos = -1 if direction > 0 else len(vis)
+
+    new_pos = pos + direction
+
+    if 0 <= new_pos < len(vis):
+        # Stay within current image
+        new_sel = vis[new_pos]
+        state['selected_idx'] = new_sel
+        scroll_crop_into_view(new_sel)
+    else:
+        # Cross image boundary — advance to next/prev image
+        next_task = task_idx + direction
+        if 0 <= next_task < total_images:
+            go_to_image(next_task)
+            new_vis = get_visible_crop_indices()
+            if new_vis:
+                new_sel = new_vis[0] if direction > 0 else new_vis[-1]
+                state['selected_idx'] = new_sel
+                scroll_crop_into_view(new_sel)
+
+
 while True:
     tb_val = clamp_task_idx(cv2.getTrackbarPos('Image', WINDOW))
     if trackbar_buf[0] is not None:
@@ -1894,9 +2524,9 @@ while True:
             state['selected_idx'] = i
             clear_last_single_label()
             scroll_crop_into_view(i)
-            _, _, crops, _, _ = tasks[state['task_idx']]
+            _, _, crops, _, _, _ = tasks[state['task_idx']]
             if state.get('click_bbox_preview', True) and i < len(crops):
-                state['overlay'] = build_preview_overlay(*crops[i])
+                state['overlay'] = build_preview_overlay(crops[i][0], crops[i][1], tasks[state['task_idx']][5])
                 state['overlay_kind'] = 'preview'
         elif val == -2:
             state['overlay'] = build_debug_overlay(state['task_idx'])
@@ -1904,9 +2534,9 @@ while True:
         elif val == -3:
             sel = state['selected_idx']
             if state.get('second_click_preview', True) and sel is not None:
-                _, _, crops, _, _ = tasks[state['task_idx']]
+                _, _, crops, _, _, _ = tasks[state['task_idx']]
                 if sel < len(crops):
-                    state['overlay'] = build_preview_overlay(*crops[sel])
+                    state['overlay'] = build_preview_overlay(crops[sel][0], crops[sel][1], tasks[state['task_idx']][5])
                     state['overlay_kind'] = 'preview'
         elif val == -1:
             state['selected_idx'] = None
@@ -1915,7 +2545,15 @@ while True:
             state['selected_idx'] = val
             clear_last_single_label()
 
-    cv2.imshow(WINDOW, render())
+    try:
+        frame = render()
+    except Exception as _render_err:
+        import traceback
+        traceback.print_exc()
+        frame = np.zeros((WIN_H, WIN_W, 3), dtype=np.uint8)
+        cv2.putText(frame, f'Render error: {_render_err}', (20, WIN_H // 2),
+                    cv2.FONT_HERSHEY_SIMPLEX, 0.6, (0, 80, 255), 1)
+    cv2.imshow(WINDOW, frame)
     key_raw = cv2.waitKeyEx(30)
 
     if key_raw == -1:
@@ -1945,19 +2583,21 @@ while True:
                 state['overlay_kind'] = None
         continue
 
-    _, _, crops, _, _ = tasks[state['task_idx']]
+    _, _, crops, _, _, _ = tasks[state['task_idx']]
     nav = state.get('nav_mode', 'image')
 
     # ── Preview ───────────────────────────────────────────────────────────────
     if ascii_key in KEY_ORDS['preview']:
         sel = state['selected_idx']
         if sel is not None and sel < len(crops):
-            state['overlay'] = build_preview_overlay(*crops[sel])
+            state['overlay'] = build_preview_overlay(crops[sel][0], crops[sel][1], tasks[state['task_idx']][5])
             state['overlay_kind'] = 'preview'
 
     # ── Clear ─────────────────────────────────────────────────────────────────
     elif ascii_key in KEY_ORDS['clear_image']:
         removed = 0
+        # Build original-path map so inference-mode files can be moved back
+        orig_path_map = {cf: cp for cp, cf in crops}
         for _, crop_fn in crops:
             if crop_fn in progress:
                 old_label = progress[crop_fn]
@@ -1966,10 +2606,23 @@ while True:
                     LABELED_DIR / old_label / f'{state["task_idx"]}_{crop_fn}',
                 ):
                     if old.exists():
-                        old.unlink()
+                        if not REVIEW_MODE:
+                            # Inference mode: move file back to original crop
+                            # location so the thumbnail stays visible.
+                            orig = orig_path_map.get(crop_fn)
+                            if orig and Path(orig).parent.exists():
+                                shutil.move(str(old), str(orig))
+                                _live_paths.pop(crop_fn, None)
+                            else:
+                                old.unlink()
+                                _live_paths.pop(crop_fn, None)
+                        else:
+                            old.unlink()
+                        break
                 del progress[crop_fn]
                 removed += 1
         if removed:
+            invalidate_visible_tasks_cache()
             save_progress(force=True)
             print(f'Cleared {removed} crops in current image')
         state['selected_idx'] = None
@@ -1984,6 +2637,18 @@ while True:
     # ── Nav mode toggle (R) ───────────────────────────────────────────────────
     elif ascii_key in KEY_ORDS['nav_mode_toggle']:
         toggle_footer_control('nav_mode_toggle')
+
+    # ── Layout toggle (L) — switch horizontal ↔ vertical ─────────────────────
+    elif ascii_key in KEY_ORDS['layout_toggle']:
+        new_layout = 'vertical' if _layout() == 'horizontal' else 'horizontal'
+        state['layout'] = new_layout
+        # Clear layout-sensitive caches
+        debug_cache.clear()
+        row_heights_cache.clear()
+        invalidate_visible_tasks_cache()
+        clamp_scroll_to_visible_rows()
+        save_session(state['task_idx'])
+        print(f'Layout: {new_layout}')
 
     # ── Batch mode toggle (Tab/E) ─────────────────────────────────────────────
     elif ascii_key in KEY_ORDS['batch_mode_toggle']:
@@ -2098,10 +2763,19 @@ while True:
     # ── Arrow keys ────────────────────────────────────────────────────────────
     elif key_raw in next_keys:
         if nav == 'crop':
-            new_sel = pick_adjacent_crop_index(state['selected_idx'], 1)
+            new_sel = pick_adjacent_crop_index(state['selected_idx'], 1, stay_at_edge=False)
             if new_sel is not None:
                 state['selected_idx'] = new_sel
                 scroll_crop_into_view(new_sel)
+            else:
+                # Reached last crop in this image — advance to next image, select first crop
+                next_task = state['task_idx'] + 1
+                if next_task < total_images:
+                    go_to_image(next_task)
+                    new_vis = get_visible_crop_indices()
+                    if new_vis:
+                        state['selected_idx'] = new_vis[0]
+                        scroll_crop_into_view(new_vis[0])
         else:
             if state.get('filter_label') is not None:
                 navigate_task(+1)
@@ -2110,10 +2784,19 @@ while True:
 
     elif key_raw in prev_keys:
         if nav == 'crop':
-            new_sel = pick_adjacent_crop_index(state['selected_idx'], -1)
+            new_sel = pick_adjacent_crop_index(state['selected_idx'], -1, stay_at_edge=False)
             if new_sel is not None:
                 state['selected_idx'] = new_sel
                 scroll_crop_into_view(new_sel)
+            else:
+                # Reached first crop in this image — go to prev image, select last crop
+                prev_task = state['task_idx'] - 1
+                if prev_task >= 0:
+                    go_to_image(prev_task)
+                    new_vis = get_visible_crop_indices()
+                    if new_vis:
+                        state['selected_idx'] = new_vis[-1]
+                        scroll_crop_into_view(new_vis[-1])
         else:
             if state.get('filter_label') is not None:
                 navigate_task(-1)
@@ -2122,11 +2805,12 @@ while True:
 
     elif key_raw in down_keys:
         if nav == 'crop':
+            cc = _crop_cols()
             new_sel = pick_adjacent_crop_index(
-                (state['scroll_row'] * CROP_COLS)
+                (state['scroll_row'] * cc)
                 if state['selected_idx'] is None
                 else min(
-                    state['selected_idx'] + CROP_COLS,
+                    state['selected_idx'] + cc,
                     len(get_visible_crop_indices()) - 1,
                 ),
                 1,
@@ -2136,18 +2820,19 @@ while True:
                 state['selected_idx'] = new_sel
                 scroll_crop_into_view(new_sel)
         else:
-            max_scroll = max(0, get_total_rows() - ROWS_VISIBLE)
+            max_scroll = max(0, get_total_rows() - _rows_visible())
             state['scroll_row'] = min(state['scroll_row'] + 1, max_scroll)
 
     elif key_raw in up_keys:
         if nav == 'crop':
+            cc = _crop_cols()
             sel = state['selected_idx']
             vis = get_visible_crop_indices()
             if sel is None:
                 new_sel = vis[0] if vis else None
             else:
                 pos = get_display_position(sel)
-                new_pos = max(0, pos - CROP_COLS) if pos is not None else 0
+                new_pos = max(0, pos - cc) if pos is not None else 0
                 new_sel = vis[new_pos] if new_pos < len(vis) else None
             if new_sel is not None:
                 state['selected_idx'] = new_sel
@@ -2167,6 +2852,25 @@ while True:
             navigate_task(-1)
         else:
             go_to_image(max(state['task_idx'] - 1, 0))
+
+    # ── W / S — global crop navigation across images ──────────────────────────
+    elif ascii_key in (ord('w'), ord('W')):
+        navigate_crop_global(-1)
+
+    elif ascii_key in (ord('s'), ord('S')):
+        navigate_crop_global(+1)
+
+    # ── N — jump to first image of next camera folder ─────────────────────────
+    elif ascii_key in (ord('n'), ord('N')):
+        cur_cam = tasks[state['task_idx']][3]
+        next_idx = None
+        for i in range(state['task_idx'] + 1, total_images):
+            if tasks[i][3] != cur_cam:
+                next_idx = i
+                break
+        if next_idx is not None:
+            go_to_image(next_idx)
+        # else: already on the last folder — do nothing (banner still visible)
 
 cv2.destroyAllWindows()
 save_progress(force=True)
