@@ -8,13 +8,14 @@ services:
     volumes:
       - postgres_data:/var/lib/postgresql/data
     healthcheck:
-      test: ['CMD-SHELL', 'pg_isready -U ${SQL_USER} -d ${SQL_DATABASE}']
+      test: ["CMD-SHELL", "pg_isready -U ${SQL_USER} -d ${SQL_DATABASE}"]
       interval: 5s
       timeout: 5s
       retries: 10
     restart: unless-stopped
 
   backend:
+    platform: linux/amd64
     build:
       context: .
       dockerfile: Dockerfile
@@ -32,7 +33,7 @@ services:
       db:
         condition: service_healthy
     expose:
-      - '8000'
+      - "8000"
     restart: unless-stopped
 
   frontend:
@@ -42,7 +43,7 @@ services:
       args:
         VITE_API_BASE_URL: ${VITE_API_BASE_URL-}
     ports:
-      - '${WEB_PORT:-8080}:80'
+      - "${WEB_PORT:-8080}:80"
     volumes:
       - media_data:/vol/media:ro
       - static_data:/vol/static:ro
