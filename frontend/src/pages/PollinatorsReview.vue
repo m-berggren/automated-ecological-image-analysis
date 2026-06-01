@@ -247,8 +247,10 @@
               <span>Label</span>
               <InfoPopover>
                 Your decision for the selected crop (or the whole bulk selection). Pick a class to
-                confirm/correct it, or Background to reject. Keyboard: 1-4 for classes, x to reject,
-                u for unsure, ⏎ for the suggested class.
+                confirm/correct it, or Background to reject. Keyboard: 1 Fly, 2 Bumblebee,
+                3 Butterfly, 4 Other; x to reject, u for unsure, ⏎ for the suggested class. In the
+                image-first layout, d rejects every still-unreviewed crop in the current image as
+                background (deletes nothing, undo with Ctrl+Z).
               </InfoPopover>
               <span
                 v-if="bulkMode"
@@ -745,8 +747,10 @@
                   Label
                   <InfoPopover>
                     Your decision for the selected crop (or the whole bulk selection). Pick a class
-                    to confirm/correct it, or Background to reject. Keyboard: 1-4 for classes, x to
-                    reject, u for unsure, ⏎ for the suggested class.
+                    to confirm/correct it, or Background to reject. Keyboard: 1 Fly, 2 Bumblebee,
+                    3 Butterfly, 4 Other; x to reject, u for unsure, ⏎ for the suggested class. In
+                    the image-first layout, d rejects every still-unreviewed crop in the current
+                    image as background (deletes nothing, undo with Ctrl+Z).
                   </InfoPopover>
                   <span
                     v-if="bulkMode"
@@ -2664,9 +2668,13 @@ function onKeydown(e: KeyboardEvent) {
       navigate(-1, e.shiftKey)
       e.preventDefault()
       break
+    case 'd':
+    case 'D':
     case 'Delete':
       // Image-first only: reject the active image's unreviewed crops,
-      // same as the rail's trash button. Undoable via Ctrl+Z.
+      // same as the rail's trash button. Undoable via Ctrl+Z. Despite the
+      // "delete" name nothing is removed: every still-unreviewed crop in
+      // the image is relabelled as background.
       if (settings.reviewLayout === 'image-first' && selected.value) {
         onDeleteImage(selected.value.source_image_filename)
         e.preventDefault()
