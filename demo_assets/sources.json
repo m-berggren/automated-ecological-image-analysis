@@ -1,0 +1,41 @@
+{
+  "bundle_url": "https://zenodo.org/records/20492661/files/demo_bundle.zip?download=1",
+  "bundle_md5": "f3b8bd795af9f9d169398adf7bc2ea23",
+  "weights": [
+    {
+      "dest": "models/seeds/1/weights.pt",
+      "url": "https://zenodo.org/records/20492661/files/seed-yolo-phyca.pt?download=1",
+      "md5": "0056394fe0436f4775973276f98217c7"
+    },
+    {
+      "dest": "models/seeds/2/weights.pt",
+      "url": "https://zenodo.org/records/20492661/files/seed-yolo-cat.pt?download=1",
+      "md5": "982ef986860e65616642bc1d937380c3"
+    },
+    {
+      "dest": "models/seeds/3/weights.pt",
+      "url": "https://zenodo.org/records/20492661/files/seed-yolo-peh.pt?download=1",
+      "md5": "da8cc08bfd6a08d1d9227ec452c08203"
+    },
+    {
+      "dest": "models/seeds/4/weights.pt",
+      "url": "https://zenodo.org/records/20492661/files/seed-yolo-vau.pt?download=1",
+      "md5": "a614202ab8853e50ad318a57436bb14e"
+    },
+    {
+      "dest": "models/pollinators/5/weights.pth",
+      "url": "https://zenodo.org/records/20492661/files/pollinator-binary-classifier.pth?download=1",
+      "md5": "006a139c462f21cc226fee6d46c40c68"
+    },
+    {
+      "dest": "models/pollinators/6/weights.pth",
+      "url": "https://zenodo.org/records/20492661/files/pollinator-group-classifier.pth?download=1",
+      "md5": "7e682384fc462aec2a02f5e26d523997"
+    },
+    {
+      "dest": "models/pollinators/7/weights.pt",
+      "url": "https://zenodo.org/records/20492661/files/pollinator-yolo.pt?download=1",
+      "md5": "e5780659bf444faeb4f903037684dd61"
+    }
+  ]
+}

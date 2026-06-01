@@ -13,6 +13,13 @@ python manage.py migrate --noinput
 echo '==> Collecting static files'
 python manage.py collectstatic --noinput
 
+# Opt-in: populate a fresh DB with the real demo dataset. Idempotent, so it is
+# safe to leave on; it no-ops once the demo runs exist.
+if [ "${IMPORT_DEMO:-false}" = 'true' ]; then
+    echo '==> Importing demo data'
+    python manage.py import_demo || echo 'import_demo skipped (bundle missing?); continuing'
+fi
+
 echo '==> Starting gunicorn'
 exec gunicorn config.wsgi:application \
     --bind 0.0.0.0:8000 \

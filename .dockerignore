@@ -16,6 +16,9 @@ media_bruno/
 staticfiles/
 static/vue/
 
+# Demo bundle: large, downloaded/mounted at runtime rather than baked in
+demo_assets/*.zip
+
 # Frontend build artifacts and deps (built in the frontend image)
 frontend/node_modules/
 frontend/dist/

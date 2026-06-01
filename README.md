@@ -145,6 +145,16 @@ Create an admin user once the stack is up:
 docker compose exec backend python manage.py createsuperuser
 ```
 
+### Demo data (optional)
+
+To start with real, browsable data instead of an empty app, set `IMPORT_DEMO=true`
+in `.env`. On first boot the entrypoint downloads the demo bundle and model
+weights from the URLs in [demo_assets/sources.json](demo_assets/README.md) (or
+uses a local `demo_assets/demo_bundle.zip` if mounted), idempotently. If no
+superuser exists, a default `admin` / `admin123` is created (override via the
+`DJANGO_SUPERUSER_*` env vars; change it for any non-local deployment). Locally,
+without Docker: `uv run python manage.py import_demo`.
+
 Notes:
 
 - torch / torchvision are pinned to the **CPU** wheels in `pyproject.toml`

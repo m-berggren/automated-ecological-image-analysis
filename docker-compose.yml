@@ -24,6 +24,10 @@ services:
       - static_data:/app/staticfiles
       - model_cache:/app/.cache
       - data_store:/app/data
+      # Demo assets (read-only): sources.json + an optional local bundle. With
+      # IMPORT_DEMO=true the entrypoint downloads from sources.json if no bundle
+      # is present here (see demo_assets/README.md).
+      - ./demo_assets:/app/demo_assets:ro
     depends_on:
       db:
         condition: service_healthy
