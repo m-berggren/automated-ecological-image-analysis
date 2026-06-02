@@ -258,24 +258,6 @@
               class="w-full px-2 py-1.5 rounded border border-border bg-background text-sm font-mono"
             />
           </label>
-          <label class="space-y-1">
-            <span class="flex items-center gap-1.5 text-xs text-muted-foreground">
-              <span>Sunny shutter threshold</span>
-              <InfoPopover>
-                Shutter-speed denominator above which an EXIF frame is tagged "sunny" rather than
-                "cloudy". Only affects the per-image weather label in exports; detection itself
-                doesn't use it.
-              </InfoPopover>
-            </span>
-            <input
-              v-model.number="config.preprocessing.sunny_shutter_threshold"
-              type="number"
-              min="50"
-              max="500"
-              step="10"
-              class="w-full px-2 py-1.5 rounded border border-border bg-background text-sm font-mono"
-            />
-          </label>
         </div>
         <div class="flex flex-wrap items-center gap-x-6 gap-y-2 pt-1 border-t border-border">
           <label class="flex items-center gap-2 text-sm">
@@ -471,7 +453,6 @@ interface PipelineConfig {
     background_sample_size: number
     min_contour_area: number
     max_contour_area: number
-    sunny_shutter_threshold: number
     skip_flash: boolean
     skip_foggy: boolean
     enable_large_motion: boolean
@@ -497,7 +478,6 @@ const config = ref<PipelineConfig>({
     background_sample_size: 100,
     min_contour_area: 400,
     max_contour_area: 35000,
-    sunny_shutter_threshold: 150,
     skip_flash: true,
     skip_foggy: true,
     enable_large_motion: true,

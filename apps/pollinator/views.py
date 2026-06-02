@@ -35,6 +35,7 @@ from apps.analysis.serializers import (
 )
 from apps.datasets.models import Module
 
+from .exif import camera_id, shutter_speed_label
 from .serializers import (
     PollinatorDetectionSerializer,
     PollinatorTrainingCreateSerializer,
@@ -61,9 +62,9 @@ _POLLINATOR_DETECTION_QS = Detection.objects.filter(
 _CSV_FIELDS = [
     'session',
     'image_name',
-    'camera_name',
+    'camera_id',
     'datetime',
-    'weather',
+    'shutter_speed',
     'fly_count',
     'bumblebee_count',
     'butterfly_moth_count',
@@ -83,13 +84,6 @@ _CLASS_TO_LAB = {
 _COUNT_BUCKETS = ('fly', 'bumblebee', 'butterfly_moth', 'other')
 
 
-def _camera_name(image) -> str:
-    exif = image.exif or {}
-    make = (exif.get('Make') or '').strip()
-    model = (exif.get('Model') or '').strip()
-    return f'{make} {model}'.strip()
-
-
 class _Echo:
     """File-like that returns whatever is written. Used by csv.writer to
     produce one CSV row per StreamingHttpResponse chunk."""
@@ -102,9 +96,9 @@ def _build_image_row(image, counts: dict[str, int], session: str) -> dict:
     return {
         'session': session,
         'image_name': Path(image.file.name).name if image.file else '',
-        'camera_name': _camera_name(image),
+        'camera_id': camera_id(image.exif or {}),
         'datetime': image.captured_at.isoformat() if image.captured_at else '',
-        'weather': image.weather or '',
+        'shutter_speed': shutter_speed_label(image.exif or {}),
         'fly_count': counts.get('fly', 0),
         'bumblebee_count': counts.get('bumblebee', 0),
         'butterfly_moth_count': counts.get('butterfly_moth', 0),
@@ -205,9 +199,9 @@ class PollinatorRunExportCSVView(APIView):
             # Image Specific
             'session',
             'image_name',
-            'camera_name',
+            'camera_id',
             'datetime',
-            'weather',
+            'shutter_speed',
             # Detection specific
             'detection_id',
             'yolo_confidence',
@@ -239,9 +233,9 @@ class PollinatorRunExportCSVView(APIView):
                         # image
                         session,
                         Path(img.file.name).name if img and img.file else '',
-                        _camera_name(img) if img else '',
+                        camera_id(img.exif or {}) if img else '',
                         img.captured_at.isoformat() if img and img.captured_at else '',
-                        img.weather or '' if img else '',
+                        shutter_speed_label(img.exif or {}) if img else '',
                         # detection
                         d.id,
                         pd.yolo_confidence if pd else None,

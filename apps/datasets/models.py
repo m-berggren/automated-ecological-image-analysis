@@ -12,12 +12,6 @@ class ImagePurpose(models.TextChoices):
     INFERENCE = 'inference', 'Inference'
 
 
-class Weather(models.TextChoices):
-    SUNNY = 'sunny', 'Sunny'
-    CLOUDY = 'cloudy', 'Cloudy'
-    UNKNOWN = 'unknown', 'Unknown'
-
-
 class ExclusionReason(models.TextChoices):
     """Only the values emitted by apps/pollinator/exif._determine_exclusion
     live here. Add new entries if/when the EXIF gate learns to detect more
@@ -112,11 +106,6 @@ class ImageAsset(models.Model):
     flash_fired = models.BooleanField(null=True, blank=True)
     exif = models.JSONField(default=dict, blank=True)
 
-    weather = models.CharField(
-        max_length=20,
-        choices=Weather.choices,
-        default=Weather.UNKNOWN,
-    )
     notes = models.TextField(blank=True)
 
     excluded = models.BooleanField(default=False)

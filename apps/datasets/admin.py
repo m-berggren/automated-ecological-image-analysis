@@ -11,10 +11,9 @@ class ImageAssetAdmin(admin.ModelAdmin):
         'purpose',
         'file',
         'captured_at',
-        'weather',
         'excluded',
         'uploaded_at',
     )
-    list_filter = ('module', 'purpose', 'weather', 'excluded')
+    list_filter = ('module', 'purpose', 'excluded')
     search_fields = ('file', 'notes')
     readonly_fields = ('uploaded_at',)

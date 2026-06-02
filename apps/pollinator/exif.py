@@ -1,9 +1,8 @@
 """Pollinator camera-trap EXIF extraction and image-quality heuristics.
 
-Used at upload time to derive captured_at, weather (sunny/cloudy via the
-Wingscapes shutter-speed heuristic), Laplacian variance for fog detection,
-and auto-exclusion of flash/foggy images. Specific to the camera-trap
-field-research workflow; other modules should not call into this.
+Used at upload time to derive captured_at, shutter speed, Laplacian variance
+for fog detection, and auto-exclusion of flash/foggy images. Specific to the
+camera-trap field-research workflow; other modules should not call into this.
 """
 
 from __future__ import annotations
@@ -34,7 +33,7 @@ def _exif_to_dict(img: Image.Image) -> dict[str, Any]:
     # Photographic tags (ExposureTime, ShutterSpeedValue, ISO, FNumber,
     # DateTimeOriginal, ...) live in the ExifIFD sub-block, not the top-
     # level dict. Merge them in so callers see one flat namespace. Without
-    # this, weather/shutter_speed extraction silently fall through to
+    # this, shutter_speed extraction silently falls through to
     # 'unknown' on cameras (e.g. Wingscapes TLCAM PRO) that only write
     # exposure data inside the sub-IFD.
     try:
@@ -67,6 +66,27 @@ def _shutter_denominator(exif: dict) -> int | None:
     return None
 
 
+def shutter_speed_label(exif: dict) -> str:
+    """Human-readable shutter speed as '1/N' seconds, or '' if unknown."""
+    denom = _shutter_denominator(exif)
+    return f'1/{denom}' if denom else ''
+
+
+def camera_id(exif: dict) -> str:
+    """Per-unit camera ID from the Wingscapes MakerNote.
+
+    The MakerNote is written as
+    ``<mac>:<seg>:<seg>:<CAMERA_ID>:<internal_filename>.JPG``, so the unit ID
+    (e.g. 'LA21-17') is the second-to-last colon-separated field. Returns ''
+    when the MakerNote is absent or unparseable.
+    """
+    raw = exif.get('MakerNote')
+    if not raw:
+        return ''
+    parts = str(raw).replace('\x00', '').split(':')
+    return parts[-2].strip() if len(parts) >= 2 else ''
+
+
 def _coerce(value: Any) -> Any:
     if isinstance(value, _JSON_SAFE):
         return value
@@ -94,16 +114,6 @@ def _parse_exif_datetime(s: str | None) -> datetime.datetime | None:
         return datetime.datetime.strptime(s, '%Y:%m:%d %H:%M:%S')
     except ValueError:
         return None
-
-
-def _derive_weather(exif_raw: dict, exif: dict) -> str:
-    """Camera with fixed aperture (Wingscapes TLCAM PRO f/2.8): fast shutter
-    → bright → sunny, slow shutter → dim → cloudy."""
-    threshold = getattr(settings, 'SUNNY_SHUTTER_THRESHOLD', 150)
-    denom = _shutter_denominator(exif)
-    if denom is None:
-        return 'unknown'
-    return 'sunny' if denom > threshold else 'cloudy'
 
 
 def _compute_laplacian_variance(img: Image.Image) -> float:
@@ -152,15 +162,14 @@ def _strip_nulls(value: Any) -> Any:
 
 
 def extract_image_metadata(file: Any) -> dict[str, Any]:
-    """Returns width, height, captured_at, flash_fired, exif, weather,
-    laplacian_var, shutter_speed, excluded, exclusion_reason."""
+    """Returns width, height, captured_at, flash_fired, exif, laplacian_var,
+    shutter_speed, excluded, exclusion_reason."""
     pos = file.tell() if hasattr(file, 'tell') else None
     try:
         img = Image.open(file)
         img.load()
         width, height = img.size
         exif = _exif_to_dict(img)
-        raw_exif = dict(img.getexif()) if img.getexif() else {}
         laplacian_var = _compute_laplacian_variance_cv2(img)
     finally:
         if pos is not None and hasattr(file, 'seek'):
@@ -175,10 +184,7 @@ def extract_image_metadata(file: Any) -> dict[str, Any]:
     if isinstance(flash_value, int):
         flash_fired = bool(flash_value & 1)
 
-    weather = _derive_weather(raw_exif, exif)
-
-    denom = _shutter_denominator(exif)
-    shutter_speed = f'1/{denom}' if denom else ''
+    shutter_speed = shutter_speed_label(exif)
 
     excluded, exclusion_reason = _determine_exclusion(flash_fired, laplacian_var)
 
@@ -188,7 +194,6 @@ def extract_image_metadata(file: Any) -> dict[str, Any]:
         'captured_at': captured_at,
         'flash_fired': flash_fired,
         'exif': exif,
-        'weather': weather,
         'laplacian_var': round(laplacian_var, 1) if laplacian_var is not None else None,
         'shutter_speed': shutter_speed,
         'excluded': excluded,
