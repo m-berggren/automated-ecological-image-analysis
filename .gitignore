@@ -45,6 +45,11 @@ static/vue/
 # Image uploads
 media/
 
+# Demo bundle: too large for git, delivered out-of-band (keep README + sources)
+demo_assets/*
+!demo_assets/README.md
+!demo_assets/sources.json
+
 # Environment variables
 .env
 
