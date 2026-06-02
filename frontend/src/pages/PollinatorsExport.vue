@@ -77,7 +77,26 @@
       >
         loading {{ loadProgress.loaded }}/{{ loadProgress.total }}…
       </span>
-      <div class="ml-auto flex gap-2 shrink-0 relative">
+      <div class="mx-auto flex items-center gap-1.5 text-xs text-muted-foreground shrink-0">
+        <span class="whitespace-nowrap">Merge overlap ≥</span>
+        <input
+          type="number"
+          min="0"
+          max="1"
+          step="0.05"
+          :value="dedupIou"
+          :disabled="!run"
+          class="w-20 px-2 py-1 rounded border border-border bg-background text-sm font-mono text-center disabled:opacity-50"
+          @change="onDedupIouInput(($event.target as HTMLInputElement).value)"
+        />
+        <InfoPopover>
+          Two accepted boxes on the same image are treated as the same insect (the larger one is
+          dropped from the export, shown red) when one box's center lies inside the other, or their
+          overlap (IoU) is at least this value. Lower merges more aggressively; 1 merges only
+          centered or contained pairs. Affects export counts only, not detection or review.
+        </InfoPopover>
+      </div>
+      <div class="flex gap-2 shrink-0 relative">
         <button
           ref="csvBtn"
           class="px-3 py-1.5 shrink-0 rounded-md text-sm font-medium border border-border bg-background shadow-sm hover:bg-muted disabled:opacity-50"
@@ -256,8 +275,10 @@ import PageHeader from '@/components/PageHeader.vue'
 import PollinatorsStepper from '@/components/PollinatorsStepper.vue'
 import ROIOverlay from '@/components/ROIOverlay.vue'
 import CsvExportDialog, { type CsvExportMode } from '@/components/CsvExportDialog.vue'
+import InfoPopover from '@/components/InfoPopover.vue'
 import { api } from '@/api'
 import {
+  effectiveReviewSettings,
   normalizeRoiBbox,
   type BBox,
   type Detection,
@@ -314,6 +335,27 @@ const { run, detections, loading, loadError, loadProgress, load } = useRunDetect
 const headerTitle = computed(() =>
   run.value ? `Export · ${run.value.name || `Run #${run.value.id}`}` : 'Export',
 )
+
+// Per-run duplicate-merge threshold. Changing it persists to review_settings,
+// then re-runs the exclusion recompute and reloads so the red overlaps update
+// live (the recompute is bidirectional, so raising it re-includes boxes).
+const dedupIou = computed(() => effectiveReviewSettings(run.value).dedupIou)
+
+async function onDedupIouInput(raw: string) {
+  const v = Number.parseFloat(raw)
+  if (Number.isNaN(v)) return
+  const clamped = Math.max(0, Math.min(1, v))
+  const r = run.value
+  if (!r) return
+  r.review_settings = { ...(r.review_settings ?? {}), dedup_iou_threshold: clamped }
+  await api(`/api/analysis/runs/${r.id}/review-settings/`, {
+    method: 'POST',
+    body: JSON.stringify({ dedup_iou_threshold: clamped }),
+  })
+  await api(`/api/analysis/runs/${runId}/recompute-exclusions/`, { method: 'POST' })
+  detections.value = []
+  await load()
+}
 
 function classLabel(cls: PollinatorClass | null): string {
   if (!cls) return '—'

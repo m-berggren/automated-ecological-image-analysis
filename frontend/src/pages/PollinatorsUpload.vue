@@ -262,6 +262,25 @@
               class="w-full px-2 py-1.5 rounded border border-border bg-background text-sm font-mono"
             />
           </label>
+          <label class="space-y-1">
+            <span class="flex items-center gap-1.5 text-xs text-muted-foreground">
+              <span>Large-motion tile overlap</span>
+              <InfoPopover>
+                Motion branch only, and only when "Detect large motion" is on. When a big motion
+                region is split into overlapping tiles, two tiles whose IoU exceeds this are treated
+                as the same detection and the lower-scoring one is dropped (NMS). Lower = fewer
+                overlapping duplicate boxes; higher = keeps more near-overlapping tiles.
+              </InfoPopover>
+            </span>
+            <input
+              v-model.number="config.preprocessing.large_motion_tile_nms_iou"
+              type="number"
+              min="0"
+              max="1"
+              step="0.05"
+              class="w-full px-2 py-1.5 rounded border border-border bg-background text-sm font-mono"
+            />
+          </label>
         </div>
         <div class="flex flex-wrap items-center gap-x-6 gap-y-2 pt-1 border-t border-border">
           <label class="flex items-center gap-2 text-sm">
@@ -460,6 +479,7 @@ interface PipelineConfig {
     skip_flash: boolean
     skip_foggy: boolean
     enable_large_motion: boolean
+    large_motion_tile_nms_iou: number
   }
 }
 
@@ -485,6 +505,7 @@ const config = ref<PipelineConfig>({
     skip_flash: true,
     skip_foggy: true,
     enable_large_motion: true,
+    large_motion_tile_nms_iou: 0.35,
   },
 })
 

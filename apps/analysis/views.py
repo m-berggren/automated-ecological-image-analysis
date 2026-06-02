@@ -941,9 +941,10 @@ class InferenceRunReviewSettingsView(APIView):
 
     Merges a partial dict into the run's review_settings JSON. Accepts any
     subset of: auto_select (bool), yolo_threshold (0..1), group_threshold
-    (0..1). These are per-run reviewer/export preferences; when a key is
-    absent the frontend resolves the default from the run's config
-    confidence values, so review sliders start where the run was processed.
+    (0..1), dedup_iou_threshold (0..1). These are per-run reviewer/export
+    preferences; when a key is absent the frontend resolves the default from
+    the run's config confidence values, so review sliders start where the run
+    was processed.
     """
 
     def post(self, request: Request, pk: int) -> Response:
@@ -964,7 +965,7 @@ class InferenceRunReviewSettingsView(APIView):
                     status=status.HTTP_400_BAD_REQUEST,
                 )
             merged['auto_select'] = v
-        for key in ('yolo_threshold', 'group_threshold'):
+        for key in ('yolo_threshold', 'group_threshold', 'dedup_iou_threshold'):
             if key in data:
                 v = data[key]
                 if isinstance(v, bool) or not isinstance(v, (int, float)):
