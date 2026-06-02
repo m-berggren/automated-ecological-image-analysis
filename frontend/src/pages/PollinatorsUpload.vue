@@ -70,7 +70,7 @@
             <input
               v-model.number="config.yolo.confidence"
               type="number"
-              min="0"
+              min="0.05"
               max="1"
               step="0.05"
               class="w-full px-2 py-1.5 rounded border border-border bg-background text-sm font-mono text-center"
@@ -143,7 +143,7 @@
             <input
               :value="twoStepConfidence"
               type="number"
-              min="0"
+              min="0.05"
               max="1"
               step="0.05"
               class="w-full px-2 py-1.5 rounded border border-border bg-background text-sm font-mono text-center"
@@ -498,7 +498,7 @@ const twoStepConfidence = computed(() => config.value.binary_classifier.confiden
 function onTwoStepConfidenceInput(raw: string) {
   const v = Number.parseFloat(raw)
   if (Number.isNaN(v)) return
-  const clamped = Math.max(0, Math.min(1, v))
+  const clamped = Math.max(0.05, Math.min(1, v))
   config.value.binary_classifier.confidence = clamped
   config.value.group_classifier.confidence = clamped
 }
