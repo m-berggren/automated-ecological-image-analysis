@@ -204,7 +204,7 @@ class BaseDetectionReadSerializer(serializers.ModelSerializer):
     source_image_filename = serializers.SerializerMethodField()
     source_image_url = serializers.SerializerMethodField()
     source_image_id = serializers.IntegerField(source='image_id', read_only=True)
-    exclude_from_training = serializers.SerializerMethodField()
+    include_in_training = serializers.SerializerMethodField()
     crop_url = serializers.SerializerMethodField()
 
     class Meta:
@@ -221,7 +221,7 @@ class BaseDetectionReadSerializer(serializers.ModelSerializer):
             'source_image_filename',
             'source_image_url',
             'source_image_id',
-            'exclude_from_training',
+            'include_in_training',
             'crop_url',
         )
 
@@ -234,8 +234,8 @@ class BaseDetectionReadSerializer(serializers.ModelSerializer):
             return 'unsure'
         return 'unreviewed'
 
-    def get_exclude_from_training(self, obj: Detection) -> bool:
-        return bool(obj.image and obj.image.exclude_from_training)
+    def get_include_in_training(self, obj: Detection) -> bool:
+        return bool(obj.image and obj.image.include_in_training)
 
     def get_source_image_filename(self, obj: Detection) -> str:
         if obj.image and obj.image.file:

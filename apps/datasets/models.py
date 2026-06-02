@@ -117,12 +117,11 @@ class ImageAsset(models.Model):
 
     metadata = models.JSONField(default=dict, blank=True)
 
-    # Reviewer flag: exclude this image from YOLO detector training. Set when
-    # an image has more real insects than were detected/annotated (e.g. 5
-    # flies, 1 box), which would teach the detector that the un-boxed insects
-    # are background. Distinct from `excluded` (general dataset exclusion);
-    # the training set builder should skip images where this is True.
-    exclude_from_training = models.BooleanField(default=False)
+    # Reviewer flag: opt this image into YOLO detector training. Off by
+    # default — the detector trains only on images the reviewer explicitly
+    # includes. Distinct from `excluded` (general dataset exclusion); the
+    # training-set builder includes only images where this is True.
+    include_in_training = models.BooleanField(default=False)
 
     class Meta:
         indexes = [

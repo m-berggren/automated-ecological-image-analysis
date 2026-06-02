@@ -71,7 +71,7 @@
       @update:selected-id="selectedId = $event"
       @drag-select="onImageFirstDragSelect"
       @delete-image="onDeleteImage"
-      @toggle-training-exclude="onToggleTrainingExclude"
+      @toggle-training-include="onToggleTrainingInclude"
     >
       <template #below>
         <!-- Four side-by-side containers under the image. Fixed height so
@@ -1536,18 +1536,18 @@ function onDeleteImage(filename: string) {
   void submitBulk(ids, 'rejected', null)
 }
 
-// Toggle the per-image "exclude from YOLO training" flag. Optimistically
+// Toggle the per-image "include in YOLO training" flag. Optimistically
 // flips it on every detection of that image (they all carry the same
 // per-image value), then persists against the image id.
-function onToggleTrainingExclude(filename: string) {
+function onToggleTrainingInclude(filename: string) {
   const imgDets = detections.value.filter((d) => d.source_image_filename === filename)
   const imageId = imgDets[0]?.source_image_id
   if (imageId == null) return
-  const next = !imgDets[0].exclude_from_training
-  for (const d of imgDets) d.exclude_from_training = next
-  void api(`/api/analysis/images/${imageId}/exclude-training/`, {
+  const next = !imgDets[0].include_in_training
+  for (const d of imgDets) d.include_in_training = next
+  void api(`/api/analysis/images/${imageId}/include-training/`, {
     method: 'POST',
-    body: JSON.stringify({ excluded: next }),
+    body: JSON.stringify({ included: next }),
   })
 }
 
@@ -2675,6 +2675,12 @@ function onKeydown(e: KeyboardEvent) {
         onDeleteImage(selected.value.source_image_filename)
         e.preventDefault()
       }
+      break
+    case 'y':
+    case 'Y':
+      // Toggle "Include in YOLO training" for the current image.
+      onToggleTrainingInclude(selected.value.source_image_filename)
+      e.preventDefault()
       break
   }
 }

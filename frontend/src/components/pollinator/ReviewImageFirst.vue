@@ -67,21 +67,21 @@
               </button>
               <label
                 class="inline-flex items-center gap-1.5 text-xs cursor-pointer"
-                :class="activeImageExcludeTraining ? 'text-red-600' : 'text-muted-foreground'"
+                :class="activeImageIncludeTraining ? 'text-primary' : 'text-muted-foreground'"
               >
                 <input
                   type="checkbox"
-                  class="w-3.5 h-3.5 accent-red-600"
-                  :checked="activeImageExcludeTraining"
-                  @change="emit('toggle-training-exclude', activeImage.filename)"
+                  class="w-3.5 h-3.5 accent-primary"
+                  :checked="activeImageIncludeTraining"
+                  @change="emit('toggle-training-include', activeImage.filename)"
                 />
-                <span>Exclude from YOLO training</span>
+                <span>Include in YOLO training</span>
               </label>
               <InfoPopover>
-                Mark this image as unfit for YOLO detector training. Use it when the photo has more
-                real insects than annotated boxes (e.g. 5 flies, 1 box) — training on it would teach
-                the detector that the un-boxed insects are background. The training-set builder
-                skips flagged images. Does not affect review or export.
+                Add this image to the YOLO detector training set (shortcut: y). Off by default — the
+                detector trains only on images you include. Accepted boxes become labels; unlabeled
+                regions count as background, so include images whose insects are fully boxed. Does
+                not affect review or export.
               </InfoPopover>
             </div>
           </header>
@@ -324,9 +324,9 @@ const emit = defineEmits<{
   // Fires when the user clicks a rail tile's delete button. Carries the
   // image filename; the parent rejects that image's unreviewed crops.
   (e: 'delete-image', filename: string): void
-  // Fires when the active image's "exclude from YOLO training" toggle
+  // Fires when the active image's "include in YOLO training" toggle
   // flips. Carries the image filename; the parent persists + propagates.
-  (e: 'toggle-training-exclude', filename: string): void
+  (e: 'toggle-training-include', filename: string): void
 }>()
 
 interface ImageGroup {
@@ -404,8 +404,8 @@ const activeImage = computed<ImageGroup | null>(() => {
 
 // All detections of an image carry the same per-image flag; read it off
 // the first one.
-const activeImageExcludeTraining = computed(
-  () => activeImage.value?.detections[0]?.exclude_from_training ?? false,
+const activeImageIncludeTraining = computed(
+  () => activeImage.value?.detections[0]?.include_in_training ?? false,
 )
 
 function selectImage(img: ImageGroup) {

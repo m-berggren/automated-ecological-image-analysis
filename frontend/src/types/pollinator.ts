@@ -39,8 +39,8 @@ export interface Detection {
   bbox: BBox | null
   excluded_from_export: boolean
   // Per-image flag (same value on every detection sharing an image):
-  // when true the image is excluded from YOLO detector training.
-  exclude_from_training: boolean
+  // when true the image is included in YOLO detector training.
+  include_in_training: boolean
 }
 
 // Per-run reviewer/export preferences. Any missing key falls back to the
