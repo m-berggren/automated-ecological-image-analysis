@@ -329,6 +329,19 @@
           <div class="grid grid-cols-2 lg:grid-cols-4 gap-3">
             <label
               class="text-xs text-muted-foreground space-y-1"
+              title="Number of full passes over the training set. Higher = more time, more risk of overfitting. The backend may early-stop sooner if val metrics plateau."
+            >
+              <span>Epochs</span>
+              <input
+                v-model.number="settings.epochs"
+                type="number"
+                min="1"
+                max="200"
+                class="w-full px-2 py-1 rounded border border-border bg-background text-sm font-mono text-foreground"
+              />
+            </label>
+            <label
+              class="text-xs text-muted-foreground space-y-1"
               title="Percentage of the dataset used to train the model. The rest goes to val (early-stop signal) and test (held-out evaluation)."
             >
               <span>Train %</span>
@@ -363,19 +376,6 @@
                 type="number"
                 min="0"
                 max="40"
-                class="w-full px-2 py-1 rounded border border-border bg-background text-sm font-mono text-foreground"
-              />
-            </label>
-            <label
-              class="text-xs text-muted-foreground space-y-1"
-              title="Number of full passes over the training set. Higher = more time, more risk of overfitting. The backend may early-stop sooner if val metrics plateau."
-            >
-              <span>Epochs</span>
-              <input
-                v-model.number="settings.epochs"
-                type="number"
-                min="1"
-                max="200"
                 class="w-full px-2 py-1 rounded border border-border bg-background text-sm font-mono text-foreground"
               />
             </label>
