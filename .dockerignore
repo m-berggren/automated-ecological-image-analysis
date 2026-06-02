@@ -1,0 +1,42 @@
+# Version control / CI
+.git
+.github
+
+# Python
+__pycache__/
+*.py[cod]
+.venv/
+.ruff_cache/
+.pytest_cache/
+
+# Local databases and generated media (live in named volumes instead)
+*.sqlite3
+media/
+media_bruno/
+staticfiles/
+static/vue/
+
+# Frontend build artifacts and deps (built in the frontend image)
+frontend/node_modules/
+frontend/dist/
+
+# ML run outputs and caches
+runs/
+sahi_results/
+prediction_images/
+predictions/
+ml_pipelines/debug_outputs/
+
+# Seed training piles (regenerated at runtime; mirror .gitignore)
+**/train/
+**/val/
+**/train_sliced/
+**/val_sliced/
+*.pt
+*.pth
+
+# Editor / OS / env
+.vscode/
+.idea/
+.DS_Store
+.env

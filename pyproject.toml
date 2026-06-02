@@ -26,6 +26,18 @@ dependencies = [
     "seaborn>=0.13.2",
 ]
 
+# Pin torch/torchvision to the CPU wheels so the lock, local `uv sync`, and the
+# container image all resolve the same (small, GPU-free) builds. Swap the index
+# url to a CUDA channel (e.g. .../whl/cu124) if you need local GPU acceleration.
+[[tool.uv.index]]
+name = 'pytorch-cpu'
+url = 'https://download.pytorch.org/whl/cpu'
+explicit = true
+
+[tool.uv.sources]
+torch = [{ index = 'pytorch-cpu' }]
+torchvision = [{ index = 'pytorch-cpu' }]
+
 [tool.ruff]
 line-length = 88
 extend-exclude = ["*.ipynb", "**/migrations/*"]
@@ -40,6 +52,10 @@ select = ["ANN001", "ANN201"] # ANN001: function args, ANN201: return types
 dev = [
     "djlint>=1.36.4",
     "ruff>=0.15.7",
+]
+prod = [
+    "gunicorn>=23.0.0",
+    "psycopg[binary]>=3.2.0",
 ]
 
 [tool.djlint]

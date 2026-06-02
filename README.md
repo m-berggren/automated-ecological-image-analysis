@@ -111,6 +111,49 @@ cd frontend && npm run dev
 
 Open http://localhost:8000 to view the application. The Vue dev server on port 5173 is only used for isolated frontend development with hot reload.
 
+## Docker (production-style stack)
+
+A three-service Compose stack: Postgres, the Django API on gunicorn, and nginx
+serving the built Vue SPA while reverse-proxying `/api`, `/admin`, `/media`, and
+`/static` to the backend. Single origin, so no CORS. Uses `config.settings.production`.
+
+```bash
+cp .env.example .env          # then edit SECRET_KEY, SQL_PASSWORD, etc.
+docker compose up --build     # open http://localhost:8080
+```
+
+The backend container runs migrations and `collectstatic` on startup. State
+persists in named volumes:
+
+| Volume | Mount | Holds |
+|--------|-------|-------|
+| `postgres_data` | db `/var/lib/postgresql/data` | database |
+| `media_data` | backend `/app/media` (nginx ro) | pollinator/analysis runs, crops, model files, training output |
+| `data_store` | backend `/app/data` | seed module datasets, labels, weights |
+| `static_data` | backend `/app/staticfiles` (nginx ro) | collected admin/DRF static |
+| `model_cache` | backend `/app/.cache` | torch / EasyOCR / Ultralytics / cloud-model weights |
+
+**Storage grows unbounded.** A pollinator run of 10k images is roughly 16 GB of
+source images plus ~6 GB of crops, stored once under
+`media/runs/<module>/<run_id>/`. Nothing caps or auto-prunes this; the only
+reclaim is deleting a run (`DELETE /api/analysis/runs/<id>/`, which removes its
+images and crops). Size `media_data`'s host disk accordingly and prune old runs.
+
+Create an admin user once the stack is up:
+
+```bash
+docker compose exec backend python manage.py createsuperuser
+```
+
+Notes:
+
+- torch / torchvision are pinned to the **CPU** wheels in `pyproject.toml`
+  (`[tool.uv.sources]`), which keeps the image small and GPU-free. This also
+  applies to a local `uv sync`. For local GPU work, point the `pytorch-cpu`
+  index at a CUDA channel (e.g. `.../whl/cu124`) and re-lock.
+- The container builds a standalone SPA (`BUILD_TARGET=standalone`); the default
+  `npm run build` still emits the `static/vue` manifest for Django integration.
+
 ## Formatting & Linting
 
 ```bash
