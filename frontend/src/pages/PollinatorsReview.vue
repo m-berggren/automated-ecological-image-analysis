@@ -1004,6 +1004,8 @@ import {
   type ReviewSettings,
 } from '@/types/pollinator'
 import { useRunDetections } from '@/composables/useRunDetections'
+import { useReviewKeyboard } from '@/composables/useReviewKeyboard'
+import { useImageZoom } from '@/composables/useImageZoom'
 import { usePollinatorSettingsStore } from '@/stores/pollinatorSettings'
 import ReviewImageFirst from '@/components/pollinator/ReviewImageFirst.vue'
 import AnnotationColorPickers from '@/components/pollinator/AnnotationColorPickers.vue'
@@ -1769,83 +1771,19 @@ const roiBbox = computed<[number, number, number, number] | null>(() =>
   normalizeRoiBbox(run.value?.config?.preprocessing?.roi_bbox),
 )
 
-// Fullscreen zoom modal. State lives in viewBox units; the SVG <g> is
-// translated then scaled, so the wheel-around-cursor math has to convert
-// the cursor's client coords into viewBox coords before applying.
-const zoomDialog = ref<HTMLDialogElement | null>(null)
-const zoom = ref({ scale: 1, tx: 0, ty: 0 })
-const panning = ref(false)
-const panStart = ref({ x: 0, y: 0, tx: 0, ty: 0 })
-
-function openZoom() {
-  if (!selected.value?.source_image_url || !sourceImage.value.w) return
-  zoom.value = { scale: 1, tx: 0, ty: 0 }
-  zoomDialog.value?.showModal()
-}
-
-function closeZoom() {
-  zoomDialog.value?.close()
-}
-
-function onZoomClose() {
-  panning.value = false
-}
-
-// Zoom toward the cursor: keep the source-image point under the cursor
-// fixed while the scale changes. Done by adjusting the translate so the
-// post-scale cursor location matches the pre-scale one.
-function onZoomWheel(e: WheelEvent) {
-  const target = e.currentTarget as HTMLElement
-  const rect = target.getBoundingClientRect()
-  // Cursor in viewBox coords: the SVG fills the container and uses
-  // preserveAspectRatio=meet, so map via the longest fitted side.
-  const sx = sourceImage.value.w
-  const sy = sourceImage.value.h
-  const fit = Math.min(rect.width / sx, rect.height / sy)
-  const offX = (rect.width - sx * fit) / 2
-  const offY = (rect.height - sy * fit) / 2
-  const vx = (e.clientX - rect.left - offX) / fit
-  const vy = (e.clientY - rect.top - offY) / fit
-
-  const factor = e.deltaY < 0 ? 1.2 : 1 / 1.2
-  const next = Math.max(1, Math.min(20, zoom.value.scale * factor))
-  if (next === zoom.value.scale) return
-  const k = next / zoom.value.scale
-  zoom.value = {
-    scale: next,
-    tx: vx - k * (vx - zoom.value.tx),
-    ty: vy - k * (vy - zoom.value.ty),
-  }
-}
-
-function onPanStart(e: MouseEvent) {
-  if (e.button !== 0) return
-  panning.value = true
-  panStart.value = {
-    x: e.clientX,
-    y: e.clientY,
-    tx: zoom.value.tx,
-    ty: zoom.value.ty,
-  }
-}
-
-function onPanMove(e: MouseEvent) {
-  if (!panning.value) return
-  const target = e.currentTarget as HTMLElement
-  const rect = target.getBoundingClientRect()
-  const sx = sourceImage.value.w
-  const sy = sourceImage.value.h
-  const fit = Math.min(rect.width / sx, rect.height / sy)
-  zoom.value = {
-    ...zoom.value,
-    tx: panStart.value.tx + (e.clientX - panStart.value.x) / fit,
-    ty: panStart.value.ty + (e.clientY - panStart.value.y) / fit,
-  }
-}
-
-function onPanEnd() {
-  panning.value = false
-}
+// Fullscreen zoom/pan over the selected detection's source image.
+const {
+  zoomDialog,
+  zoom,
+  panning,
+  openZoom,
+  closeZoom,
+  onZoomClose,
+  onZoomWheel,
+  onPanStart,
+  onPanMove,
+  onPanEnd,
+} = useImageZoom(sourceImage)
 
 // Width of the left (crops) section in pixels at lg+. Persisted so each
 // reviewer's choice survives reloads. The bounds keep the layout sane —
@@ -2567,127 +2505,26 @@ function onTileClick(d: Detection, e: MouseEvent | KeyboardEvent) {
   stableBulkIds.value = new Set(bulkIds.value)
 }
 
-function onKeydown(e: KeyboardEvent) {
-  // Inputs keep their own typing + native undo.
-  if (
-    e.target instanceof HTMLElement &&
-    ['INPUT', 'SELECT', 'TEXTAREA'].includes(e.target.tagName)
-  ) {
-    return
-  }
-  // Ctrl/Cmd+Z reverts the last classify gesture. Handled before the
-  // `selected` guard because a keyboard action auto-advances off the
-  // crop it changed, so nothing may be selected when the user undoes.
-  if ((e.ctrlKey || e.metaKey) && !e.shiftKey && (e.key === 'z' || e.key === 'Z')) {
-    e.preventDefault()
-    void undoLast()
-    return
-  }
-  if (!selected.value) return
-  if (zoomDialog.value?.open) return
-  // Escape clears any bulk selection without losing the currently-focused tile.
-  if (e.key === 'Escape' && bulkIds.value.size > 0) {
-    clearBulk()
-    e.preventDefault()
-    return
-  }
-  // Bulk-aware shortcuts: when one or more tiles are checkbox-selected,
-  // class keys (1-4), reject (x) and unsure (u) apply to the whole bulk
-  // instead of just the focused tile. Lets the reviewer do "select 30
-  // crops, press x" without reaching for the bulk action bar.
-  const bulkMode = bulkIds.value.size > 0
-  // Keyboard actions auto-advance to the next tile so the reviewer can
-  // fly through a queue without touching the mouse. Mouse-driven actions
-  // (Label panel clicks, footer buttons) stay put — see applyAction.
-  const classKeyAction = (cls: PollinatorClass) =>
-    bulkMode ? applyToBulk('corrected', cls) : confirmAs(cls, true)
-  switch (e.key) {
-    case '1':
-      classKeyAction('fly')
-      e.preventDefault()
-      break
-    case '2':
-      classKeyAction('bumblebee')
-      e.preventDefault()
-      break
-    case '3':
-      classKeyAction('butterfly')
-      e.preventDefault()
-      break
-    case '4':
-      classKeyAction('other')
-      e.preventDefault()
-      break
-    case 'x':
-    case 'X':
-      if (bulkMode) applyToBulk('rejected', null)
-      else reject(true)
-      e.preventDefault()
-      break
-    case 'u':
-    case 'U':
-      if (bulkMode) applyToBulk('unsure', null)
-      else markUnsure(true)
-      e.preventDefault()
-      break
-    case 'Enter':
-      confirmAs(suggestedClass(selected.value), true)
-      e.preventDefault()
-      break
-    case 'ArrowDown':
-    case 'j':
-      // Image-first: up/down cycle SOURCE IMAGES, left/right cycle
-      // crops within the current image. Crop-first keeps its grid nav.
-      if (settings.reviewLayout === 'image-first') {
-        navigateImage(1)
-      } else {
-        navigate(colsPerRow.value, e.shiftKey)
-      }
-      e.preventDefault()
-      break
-    case 'ArrowUp':
-    case 'k':
-      if (settings.reviewLayout === 'image-first') {
-        navigateImage(-1)
-      } else {
-        navigate(-colsPerRow.value, e.shiftKey)
-      }
-      e.preventDefault()
-      break
-    case 'ArrowRight':
-    case 'l':
-      navigate(1, e.shiftKey)
-      e.preventDefault()
-      break
-    case 'ArrowLeft':
-    case 'h':
-      navigate(-1, e.shiftKey)
-      e.preventDefault()
-      break
-    case 'd':
-    case 'D':
-    case 'Delete':
-      // Image-first only: reject the active image's unreviewed crops,
-      // same as the rail's trash button. Undoable via Ctrl+Z. Despite the
-      // "delete" name nothing is removed: every still-unreviewed crop in
-      // the image is relabelled as background.
-      if (settings.reviewLayout === 'image-first' && selected.value) {
-        onDeleteImage(selected.value.source_image_filename)
-        e.preventDefault()
-      }
-      break
-    case 'y':
-    case 'Y':
-      // Toggle "Include in YOLO training" for the current image.
-      onToggleTrainingInclude(selected.value.source_image_filename)
-      e.preventDefault()
-      break
-  }
-}
+useReviewKeyboard({
+  getSelected: () => selected.value,
+  getBulkSize: () => bulkIds.value.size,
+  isZoomOpen: () => zoomDialog.value?.open ?? false,
+  isImageFirst: () => settings.reviewLayout === 'image-first',
+  getColsPerRow: () => colsPerRow.value,
+  undoLast,
+  clearBulk,
+  applyToBulk,
+  confirmAs,
+  reject,
+  markUnsure,
+  navigate,
+  navigateImage,
+  deleteImage: onDeleteImage,
+  toggleInclude: onToggleTrainingInclude,
+  suggestedClass,
+})
 
-onMounted(() => window.addEventListener('keydown', onKeydown))
 onUnmounted(() => {
-  window.removeEventListener('keydown', onKeydown)
   gridResizeObserver?.disconnect()
   // If the user navigates away mid-drag, the move/up listeners would leak.
   window.removeEventListener('mousemove', onPreviewDragMove)
