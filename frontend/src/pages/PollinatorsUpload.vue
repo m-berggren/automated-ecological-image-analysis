@@ -36,6 +36,8 @@
       <div class="grid grid-cols-1 md:grid-cols-[1fr_2fr] gap-6">
         <!-- YOLO column. -->
         <div class="space-y-3">
+          <p class="text-xs font-semibold text-foreground">Full-Image Detection (YOLO)</p>
+          <p class="text-xs text-muted-foreground">Scans every image directly. Works even when insects aren't moving.</p>
           <label class="space-y-1 block">
             <span class="flex items-center gap-1.5 text-xs text-muted-foreground">
               <span class="font-semibold">YOLO</span>
@@ -79,12 +81,14 @@
         <!-- 2-step Classification column: two model selects in a row,
              then a single shared Confidence input centered below. -->
         <div class="space-y-3 md:border-l md:border-border md:pl-6">
+          <p class="text-xs font-semibold text-foreground">Motion-Based Detection</p>
+          <p class="text-xs text-muted-foreground">Detects movement between frames, then runs two steps: confirm it's an insect (Step 1), then identify the type (Step 2).</p>
           <div class="grid grid-cols-2 gap-4">
             <label class="space-y-1 block">
               <span class="flex items-center gap-1.5 text-xs text-muted-foreground">
-                <span>Binary Classifier</span>
+                <span class="font-semibold">Step 1: Insect Detection</span>
                 <InfoPopover>
-                  The insect/background gate (formerly "EfficientNet"). Every motion-detected crop
+                  <strong>Binary Classifier</strong> — insect versus background (formerly "EfficientNet"). Every motion-detected crop
                   runs through this first; non-insect crops are dropped before the group classifier
                   sees them.
                 </InfoPopover>
@@ -104,9 +108,9 @@
             </label>
             <label class="space-y-1 block">
               <span class="flex items-center gap-1.5 text-xs text-muted-foreground">
-                <span>Group Classifier</span>
+                <span class="font-semibold">Step 2: Insect Classification</span>
                 <InfoPopover>
-                  Assigns insect crops to one of: bumblebee, fly, butterfly, other (formerly
+                  <strong>Group Classifier</strong> — assigns insect crops to one of: bumblebee, fly, butterfly, other (formerly
                   "InsectNet"). Runs only on crops the Binary Classifier accepted.
                 </InfoPopover>
               </span>

@@ -105,9 +105,7 @@
             >
               <span>Predictions</span>
               <InfoPopover>
-                The model calls for the focused crop: the YOLO detector and the 4-group classifier
-                (fly / bumblebee / butterfly / other), each with its confidence. These are model
-                outputs, not your decision — confirm or correct them with the Label controls.
+                The model calls for this crop: the Full-Image (YOLO) detector and the Motion-Based (4-group) classifier (fly / bumblebee / butterfly / other), each with its confidence. These are model outputs, not your decision — confirm or correct them with the Label controls.
               </InfoPopover>
             </div>
             <div
@@ -116,7 +114,7 @@
             >
               <div v-if="!bulkMode && selected" class="space-y-0.5 text-xs font-mono">
                 <div class="flex items-center gap-2">
-                  <span class="text-muted-foreground w-16 text-[10px]">YOLO</span>
+                  <span class="text-muted-foreground w-24 text-[10px] flex flex-col leading-tight">YOLO<span class="opacity-60">(Full-Image)</span></span>
                   <span class="w-10 tabular-nums">
                     {{
                       selected.yolo_confidence != null ? selected.yolo_confidence.toFixed(2) : '—'
@@ -130,7 +128,7 @@
                   }}</span>
                 </div>
                 <div class="flex items-center gap-2">
-                  <span class="text-muted-foreground w-16 text-[10px]">4-Group</span>
+                  <span class="text-muted-foreground w-24 text-[10px] flex flex-col leading-tight">4-Group<span class="opacity-60">(Motion-Based)</span></span>
                   <span class="w-10 tabular-nums">
                     {{
                       selected.insectnet_confidence != null
@@ -169,22 +167,22 @@
               </InfoPopover>
             </div>
             <div class="grid grid-cols-[auto_1fr_auto] items-center gap-x-1 gap-y-1 text-xs">
-              <label for="img-yolo-min" class="text-muted-foreground" title="YOLO detector confidence threshold"><span class="min-[1200px]:hidden">Y ≥</span><span class="hidden min-[1200px]:inline">YOLO ≥</span></label>
+              <label for="img-yolo-min" class="text-muted-foreground" title="Full-Image Detection (YOLO) confidence threshold"><span class="min-[1200px]:hidden">FI ≥</span><span class="hidden min-[1200px]:inline">Full-Image ≥</span></label>
               <input
                 id="img-yolo-min"
                 type="range"
-                min="0"
+                min="0.05"
                 max="1"
                 step="0.05"
                 v-model.number="yoloMinConf"
                 class="w-full accent-primary"
               />
               <span class="font-mono w-9 text-right">{{ yoloMinConf.toFixed(2) }}</span>
-              <label for="img-group-min" class="text-muted-foreground" title="Group classifier confidence threshold"><span class="min-[1200px]:hidden">G ≥</span><span class="hidden min-[1200px]:inline">Group ≥</span></label>
+              <label for="img-group-min" class="text-muted-foreground" title="Classifier Classification confidence threshold"><span class="min-[1200px]:hidden">Cls ≥</span><span class="hidden min-[1200px]:inline">Classification ≥</span></label>
               <input
                 id="img-group-min"
                 type="range"
-                min="0"
+                min="0.05"
                 max="1"
                 step="0.05"
                 v-model.number="groupMinConf"
@@ -375,22 +373,22 @@
              score) pass that branch's filter unaffected, so the slider
              only hides things its branch actually scored. -->
           <div class="grid grid-cols-[auto_1fr_auto] items-center gap-x-1 gap-y-1 text-xs">
-            <label for="yolo-min" class="text-muted-foreground" title="YOLO detector confidence threshold"><span class="min-[1200px]:hidden">Y ≥</span><span class="hidden min-[1200px]:inline">YOLO ≥</span></label>
+            <label for="yolo-min" class="text-muted-foreground" title="Full-Image Detection (YOLO) confidence threshold"><span class="min-[1200px]:hidden">FI ≥</span><span class="hidden min-[1200px]:inline">Full-Image ≥</span></label>
             <input
               id="yolo-min"
               type="range"
-              min="0"
+              min="0.05"
               max="1"
               step="0.05"
               v-model.number="yoloMinConf"
               class="w-full accent-primary"
             />
             <span class="font-mono w-9 text-right">{{ yoloMinConf.toFixed(2) }}</span>
-            <label for="group-min" class="text-muted-foreground" title="Group classifier confidence threshold"><span class="min-[1200px]:hidden">G ≥</span><span class="hidden min-[1200px]:inline">Group ≥</span></label>
+            <label for="group-min" class="text-muted-foreground" title="Classifier Classification confidence threshold"><span class="min-[1200px]:hidden">Cls ≥</span><span class="hidden min-[1200px]:inline">Classification ≥</span></label>
             <input
               id="group-min"
               type="range"
-              min="0"
+              min="0.05"
               max="1"
               step="0.05"
               v-model.number="groupMinConf"
@@ -818,9 +816,7 @@
                 >
                   Predictions
                   <InfoPopover>
-                    The model calls for this crop: the YOLO detector and the 4-group classifier (fly
-                    / bumblebee / butterfly / other), each with its confidence. These are model
-                    outputs, not your decision — confirm or correct them with the Label controls.
+                    The model calls for this crop: the Full-Image (YOLO) detector and the Motion-Based (4-group) classifier (fly / bumblebee / butterfly / other), each with its confidence. These are model outputs, not your decision — confirm or correct them with the Label controls.
                   </InfoPopover>
                 </div>
                 <div class="space-y-0.5 text-xs xl:text-sm">
@@ -828,7 +824,7 @@
                     class="flex items-center gap-2"
                     :class="selected.yolo_class == null ? 'opacity-60' : ''"
                   >
-                    <span class="text-muted-foreground w-16 xl:w-20">YOLO</span>
+                    <span class="text-muted-foreground w-24 xl:w-28 flex flex-col leading-tight text-xs">YOLO<span class="opacity-60">(Full-Image)</span></span>
                     <span
                       class="w-2 h-2 rounded-full shrink-0"
                       :style="{ backgroundColor: classColor(selected.yolo_class) }"
@@ -846,7 +842,7 @@
                     class="flex items-center gap-2"
                     :class="selected.insectnet_class == null ? 'opacity-60' : ''"
                   >
-                    <span class="text-muted-foreground w-16 xl:w-20">4-Group</span>
+                    <span class="text-muted-foreground w-24 xl:w-28 flex flex-col leading-tight text-xs">4-Group<span class="opacity-60">(Motion-Based)</span></span>
                     <span
                       class="w-2 h-2 rounded-full shrink-0"
                       :style="{ backgroundColor: classColor(selected.insectnet_class) }"

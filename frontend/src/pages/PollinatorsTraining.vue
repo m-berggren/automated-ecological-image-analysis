@@ -26,47 +26,58 @@
               here.
             </InfoPopover>
           </div>
-          <div class="space-y-2">
-            <label
-              v-for="track in tracks"
-              :key="track.id"
-              class="flex items-start gap-3 p-3 rounded-lg border cursor-pointer transition-colors"
-              :class="
-                selectedTrackId === track.id
-                  ? 'border-primary bg-primary/5'
-                  : 'border-border hover:border-primary/40'
-              "
-            >
-              <input type="radio" :value="track.id" v-model="selectedTrackId" class="mt-0.5" />
-              <div class="flex-1 min-w-0">
-                <div class="flex items-baseline gap-2 flex-wrap">
-                  <span class="font-medium text-sm">{{ track.label }}</span>
-                  <span
-                    v-if="displayedVersion(track)"
-                    class="text-xs px-2 py-0.5 rounded-full bg-green-300 text-green-900 font-medium"
-                  >
-                    {{ displayedVersion(track)!.version_name }}
-                  </span>
-                  <span
-                    v-if="track.active_job"
-                    class="text-xs px-2 py-0.5 rounded-full bg-blue-200 text-blue-800 font-medium"
-                  >
-                    training in progress
-                  </span>
-                </div>
-                <p class="text-xs text-muted-foreground mt-0.5">{{ track.description }}</p>
-                <div v-if="displayedVersion(track)" class="text-xs text-muted-foreground mt-1">
-                  {{ track.metric_label }}
-                  <span class="font-mono ml-1 text-foreground">
-                    {{ formatMetric(displayedMainMetric(track)) }}
-                  </span>
-                  · {{ track.data_pool.total_samples.toLocaleString() }} samples available
-                  <span v-if="track.data_pool.new_since_active > 0" class="text-primary">
-                    (+{{ track.data_pool.new_since_active }} new since active)
-                  </span>
-                </div>
+          <div class="space-y-4">
+            <div v-for="group in TRAINING_PIPELINE_GROUPS" :key="group.id">
+              <p class="text-sm font-bold text-foreground mb-1">{{ group.label }}</p>
+              <p class="text-xs text-muted-foreground mb-2">{{ group.desc }}</p>
+              <div class="space-y-2">
+                <label
+                  v-for="track in tracks.filter(t => group.ids.includes(t.id))"
+                  :key="track.id"
+                  class="flex items-start gap-3 p-3 rounded-lg border cursor-pointer transition-colors"
+                  :class="
+                    selectedTrackId === track.id
+                      ? 'border-primary bg-primary/5'
+                      : 'border-border hover:border-primary/40'
+                  "
+                >
+                  <input type="radio" :value="track.id" v-model="selectedTrackId" class="mt-0.5" />
+                  <div class="flex-1 min-w-0">
+                    <div class="flex items-baseline gap-2 flex-wrap">
+                      <span class="font-medium text-sm">{{ track.label }}</span>
+                      <span v-if="track.id === 'detector'" class="text-xs text-muted-foreground font-mono">(Full-Image Detection)</span>
+                      <span v-else-if="track.id === 'binary_classifier'" class="text-xs text-muted-foreground font-mono">(Insect Detection)</span>
+                      <span v-else-if="track.id === 'group_classifier'" class="text-xs text-muted-foreground font-mono">(Insect Classification)</span>
+                      <span
+                        v-if="displayedVersion(track)"
+                        class="text-xs px-2 py-0.5 rounded-full bg-green-300 text-green-900 font-medium"
+                      >
+                        {{ displayedVersion(track)!.version_name }}
+                      </span>
+                      <span
+                        v-if="track.active_job"
+                        class="text-xs px-2 py-0.5 rounded-full bg-blue-200 text-blue-800 font-medium"
+                      >
+                        training in progress
+                      </span>
+                    </div>
+                    <p class="text-xs text-muted-foreground mt-0.5">
+                      {{ track.description }}
+                    </p>
+                    <div v-if="displayedVersion(track)" class="text-xs text-muted-foreground mt-1">
+                      {{ track.metric_label }}
+                      <span class="font-mono ml-1 text-foreground">
+                        {{ formatMetric(displayedMainMetric(track)) }}
+                      </span>
+                      · {{ track.data_pool.total_samples.toLocaleString() }} samples available
+                      <span v-if="track.data_pool.new_since_active > 0" class="text-primary">
+                        (+{{ track.data_pool.new_since_active }} new since active)
+                      </span>
+                    </div>
+                  </div>
+                </label>
               </div>
-            </label>
+            </div>
           </div>
         </div>
 
@@ -857,6 +868,11 @@ import { UploadCloud } from 'lucide-vue-next'
 import { api } from '@/api'
 import { confirm } from '@/lib/confirm'
 import { tracksFromVersions, type BackendModelVersion } from '@/lib/model-tracks'
+
+const TRAINING_PIPELINE_GROUPS = [
+  { id: 'full-image', label: 'Full-Image Detection', desc: 'Retrain independently of the motion-based pipeline.', ids: ['detector'] },
+  { id: 'motion-based', label: 'Motion-Based Detection', desc: 'Two models that work in sequence — retrain each separately.', ids: ['binary_classifier', 'group_classifier'] },
+]
 
 interface ChartData {
   training_curve?: Array<{ epoch: number; loss: number; val_metric: number }>

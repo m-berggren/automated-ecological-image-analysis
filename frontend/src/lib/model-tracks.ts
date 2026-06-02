@@ -63,7 +63,7 @@ const POLLINATOR_TRACK_DEFS: TrackDef[] = [
   {
     id: 'detector',
     label: 'YOLO',
-    description: 'Pollinator detector',
+    description: 'Scans every image directly to find and label insects — no motion required.',
     // mAP50 is the headline detector metric stored at model level (recall
     // only exists per-class in the nested metrics, not as a top-level key).
     metric_label: 'mAP50',
@@ -71,7 +71,7 @@ const POLLINATOR_TRACK_DEFS: TrackDef[] = [
   {
     id: 'binary_classifier',
     label: 'Binary Classifier',
-    description: 'Insect vs background',
+    description: 'Step 1 — checks each moving object and decides: is this an insect or just background noise?',
     // F1, not accuracy: the insect/background split is imbalanced (mostly
     // background), so accuracy is inflated by the majority class. F1 balances
     // precision and recall on the insect class we actually care about.
@@ -80,7 +80,7 @@ const POLLINATOR_TRACK_DEFS: TrackDef[] = [
   {
     id: 'group_classifier',
     label: 'Group Classifier',
-    description: 'Bumblebee, fly, butterfly, other',
+    description: 'Step 2 — takes confirmed insects from Step 1 and classifies them as fly, bumblebee, butterfly, or other.',
     // Macro-F1 (surfaced as 'f1'): multi-class with a dominant class, so
     // accuracy is dominated by the majority. Macro-F1 weights each class
     // equally — the honest headline for imbalanced taxa.

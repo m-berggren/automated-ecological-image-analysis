@@ -44,26 +44,37 @@
         No models match this filter.
       </div>
 
-      <div v-else class="p-6 space-y-4">
-        <section
-          v-for="track in filteredTracks"
-          :key="track.id"
-          class="rounded-xl border border-border bg-card overflow-hidden shadow-md"
-        >
-          <header
-            class="px-5 py-4 bg-primary/[0.22] border-b border-border flex items-baseline gap-3"
+      <div v-else class="p-6 space-y-6">
+        <div v-for="group in pipelineGroups" :key="group.id" class="space-y-3">
+          <div v-if="kindFilter === 'all'" class="flex items-center gap-3">
+            <p class="text-xs font-medium text-muted-foreground whitespace-nowrap">{{ group.label }}</p>
+            <div class="flex-1 border-t border-border" />
+          </div>
+          <section
+            v-for="track in group.tracks"
+            :key="track.id"
+            class="rounded-xl border border-border bg-card overflow-hidden shadow-md"
           >
-            <h2 class="font-bold text-lg tracking-tight">{{ track.label }}</h2>
-            <InfoPopover v-if="TRACK_INFO[track.id]">{{ TRACK_INFO[track.id] }}</InfoPopover>
-            <span class="text-xs text-muted-foreground">
-              {{ track.versions.length }} {{ track.versions.length === 1 ? 'version' : 'versions' }}
-            </span>
-            <span class="text-xs text-muted-foreground ml-auto inline-flex items-center gap-1">
-              metric: {{ track.metric_label }}
-              <InfoPopover>{{
-                METRIC_INFO[track.metric_label] ?? 'Headline metric for this model.'
-              }}</InfoPopover>
-            </span>
+          <header
+            class="px-5 py-4 bg-primary/[0.22] border-b border-border"
+          >
+            <div class="flex items-baseline gap-3">
+              <h2 class="font-bold text-lg tracking-tight">{{ track.label }}</h2>
+              <span v-if="track.id === 'detector'" class="text-xs text-muted-foreground font-mono">(Full-Image Detection)</span>
+              <span v-else-if="track.id === 'binary_classifier'" class="text-xs text-muted-foreground font-mono">(Insect Detection)</span>
+              <span v-else-if="track.id === 'group_classifier'" class="text-xs text-muted-foreground font-mono">(Insect Classification)</span>
+              <InfoPopover v-if="TRACK_INFO[track.id]">{{ TRACK_INFO[track.id] }}</InfoPopover>
+              <span class="text-xs text-muted-foreground">
+                {{ track.versions.length }} {{ track.versions.length === 1 ? 'version' : 'versions' }}
+              </span>
+              <span class="text-xs text-muted-foreground ml-auto inline-flex items-center gap-1">
+                metric: {{ track.metric_label }}
+                <InfoPopover>{{
+                  METRIC_INFO[track.metric_label] ?? 'Headline metric for this model.'
+                }}</InfoPopover>
+              </span>
+            </div>
+            <p v-if="track.description" class="text-xs text-muted-foreground mt-1">{{ track.description }}</p>
           </header>
 
           <!-- table-fixed so column widths come from the header, not cell
@@ -269,7 +280,8 @@
               </template>
             </tbody>
           </table>
-        </section>
+          </section>
+        </div>
       </div>
     </div>
 
@@ -300,14 +312,17 @@ import {
   type TrackVersion as Version,
 } from '@/lib/model-tracks'
 
+// Display name for the backend track id badge (detector → yolo_detector for clarity).
+const TRACK_ID_DISPLAY: Record<string, string> = { detector: 'yolo_detector' }
+
 // Per-track help shown in the section-header info popover (keyed by track id).
 const TRACK_INFO: Record<string, string> = {
   detector:
-    'YOLO object detector — finds insect bounding boxes anywhere in the frame. Runs on every image.',
+    'Full-Image Detection Pipeline (YOLO): scans each image directly to locate insects — no motion required. Can detect stationary insects.',
   binary_classifier:
-    'Insect-vs-background gate. Every motion crop runs through this first; non-insect crops are dropped before the group classifier.',
+    'Motion-Based Pipeline — Step 1 (Insect Detection): detects movement between frames and decides whether each moving object is an insect or background noise.',
   group_classifier:
-    'Assigns each surviving insect crop to one of: bumblebee, fly, butterfly, other.',
+    'Motion-Based Pipeline — Step 2 (Insect Classification): takes confirmed insects from Step 1 and classifies them as fly, bumblebee, butterfly, or other.',
 }
 
 // Why each headline metric (keyed by metric_label), shown next to "metric:".
@@ -415,9 +430,9 @@ function visibleParams(params: Record<string, unknown>): Array<[string, unknown]
 const uploadOpen = ref(false)
 
 const UPLOAD_KIND_OPTIONS = [
-  { value: 'detector', label: 'YOLO detector' },
-  { value: 'binary_classifier', label: 'Binary Classifier' },
-  { value: 'group_classifier', label: 'Group Classifier' },
+  { value: 'detector', label: 'Full-Image Detection (YOLO)' },
+  { value: 'binary_classifier', label: 'Insect Detection — Step 1  (file: *_binary_best.pth)' },
+  { value: 'group_classifier', label: 'Insect Classification — Step 2  (file: group_*_best.pth)' },
 ]
 
 // Expected upload layout per kind, shown in the dialog's info popover. The
@@ -525,6 +540,16 @@ const filteredTracks = computed(() => {
   if (kindFilter.value === 'all') return tracks.value
   return tracks.value.filter((t) => t.id === kindFilter.value)
 })
+
+const PIPELINE_GROUPS = [
+  { id: 'full-image', label: 'Full-Image Detection Pipeline', ids: ['detector'] },
+  { id: 'motion-based', label: 'Motion-Based Detection Pipeline', ids: ['binary_classifier', 'group_classifier'] },
+]
+const pipelineGroups = computed(() =>
+  PIPELINE_GROUPS
+    .map((g) => ({ ...g, tracks: filteredTracks.value.filter((t) => g.ids.includes(t.id)) }))
+    .filter((g) => g.tracks.length > 0),
+)
 
 const totalVersions = computed(() => tracks.value.reduce((sum, t) => sum + t.versions.length, 0))
 
