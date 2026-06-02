@@ -499,7 +499,7 @@ const config = ref<PipelineConfig>({
     use_roi: false,
     roi_bbox: null,
     crop_pad_frac: 0.3,
-    background_sample_size: 100,
+    background_sample_size: 0,
     min_contour_area: 400,
     max_contour_area: 35000,
     skip_flash: true,
