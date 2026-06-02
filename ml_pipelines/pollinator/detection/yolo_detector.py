@@ -23,6 +23,8 @@ from sahi import AutoDetectionModel
 from sahi.predict import get_sliced_prediction
 from ultralytics import YOLO
 
+from ..device import pick_device
+
 logger = logging.getLogger(__name__)
 
 CLASSES = ['bumblebee', 'fly', 'butterfly', 'other']
@@ -52,7 +54,7 @@ class YoloDetector:
         Args:
             checkpoint_path: Path to trained YOLO .pt file.
             confidence:      Minimum detection confidence threshold.
-            device:          "cuda", "cpu", or None (auto-detect).
+            device:          "cuda", "mps", "cpu", or None (auto-detect).
             use_sahi:        Tile the image for small-object detection (default True).
             slice_size:      SAHI tile size in pixels (must match training imgsz).
             overlap:         SAHI overlap ratio between tiles (0-1).
@@ -64,7 +66,9 @@ class YoloDetector:
         self.slice_size = slice_size
         self.overlap = overlap
         self.iou = iou
-        self.device = device or ('cuda:0' if torch.cuda.is_available() else 'cpu')
+        resolved = pick_device(device)
+        # ultralytics/SAHI want an indexed CUDA device; mps/cpu pass through.
+        self.device = 'cuda:0' if resolved == 'cuda' else resolved
         self._load()
         logger.info(
             f'YoloDetector loaded: ckpt={self.checkpoint_path} '

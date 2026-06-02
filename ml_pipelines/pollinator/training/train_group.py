@@ -47,6 +47,7 @@ import torch.nn as nn
 import torchvision.transforms as T
 from torch.utils.data import DataLoader, WeightedRandomSampler
 
+from ..device import pick_device
 from .backbones import build_efficientnet_b2, build_insectnet, load_checkpoint
 from .datasets import CropDataset, letterbox
 
@@ -330,7 +331,7 @@ def train_group(
     logging.basicConfig(level=logging.INFO, format='%(levelname)s %(message)s')
     if not data_dirs:
         raise ValueError('data_dirs must contain at least one path')
-    device = torch.device('cuda' if torch.cuda.is_available() else 'cpu')
+    device = torch.device(pick_device())
     logger.info(f'Device: {device}')
 
     def _emit(

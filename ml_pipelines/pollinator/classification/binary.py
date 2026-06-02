@@ -24,6 +24,8 @@ import torchvision
 import torchvision.transforms as T
 from PIL import Image
 
+from ..device import pick_device
+
 logger = logging.getLogger(__name__)
 
 CLASSES = ['background', 'insect']
@@ -73,11 +75,9 @@ class BinaryClassifier:
         """
         Args:
             checkpoint_path: Path to .pth file saved during training.
-            device:          "cuda", "cpu", or None (auto-detect).
+            device:          "cuda", "mps", "cpu", or None (auto-detect).
         """
-        self.device = torch.device(
-            device or ('cuda' if torch.cuda.is_available() else 'cpu')
-        )
+        self.device = torch.device(pick_device(device))
         self._load(checkpoint_path)
         logger.info(
             f'BinaryClassifier loaded: arch={self.arch} '
