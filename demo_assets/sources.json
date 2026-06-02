@@ -25,12 +25,12 @@
     {
       "dest": "models/pollinators/5/weights.pth",
       "url": "https://zenodo.org/records/20492661/files/pollinator-binary-classifier.pth?download=1",
-      "md5": "006a139c462f21cc226fee6d46c40c68"
+      "md5": "1be55f09a02b20d52a862933ca872d4f"
     },
     {
       "dest": "models/pollinators/6/weights.pth",
       "url": "https://zenodo.org/records/20492661/files/pollinator-group-classifier.pth?download=1",
-      "md5": "7e682384fc462aec2a02f5e26d523997"
+      "md5": "c01f0400a78acb7331e49e1fd7b4fd10"
     },
     {
       "dest": "models/pollinators/7/weights.pt",
