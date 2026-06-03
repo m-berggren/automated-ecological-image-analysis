@@ -48,7 +48,7 @@ The preprocessing step is independent of the classification step. You can run
 ### YOLO pipeline
 Runs in `infer_yolo.ipynb`.
 
-A YOLOv11 (Ultralytics) model trained end-to-end on CVAT-annotated full images. It detects
+A YOLO26n (Ultralytics) model trained end-to-end on CVAT-annotated full images. It detects
 and classifies pollinators in a single forward pass with no separate preprocessing step.
 The YOLO model tends to find insects that motion detection misses (e.g. stationary insects
 or insects on very busy backgrounds). It also provides an independent second opinion for
