@@ -26,7 +26,6 @@ _DEFAULT_META: dict = {
     'captured_at': None,
     'flash_fired': None,
     'exif': {},
-    'weather': 'unknown',
     'laplacian_var': None,
     'shutter_speed': '',
     'excluded': False,
@@ -36,7 +35,7 @@ _DEFAULT_META: dict = {
 
 def _extract_metadata(module: str, file, upload_id=None) -> dict:
     """Module-aware metadata extraction. Pollinator uploads run the
-    camera-trap EXIF/weather/fog pipeline; other modules get defaults
+    camera-trap EXIF/fog pipeline; other modules get defaults
     until they grow their own extractor."""
 
     meta = dict(_DEFAULT_META)
@@ -78,7 +77,7 @@ class ImageUploadView(APIView):
         purpose : 'training' or 'inference' (default: inference)
         upload  : optional Upload id; the resulting ImageAsset is linked back
 
-    Per-module post-upload processing (EXIF, weather, exclusion flags) is
+    Per-module post-upload processing (EXIF, exclusion flags) is
     dispatched in _extract_metadata.
     """
 
@@ -138,7 +137,6 @@ class ImageUploadView(APIView):
             captured_at=meta['captured_at'],
             flash_fired=meta['flash_fired'],
             exif=meta['exif'],
-            weather=meta['weather'],
             excluded=meta['excluded'],
             exclusion_reason=meta['exclusion_reason'],
             metadata={

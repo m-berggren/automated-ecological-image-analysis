@@ -71,7 +71,7 @@
       @update:selected-id="selectedId = $event"
       @drag-select="onImageFirstDragSelect"
       @delete-image="onDeleteImage"
-      @toggle-training-exclude="onToggleTrainingExclude"
+      @toggle-training-include="onToggleTrainingInclude"
     >
       <template #below>
         <!-- Four side-by-side containers under the image. Fixed height so
@@ -105,9 +105,7 @@
             >
               <span>Predictions</span>
               <InfoPopover>
-                The model calls for the focused crop: the YOLO detector and the 4-group classifier
-                (fly / bumblebee / butterfly / other), each with its confidence. These are model
-                outputs, not your decision — confirm or correct them with the Label controls.
+                The model calls for this crop: the Full-Image (YOLO) detector and the Motion-Based (4-group) classifier (fly / bumblebee / butterfly / other), each with its confidence. These are model outputs, not your decision — confirm or correct them with the Label controls.
               </InfoPopover>
             </div>
             <div
@@ -116,7 +114,7 @@
             >
               <div v-if="!bulkMode && selected" class="space-y-0.5 text-xs font-mono">
                 <div class="flex items-center gap-2">
-                  <span class="text-muted-foreground w-16 text-[10px]">YOLO</span>
+                  <span class="text-muted-foreground w-24 text-[10px] flex flex-col leading-tight">YOLO<span class="opacity-60">(Full-Image)</span></span>
                   <span class="w-10 tabular-nums">
                     {{
                       selected.yolo_confidence != null ? selected.yolo_confidence.toFixed(2) : '—'
@@ -130,7 +128,7 @@
                   }}</span>
                 </div>
                 <div class="flex items-center gap-2">
-                  <span class="text-muted-foreground w-16 text-[10px]">4-Group</span>
+                  <span class="text-muted-foreground w-24 text-[10px] flex flex-col leading-tight">4-Group<span class="opacity-60">(Motion-Based)</span></span>
                   <span class="w-10 tabular-nums">
                     {{
                       selected.insectnet_confidence != null
@@ -169,22 +167,22 @@
               </InfoPopover>
             </div>
             <div class="grid grid-cols-[auto_1fr_auto] items-center gap-x-1 gap-y-1 text-xs">
-              <label for="img-yolo-min" class="text-muted-foreground" title="YOLO detector confidence threshold"><span class="min-[1200px]:hidden">Y ≥</span><span class="hidden min-[1200px]:inline">YOLO ≥</span></label>
+              <label for="img-yolo-min" class="text-muted-foreground" title="Full-Image Detection (YOLO) confidence threshold"><span class="min-[1200px]:hidden">FI ≥</span><span class="hidden min-[1200px]:inline">Full-Image ≥</span></label>
               <input
                 id="img-yolo-min"
                 type="range"
-                min="0"
+                min="0.05"
                 max="1"
                 step="0.05"
                 v-model.number="yoloMinConf"
                 class="w-full accent-primary"
               />
               <span class="font-mono w-9 text-right">{{ yoloMinConf.toFixed(2) }}</span>
-              <label for="img-group-min" class="text-muted-foreground" title="Group classifier confidence threshold"><span class="min-[1200px]:hidden">G ≥</span><span class="hidden min-[1200px]:inline">Group ≥</span></label>
+              <label for="img-group-min" class="text-muted-foreground" title="Classifier Classification confidence threshold"><span class="min-[1200px]:hidden">Cls ≥</span><span class="hidden min-[1200px]:inline">Classification ≥</span></label>
               <input
                 id="img-group-min"
                 type="range"
-                min="0"
+                min="0.05"
                 max="1"
                 step="0.05"
                 v-model.number="groupMinConf"
@@ -375,22 +373,22 @@
              score) pass that branch's filter unaffected, so the slider
              only hides things its branch actually scored. -->
           <div class="grid grid-cols-[auto_1fr_auto] items-center gap-x-1 gap-y-1 text-xs">
-            <label for="yolo-min" class="text-muted-foreground" title="YOLO detector confidence threshold"><span class="min-[1200px]:hidden">Y ≥</span><span class="hidden min-[1200px]:inline">YOLO ≥</span></label>
+            <label for="yolo-min" class="text-muted-foreground" title="Full-Image Detection (YOLO) confidence threshold"><span class="min-[1200px]:hidden">FI ≥</span><span class="hidden min-[1200px]:inline">Full-Image ≥</span></label>
             <input
               id="yolo-min"
               type="range"
-              min="0"
+              min="0.05"
               max="1"
               step="0.05"
               v-model.number="yoloMinConf"
               class="w-full accent-primary"
             />
             <span class="font-mono w-9 text-right">{{ yoloMinConf.toFixed(2) }}</span>
-            <label for="group-min" class="text-muted-foreground" title="Group classifier confidence threshold"><span class="min-[1200px]:hidden">G ≥</span><span class="hidden min-[1200px]:inline">Group ≥</span></label>
+            <label for="group-min" class="text-muted-foreground" title="Classifier Classification confidence threshold"><span class="min-[1200px]:hidden">Cls ≥</span><span class="hidden min-[1200px]:inline">Classification ≥</span></label>
             <input
               id="group-min"
               type="range"
-              min="0"
+              min="0.05"
               max="1"
               step="0.05"
               v-model.number="groupMinConf"
@@ -818,9 +816,7 @@
                 >
                   Predictions
                   <InfoPopover>
-                    The model calls for this crop: the YOLO detector and the 4-group classifier (fly
-                    / bumblebee / butterfly / other), each with its confidence. These are model
-                    outputs, not your decision — confirm or correct them with the Label controls.
+                    The model calls for this crop: the Full-Image (YOLO) detector and the Motion-Based (4-group) classifier (fly / bumblebee / butterfly / other), each with its confidence. These are model outputs, not your decision — confirm or correct them with the Label controls.
                   </InfoPopover>
                 </div>
                 <div class="space-y-0.5 text-xs xl:text-sm">
@@ -828,7 +824,7 @@
                     class="flex items-center gap-2"
                     :class="selected.yolo_class == null ? 'opacity-60' : ''"
                   >
-                    <span class="text-muted-foreground w-16 xl:w-20">YOLO</span>
+                    <span class="text-muted-foreground w-24 xl:w-28 flex flex-col leading-tight text-xs">YOLO<span class="opacity-60">(Full-Image)</span></span>
                     <span
                       class="w-2 h-2 rounded-full shrink-0"
                       :style="{ backgroundColor: classColor(selected.yolo_class) }"
@@ -846,7 +842,7 @@
                     class="flex items-center gap-2"
                     :class="selected.insectnet_class == null ? 'opacity-60' : ''"
                   >
-                    <span class="text-muted-foreground w-16 xl:w-20">4-Group</span>
+                    <span class="text-muted-foreground w-24 xl:w-28 flex flex-col leading-tight text-xs">4-Group<span class="opacity-60">(Motion-Based)</span></span>
                     <span
                       class="w-2 h-2 rounded-full shrink-0"
                       :style="{ backgroundColor: classColor(selected.insectnet_class) }"
@@ -1008,6 +1004,8 @@ import {
   type ReviewSettings,
 } from '@/types/pollinator'
 import { useRunDetections } from '@/composables/useRunDetections'
+import { useReviewKeyboard } from '@/composables/useReviewKeyboard'
+import { useImageZoom } from '@/composables/useImageZoom'
 import { usePollinatorSettingsStore } from '@/stores/pollinatorSettings'
 import ReviewImageFirst from '@/components/pollinator/ReviewImageFirst.vue'
 import AnnotationColorPickers from '@/components/pollinator/AnnotationColorPickers.vue'
@@ -1540,18 +1538,18 @@ function onDeleteImage(filename: string) {
   void submitBulk(ids, 'rejected', null)
 }
 
-// Toggle the per-image "exclude from YOLO training" flag. Optimistically
+// Toggle the per-image "include in YOLO training" flag. Optimistically
 // flips it on every detection of that image (they all carry the same
 // per-image value), then persists against the image id.
-function onToggleTrainingExclude(filename: string) {
+function onToggleTrainingInclude(filename: string) {
   const imgDets = detections.value.filter((d) => d.source_image_filename === filename)
   const imageId = imgDets[0]?.source_image_id
   if (imageId == null) return
-  const next = !imgDets[0].exclude_from_training
-  for (const d of imgDets) d.exclude_from_training = next
-  void api(`/api/analysis/images/${imageId}/exclude-training/`, {
+  const next = !imgDets[0].include_in_training
+  for (const d of imgDets) d.include_in_training = next
+  void api(`/api/analysis/images/${imageId}/include-training/`, {
     method: 'POST',
-    body: JSON.stringify({ excluded: next }),
+    body: JSON.stringify({ included: next }),
   })
 }
 
@@ -1773,83 +1771,19 @@ const roiBbox = computed<[number, number, number, number] | null>(() =>
   normalizeRoiBbox(run.value?.config?.preprocessing?.roi_bbox),
 )
 
-// Fullscreen zoom modal. State lives in viewBox units; the SVG <g> is
-// translated then scaled, so the wheel-around-cursor math has to convert
-// the cursor's client coords into viewBox coords before applying.
-const zoomDialog = ref<HTMLDialogElement | null>(null)
-const zoom = ref({ scale: 1, tx: 0, ty: 0 })
-const panning = ref(false)
-const panStart = ref({ x: 0, y: 0, tx: 0, ty: 0 })
-
-function openZoom() {
-  if (!selected.value?.source_image_url || !sourceImage.value.w) return
-  zoom.value = { scale: 1, tx: 0, ty: 0 }
-  zoomDialog.value?.showModal()
-}
-
-function closeZoom() {
-  zoomDialog.value?.close()
-}
-
-function onZoomClose() {
-  panning.value = false
-}
-
-// Zoom toward the cursor: keep the source-image point under the cursor
-// fixed while the scale changes. Done by adjusting the translate so the
-// post-scale cursor location matches the pre-scale one.
-function onZoomWheel(e: WheelEvent) {
-  const target = e.currentTarget as HTMLElement
-  const rect = target.getBoundingClientRect()
-  // Cursor in viewBox coords: the SVG fills the container and uses
-  // preserveAspectRatio=meet, so map via the longest fitted side.
-  const sx = sourceImage.value.w
-  const sy = sourceImage.value.h
-  const fit = Math.min(rect.width / sx, rect.height / sy)
-  const offX = (rect.width - sx * fit) / 2
-  const offY = (rect.height - sy * fit) / 2
-  const vx = (e.clientX - rect.left - offX) / fit
-  const vy = (e.clientY - rect.top - offY) / fit
-
-  const factor = e.deltaY < 0 ? 1.2 : 1 / 1.2
-  const next = Math.max(1, Math.min(20, zoom.value.scale * factor))
-  if (next === zoom.value.scale) return
-  const k = next / zoom.value.scale
-  zoom.value = {
-    scale: next,
-    tx: vx - k * (vx - zoom.value.tx),
-    ty: vy - k * (vy - zoom.value.ty),
-  }
-}
-
-function onPanStart(e: MouseEvent) {
-  if (e.button !== 0) return
-  panning.value = true
-  panStart.value = {
-    x: e.clientX,
-    y: e.clientY,
-    tx: zoom.value.tx,
-    ty: zoom.value.ty,
-  }
-}
-
-function onPanMove(e: MouseEvent) {
-  if (!panning.value) return
-  const target = e.currentTarget as HTMLElement
-  const rect = target.getBoundingClientRect()
-  const sx = sourceImage.value.w
-  const sy = sourceImage.value.h
-  const fit = Math.min(rect.width / sx, rect.height / sy)
-  zoom.value = {
-    ...zoom.value,
-    tx: panStart.value.tx + (e.clientX - panStart.value.x) / fit,
-    ty: panStart.value.ty + (e.clientY - panStart.value.y) / fit,
-  }
-}
-
-function onPanEnd() {
-  panning.value = false
-}
+// Fullscreen zoom/pan over the selected detection's source image.
+const {
+  zoomDialog,
+  zoom,
+  panning,
+  openZoom,
+  closeZoom,
+  onZoomClose,
+  onZoomWheel,
+  onPanStart,
+  onPanMove,
+  onPanEnd,
+} = useImageZoom(sourceImage)
 
 // Width of the left (crops) section in pixels at lg+. Persisted so each
 // reviewer's choice survives reloads. The bounds keep the layout sane —
@@ -2571,121 +2505,26 @@ function onTileClick(d: Detection, e: MouseEvent | KeyboardEvent) {
   stableBulkIds.value = new Set(bulkIds.value)
 }
 
-function onKeydown(e: KeyboardEvent) {
-  // Inputs keep their own typing + native undo.
-  if (
-    e.target instanceof HTMLElement &&
-    ['INPUT', 'SELECT', 'TEXTAREA'].includes(e.target.tagName)
-  ) {
-    return
-  }
-  // Ctrl/Cmd+Z reverts the last classify gesture. Handled before the
-  // `selected` guard because a keyboard action auto-advances off the
-  // crop it changed, so nothing may be selected when the user undoes.
-  if ((e.ctrlKey || e.metaKey) && !e.shiftKey && (e.key === 'z' || e.key === 'Z')) {
-    e.preventDefault()
-    void undoLast()
-    return
-  }
-  if (!selected.value) return
-  if (zoomDialog.value?.open) return
-  // Escape clears any bulk selection without losing the currently-focused tile.
-  if (e.key === 'Escape' && bulkIds.value.size > 0) {
-    clearBulk()
-    e.preventDefault()
-    return
-  }
-  // Bulk-aware shortcuts: when one or more tiles are checkbox-selected,
-  // class keys (1-4), reject (x) and unsure (u) apply to the whole bulk
-  // instead of just the focused tile. Lets the reviewer do "select 30
-  // crops, press x" without reaching for the bulk action bar.
-  const bulkMode = bulkIds.value.size > 0
-  // Keyboard actions auto-advance to the next tile so the reviewer can
-  // fly through a queue without touching the mouse. Mouse-driven actions
-  // (Label panel clicks, footer buttons) stay put — see applyAction.
-  const classKeyAction = (cls: PollinatorClass) =>
-    bulkMode ? applyToBulk('corrected', cls) : confirmAs(cls, true)
-  switch (e.key) {
-    case '1':
-      classKeyAction('fly')
-      e.preventDefault()
-      break
-    case '2':
-      classKeyAction('bumblebee')
-      e.preventDefault()
-      break
-    case '3':
-      classKeyAction('butterfly')
-      e.preventDefault()
-      break
-    case '4':
-      classKeyAction('other')
-      e.preventDefault()
-      break
-    case 'x':
-    case 'X':
-      if (bulkMode) applyToBulk('rejected', null)
-      else reject(true)
-      e.preventDefault()
-      break
-    case 'u':
-    case 'U':
-      if (bulkMode) applyToBulk('unsure', null)
-      else markUnsure(true)
-      e.preventDefault()
-      break
-    case 'Enter':
-      confirmAs(suggestedClass(selected.value), true)
-      e.preventDefault()
-      break
-    case 'ArrowDown':
-    case 'j':
-      // Image-first: up/down cycle SOURCE IMAGES, left/right cycle
-      // crops within the current image. Crop-first keeps its grid nav.
-      if (settings.reviewLayout === 'image-first') {
-        navigateImage(1)
-      } else {
-        navigate(colsPerRow.value, e.shiftKey)
-      }
-      e.preventDefault()
-      break
-    case 'ArrowUp':
-    case 'k':
-      if (settings.reviewLayout === 'image-first') {
-        navigateImage(-1)
-      } else {
-        navigate(-colsPerRow.value, e.shiftKey)
-      }
-      e.preventDefault()
-      break
-    case 'ArrowRight':
-    case 'l':
-      navigate(1, e.shiftKey)
-      e.preventDefault()
-      break
-    case 'ArrowLeft':
-    case 'h':
-      navigate(-1, e.shiftKey)
-      e.preventDefault()
-      break
-    case 'd':
-    case 'D':
-    case 'Delete':
-      // Image-first only: reject the active image's unreviewed crops,
-      // same as the rail's trash button. Undoable via Ctrl+Z. Despite the
-      // "delete" name nothing is removed: every still-unreviewed crop in
-      // the image is relabelled as background.
-      if (settings.reviewLayout === 'image-first' && selected.value) {
-        onDeleteImage(selected.value.source_image_filename)
-        e.preventDefault()
-      }
-      break
-  }
-}
+useReviewKeyboard({
+  getSelected: () => selected.value,
+  getBulkSize: () => bulkIds.value.size,
+  isZoomOpen: () => zoomDialog.value?.open ?? false,
+  isImageFirst: () => settings.reviewLayout === 'image-first',
+  getColsPerRow: () => colsPerRow.value,
+  undoLast,
+  clearBulk,
+  applyToBulk,
+  confirmAs,
+  reject,
+  markUnsure,
+  navigate,
+  navigateImage,
+  deleteImage: onDeleteImage,
+  toggleInclude: onToggleTrainingInclude,
+  suggestedClass,
+})
 
-onMounted(() => window.addEventListener('keydown', onKeydown))
 onUnmounted(() => {
-  window.removeEventListener('keydown', onKeydown)
   gridResizeObserver?.disconnect()
   // If the user navigates away mid-drag, the move/up listeners would leak.
   window.removeEventListener('mousemove', onPreviewDragMove)

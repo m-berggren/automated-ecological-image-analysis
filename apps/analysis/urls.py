@@ -4,7 +4,7 @@ from .views import (
     DetectionBulkView,
     DetectionExcludeTrainingView,
     DetectionExclusionView,
-    ImageExcludeTrainingView,
+    ImageIncludeTrainingView,
     InferenceRunAbortView,
     InferenceRunActiveView,
     InferenceRunCancelView,
@@ -79,9 +79,9 @@ urlpatterns = [
         name='detection-exclude-training',
     ),
     path(
-        'images/<int:pk>/exclude-training/',
-        ImageExcludeTrainingView.as_view(),
-        name='image-exclude-training',
+        'images/<int:pk>/include-training/',
+        ImageIncludeTrainingView.as_view(),
+        name='image-include-training',
     ),
     path('training/', TrainingJobListView.as_view(), name='training-list'),
     path(

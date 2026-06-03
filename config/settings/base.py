@@ -26,10 +26,7 @@ JWT_ROTATE_REFRESH = os.environ.get('JWT_ROTATE_REFRESH', 'true').lower() == 'tr
 
 CORS_ALLOW_ALL_ORIGINS = os.environ.get('CORS_ALLOW_ALL', 'true').lower() == 'true'
 
-# Image quality — used by EXIF extraction to auto-populate weather and excluded fields.
-# SUNNY_SHUTTER_THRESHOLD: EXIF ExposureTime denominator above this → sunny, else cloudy.
-# Wingscapes TLCAM PRO has fixed f/2.8 aperture, so shutter speed reflects ambient light.
-SUNNY_SHUTTER_THRESHOLD = int(os.environ.get('SUNNY_SHUTTER_THRESHOLD', 150))
+# Image quality — used by EXIF extraction to auto-populate the excluded field.
 # FOGGY_LAPLACIAN_THRESHOLD: Laplacian variance below this → fog/blur → excluded.
 FOGGY_LAPLACIAN_THRESHOLD = float(os.environ.get('FOGGY_LAPLACIAN_THRESHOLD', 50))
 # AUTO_EXCLUDE_FLASH: automatically exclude images where flash fired.

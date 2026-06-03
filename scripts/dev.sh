@@ -18,6 +18,11 @@ cd "$(dirname "$0")/.."
 BACKEND_PORT="${BACKEND_PORT:-8000}"
 FRONTEND_PORT="${FRONTEND_PORT:-5173}"
 
+# On Apple Silicon the models run on the MPS (Metal) GPU; let any op that MPS
+# lacks fall back to CPU instead of raising. Harmless on Linux. Set
+# AEA_DEVICE=cpu to force CPU everywhere if MPS ever misbehaves.
+export PYTORCH_ENABLE_MPS_FALLBACK="${PYTORCH_ENABLE_MPS_FALLBACK:-1}"
+
 # ── Toolchain: use uv + npm directly if present, otherwise manage via mise ──
 PREFIX=()
 if command -v uv >/dev/null 2>&1 && command -v npm >/dev/null 2>&1; then

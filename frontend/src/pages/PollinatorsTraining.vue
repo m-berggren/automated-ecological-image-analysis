@@ -26,47 +26,58 @@
               here.
             </InfoPopover>
           </div>
-          <div class="space-y-2">
-            <label
-              v-for="track in tracks"
-              :key="track.id"
-              class="flex items-start gap-3 p-3 rounded-lg border cursor-pointer transition-colors"
-              :class="
-                selectedTrackId === track.id
-                  ? 'border-primary bg-primary/5'
-                  : 'border-border hover:border-primary/40'
-              "
-            >
-              <input type="radio" :value="track.id" v-model="selectedTrackId" class="mt-0.5" />
-              <div class="flex-1 min-w-0">
-                <div class="flex items-baseline gap-2 flex-wrap">
-                  <span class="font-medium text-sm">{{ track.label }}</span>
-                  <span
-                    v-if="displayedVersion(track)"
-                    class="text-xs px-2 py-0.5 rounded-full bg-green-300 text-green-900 font-medium"
-                  >
-                    {{ displayedVersion(track)!.version_name }}
-                  </span>
-                  <span
-                    v-if="track.active_job"
-                    class="text-xs px-2 py-0.5 rounded-full bg-blue-200 text-blue-800 font-medium"
-                  >
-                    training in progress
-                  </span>
-                </div>
-                <p class="text-xs text-muted-foreground mt-0.5">{{ track.description }}</p>
-                <div v-if="displayedVersion(track)" class="text-xs text-muted-foreground mt-1">
-                  {{ track.metric_label }}
-                  <span class="font-mono ml-1 text-foreground">
-                    {{ formatMetric(displayedMainMetric(track)) }}
-                  </span>
-                  · {{ track.data_pool.total_samples.toLocaleString() }} samples available
-                  <span v-if="track.data_pool.new_since_active > 0" class="text-primary">
-                    (+{{ track.data_pool.new_since_active }} new since active)
-                  </span>
-                </div>
+          <div class="space-y-4">
+            <div v-for="group in TRAINING_PIPELINE_GROUPS" :key="group.id">
+              <p class="text-sm font-bold text-foreground mb-1">{{ group.label }}</p>
+              <p class="text-xs text-muted-foreground mb-2">{{ group.desc }}</p>
+              <div class="space-y-2">
+                <label
+                  v-for="track in tracks.filter(t => group.ids.includes(t.id))"
+                  :key="track.id"
+                  class="flex items-start gap-3 p-3 rounded-lg border cursor-pointer transition-colors"
+                  :class="
+                    selectedTrackId === track.id
+                      ? 'border-primary bg-primary/5'
+                      : 'border-border hover:border-primary/40'
+                  "
+                >
+                  <input type="radio" :value="track.id" v-model="selectedTrackId" class="mt-0.5" />
+                  <div class="flex-1 min-w-0">
+                    <div class="flex items-baseline gap-2 flex-wrap">
+                      <span class="font-medium text-sm">{{ track.label }}</span>
+                      <span v-if="track.id === 'detector'" class="text-xs text-muted-foreground font-mono">(Full-Image Detection)</span>
+                      <span v-else-if="track.id === 'binary_classifier'" class="text-xs text-muted-foreground font-mono">(Insect Detection)</span>
+                      <span v-else-if="track.id === 'group_classifier'" class="text-xs text-muted-foreground font-mono">(Insect Classification)</span>
+                      <span
+                        v-if="displayedVersion(track)"
+                        class="text-xs px-2 py-0.5 rounded-full bg-green-300 text-green-900 font-medium"
+                      >
+                        {{ displayedVersion(track)!.version_name }}
+                      </span>
+                      <span
+                        v-if="track.active_job"
+                        class="text-xs px-2 py-0.5 rounded-full bg-blue-200 text-blue-800 font-medium"
+                      >
+                        training in progress
+                      </span>
+                    </div>
+                    <p class="text-xs text-muted-foreground mt-0.5">
+                      {{ track.description }}
+                    </p>
+                    <div v-if="displayedVersion(track)" class="text-xs text-muted-foreground mt-1">
+                      {{ track.metric_label }}
+                      <span class="font-mono ml-1 text-foreground">
+                        {{ formatMetric(displayedMainMetric(track)) }}
+                      </span>
+                      · {{ track.data_pool.total_samples.toLocaleString() }} samples available
+                      <span v-if="track.data_pool.new_since_active > 0" class="text-primary">
+                        (+{{ track.data_pool.new_since_active }} new since active)
+                      </span>
+                    </div>
+                  </div>
+                </label>
               </div>
-            </label>
+            </div>
           </div>
         </div>
 
@@ -318,6 +329,19 @@
           <div class="grid grid-cols-2 lg:grid-cols-4 gap-3">
             <label
               class="text-xs text-muted-foreground space-y-1"
+              title="Number of full passes over the training set. Higher = more time, more risk of overfitting. The backend may early-stop sooner if val metrics plateau."
+            >
+              <span>Epochs</span>
+              <input
+                v-model.number="settings.epochs"
+                type="number"
+                min="1"
+                max="200"
+                class="w-full px-2 py-1 rounded border border-border bg-background text-sm font-mono text-foreground"
+              />
+            </label>
+            <label
+              class="text-xs text-muted-foreground space-y-1"
               title="Percentage of the dataset used to train the model. The rest goes to val (early-stop signal) and test (held-out evaluation)."
             >
               <span>Train %</span>
@@ -352,19 +376,6 @@
                 type="number"
                 min="0"
                 max="40"
-                class="w-full px-2 py-1 rounded border border-border bg-background text-sm font-mono text-foreground"
-              />
-            </label>
-            <label
-              class="text-xs text-muted-foreground space-y-1"
-              title="Number of full passes over the training set. Higher = more time, more risk of overfitting. The backend may early-stop sooner if val metrics plateau."
-            >
-              <span>Epochs</span>
-              <input
-                v-model.number="settings.epochs"
-                type="number"
-                min="1"
-                max="200"
                 class="w-full px-2 py-1 rounded border border-border bg-background text-sm font-mono text-foreground"
               />
             </label>
@@ -857,6 +868,11 @@ import { UploadCloud } from 'lucide-vue-next'
 import { api } from '@/api'
 import { confirm } from '@/lib/confirm'
 import { tracksFromVersions, type BackendModelVersion } from '@/lib/model-tracks'
+
+const TRAINING_PIPELINE_GROUPS = [
+  { id: 'full-image', label: 'Full-Image Detection', desc: 'Retrain independently of the motion-based pipeline.', ids: ['detector'] },
+  { id: 'motion-based', label: 'Motion-Based Detection', desc: 'Two models that work in sequence — retrain each separately.', ids: ['binary_classifier', 'group_classifier'] },
+]
 
 interface ChartData {
   training_curve?: Array<{ epoch: number; loss: number; val_metric: number }>
@@ -1465,12 +1481,17 @@ function toggleJobLog(trackId: string) {
 // shared GPU/CPU.
 const anyJobActive = computed(() => tracks.value.some((t) => t.active_job !== null))
 
+// The YOLO detector needs enough images to form a train/val split and to be
+// worth training on at all; below this we lock the detector retrain.
+const MIN_DETECTOR_IMAGES = 10
+
 const canSubmit = computed(() => {
   if (!selectedTrack.value) return false
   if (anyJobActive.value) return false
   if (splitTotal.value !== 100) return false
   // Incremental retraining requires a base model to continue from.
   if (selectedSourceId.value == null) return false
+  if (isDetector.value && totalPoolSamples.value < MIN_DETECTOR_IMAGES) return false
   return true
 })
 
@@ -1487,6 +1508,9 @@ const submitBlockReason = computed<string>(() => {
   }
   if (selectedSourceId.value == null) {
     return `${selectedTrack.value.label} has no model version to retrain from.`
+  }
+  if (isDetector.value && totalPoolSamples.value < MIN_DETECTOR_IMAGES) {
+    return `The detector needs at least ${MIN_DETECTOR_IMAGES} images to retrain (have ${totalPoolSamples.value}). Review more images or upload a labelled dataset.`
   }
   return ''
 })

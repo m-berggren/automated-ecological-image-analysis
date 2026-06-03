@@ -36,6 +36,8 @@
       <div class="grid grid-cols-1 md:grid-cols-[1fr_2fr] gap-6">
         <!-- YOLO column. -->
         <div class="space-y-3">
+          <p class="text-xs font-semibold text-foreground">Full-Image Detection (YOLO)</p>
+          <p class="text-xs text-muted-foreground">Scans every image directly. Works even when insects aren't moving.</p>
           <label class="space-y-1 block">
             <span class="flex items-center gap-1.5 text-xs text-muted-foreground">
               <span class="font-semibold">YOLO</span>
@@ -68,7 +70,7 @@
             <input
               v-model.number="config.yolo.confidence"
               type="number"
-              min="0"
+              min="0.05"
               max="1"
               step="0.05"
               class="w-full px-2 py-1.5 rounded border border-border bg-background text-sm font-mono text-center"
@@ -79,12 +81,14 @@
         <!-- 2-step Classification column: two model selects in a row,
              then a single shared Confidence input centered below. -->
         <div class="space-y-3 md:border-l md:border-border md:pl-6">
+          <p class="text-xs font-semibold text-foreground">Motion-Based Detection</p>
+          <p class="text-xs text-muted-foreground">Detects movement between frames, then runs two steps: confirm it's an insect (Step 1), then identify the type (Step 2).</p>
           <div class="grid grid-cols-2 gap-4">
             <label class="space-y-1 block">
               <span class="flex items-center gap-1.5 text-xs text-muted-foreground">
-                <span>Binary Classifier</span>
+                <span class="font-semibold">Step 1: Insect Detection</span>
                 <InfoPopover>
-                  The insect/background gate (formerly "EfficientNet"). Every motion-detected crop
+                  <strong>Binary Classifier</strong> — insect versus background (formerly "EfficientNet"). Every motion-detected crop
                   runs through this first; non-insect crops are dropped before the group classifier
                   sees them.
                 </InfoPopover>
@@ -104,9 +108,9 @@
             </label>
             <label class="space-y-1 block">
               <span class="flex items-center gap-1.5 text-xs text-muted-foreground">
-                <span>Group Classifier</span>
+                <span class="font-semibold">Step 2: Insect Classification</span>
                 <InfoPopover>
-                  Assigns insect crops to one of: bumblebee, fly, butterfly, other (formerly
+                  <strong>Group Classifier</strong> — assigns insect crops to one of: bumblebee, fly, butterfly, other (formerly
                   "InsectNet"). Runs only on crops the Binary Classifier accepted.
                 </InfoPopover>
               </span>
@@ -139,7 +143,7 @@
             <input
               :value="twoStepConfidence"
               type="number"
-              min="0"
+              min="0.05"
               max="1"
               step="0.05"
               class="w-full px-2 py-1.5 rounded border border-border bg-background text-sm font-mono text-center"
@@ -260,19 +264,20 @@
           </label>
           <label class="space-y-1">
             <span class="flex items-center gap-1.5 text-xs text-muted-foreground">
-              <span>Sunny shutter threshold</span>
+              <span>Large-motion tile overlap</span>
               <InfoPopover>
-                Shutter-speed denominator above which an EXIF frame is tagged "sunny" rather than
-                "cloudy". Only affects the per-image weather label in exports; detection itself
-                doesn't use it.
+                Motion branch only, and only when "Detect large motion" is on. When a big motion
+                region is split into overlapping tiles, two tiles whose IoU exceeds this are treated
+                as the same detection and the lower-scoring one is dropped (NMS). Lower = fewer
+                overlapping duplicate boxes; higher = keeps more near-overlapping tiles.
               </InfoPopover>
             </span>
             <input
-              v-model.number="config.preprocessing.sunny_shutter_threshold"
+              v-model.number="config.preprocessing.large_motion_tile_nms_iou"
               type="number"
-              min="50"
-              max="500"
-              step="10"
+              min="0"
+              max="1"
+              step="0.05"
               class="w-full px-2 py-1.5 rounded border border-border bg-background text-sm font-mono"
             />
           </label>
@@ -471,10 +476,10 @@ interface PipelineConfig {
     background_sample_size: number
     min_contour_area: number
     max_contour_area: number
-    sunny_shutter_threshold: number
     skip_flash: boolean
     skip_foggy: boolean
     enable_large_motion: boolean
+    large_motion_tile_nms_iou: number
   }
 }
 
@@ -494,13 +499,13 @@ const config = ref<PipelineConfig>({
     use_roi: false,
     roi_bbox: null,
     crop_pad_frac: 0.3,
-    background_sample_size: 100,
+    background_sample_size: 0,
     min_contour_area: 400,
     max_contour_area: 35000,
-    sunny_shutter_threshold: 150,
     skip_flash: true,
     skip_foggy: true,
     enable_large_motion: true,
+    large_motion_tile_nms_iou: 0.35,
   },
 })
 
@@ -514,7 +519,7 @@ const twoStepConfidence = computed(() => config.value.binary_classifier.confiden
 function onTwoStepConfidenceInput(raw: string) {
   const v = Number.parseFloat(raw)
   if (Number.isNaN(v)) return
-  const clamped = Math.max(0, Math.min(1, v))
+  const clamped = Math.max(0.05, Math.min(1, v))
   config.value.binary_classifier.confidence = clamped
   config.value.group_classifier.confidence = clamped
 }

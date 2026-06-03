@@ -479,7 +479,7 @@ class Detection(models.Model):
             'training. Set by un-ticking the crop in the training pool drawer; '
             'the crop stays visible (greyed) and can be re-included. Distinct '
             'from excluded_from_export (which only affects CSV export) and from '
-            'ImageAsset.exclude_from_training (which governs YOLO detector '
+            'ImageAsset.include_in_training (which governs YOLO detector '
             'training at the image level).'
         ),
     )

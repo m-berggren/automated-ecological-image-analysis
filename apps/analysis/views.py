@@ -879,13 +879,12 @@ class DetectionExclusionView(APIView):
         return Response({'id': d.pk, 'excluded_from_export': excluded})
 
 
-class ImageExcludeTrainingView(APIView):
-    """POST /api/analysis/images/<pk>/exclude-training/
+class ImageIncludeTrainingView(APIView):
+    """POST /api/analysis/images/<pk>/include-training/
 
-    Body: {"excluded": true|false}. Toggles ImageAsset.exclude_from_training,
-    the reviewer flag marking an image as unfit for YOLO detector training
-    (more real insects than boxes). The training-set builder skips images
-    where this is True.
+    Body: {"included": true|false}. Toggles ImageAsset.include_in_training,
+    the reviewer flag opting an image into YOLO detector training. The
+    training-set builder includes only images where this is True.
     """
 
     def post(self, request: Request, pk: int) -> Response:
@@ -896,15 +895,15 @@ class ImageExcludeTrainingView(APIView):
                 {'error': 'Image not found'},
                 status=status.HTTP_404_NOT_FOUND,
             )
-        excluded = request.data.get('excluded')
-        if not isinstance(excluded, bool):
+        included = request.data.get('included')
+        if not isinstance(included, bool):
             return Response(
-                {'error': 'excluded must be a boolean'},
+                {'error': 'included must be a boolean'},
                 status=status.HTTP_400_BAD_REQUEST,
             )
-        img.exclude_from_training = excluded
-        img.save(update_fields=['exclude_from_training'])
-        return Response({'id': img.pk, 'exclude_from_training': excluded})
+        img.include_in_training = included
+        img.save(update_fields=['include_in_training'])
+        return Response({'id': img.pk, 'include_in_training': included})
 
 
 class DetectionExcludeTrainingView(APIView):
@@ -914,7 +913,7 @@ class DetectionExcludeTrainingView(APIView):
     the reviewer flag marking a crop as unfit for binary/group classifier
     training. Set by un-ticking the crop in the training pool drawer; the
     classifier pool builders skip crops where this is True. Distinct from
-    excluded_from_export (CSV only) and ImageAsset.exclude_from_training
+    excluded_from_export (CSV only) and ImageAsset.include_in_training
     (image-level, detector training).
     """
 
@@ -942,9 +941,10 @@ class InferenceRunReviewSettingsView(APIView):
 
     Merges a partial dict into the run's review_settings JSON. Accepts any
     subset of: auto_select (bool), yolo_threshold (0..1), group_threshold
-    (0..1). These are per-run reviewer/export preferences; when a key is
-    absent the frontend resolves the default from the run's config
-    confidence values, so review sliders start where the run was processed.
+    (0..1), dedup_iou_threshold (0..1). These are per-run reviewer/export
+    preferences; when a key is absent the frontend resolves the default from
+    the run's config confidence values, so review sliders start where the run
+    was processed.
     """
 
     def post(self, request: Request, pk: int) -> Response:
@@ -965,7 +965,7 @@ class InferenceRunReviewSettingsView(APIView):
                     status=status.HTTP_400_BAD_REQUEST,
                 )
             merged['auto_select'] = v
-        for key in ('yolo_threshold', 'group_threshold'):
+        for key in ('yolo_threshold', 'group_threshold', 'dedup_iou_threshold'):
             if key in data:
                 v = data[key]
                 if isinstance(v, bool) or not isinstance(v, (int, float)):

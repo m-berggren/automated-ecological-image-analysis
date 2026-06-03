@@ -39,8 +39,8 @@ export interface Detection {
   bbox: BBox | null
   excluded_from_export: boolean
   // Per-image flag (same value on every detection sharing an image):
-  // when true the image is excluded from YOLO detector training.
-  exclude_from_training: boolean
+  // when true the image is included in YOLO detector training.
+  include_in_training: boolean
 }
 
 // Per-run reviewer/export preferences. Any missing key falls back to the
@@ -49,6 +49,9 @@ export interface ReviewSettings {
   auto_select?: boolean
   yolo_threshold?: number
   group_threshold?: number
+  // Export-page duplicate suppression: two accepted boxes on one image are the
+  // same insect when one center is inside the other or their IoU >= this.
+  dedup_iou_threshold?: number
 }
 
 export interface Run {
@@ -112,6 +115,7 @@ export function effectiveReviewSettings(run: Run | null | undefined): {
   autoSelect: boolean
   yolo: number
   group: number
+  dedupIou: number
 } {
   const rs = run?.review_settings ?? {}
   const cfg = run?.config
@@ -119,5 +123,6 @@ export function effectiveReviewSettings(run: Run | null | undefined): {
     autoSelect: rs.auto_select ?? false,
     yolo: rs.yolo_threshold ?? cfg?.yolo?.confidence ?? 0.5,
     group: rs.group_threshold ?? cfg?.group_classifier?.confidence ?? 0.5,
+    dedupIou: rs.dedup_iou_threshold ?? 0.5,
   }
 }

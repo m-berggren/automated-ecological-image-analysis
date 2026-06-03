@@ -499,9 +499,9 @@ def _collect_detector_pool(
             status=DetectionStatus.ACCEPTED,
         )
         .exclude(image_id__in=images_with_pending)
-        # Reviewer-flagged under-annotated images: their un-boxed insects would
-        # train the detector to treat real insects as background. Drop them.
-        .exclude(image__exclude_from_training=True)
+        # Opt-in: the detector trains only on images the reviewer explicitly
+        # marked "Include in YOLO training".
+        .filter(image__include_in_training=True)
         .select_related('image')
     )
     return [
