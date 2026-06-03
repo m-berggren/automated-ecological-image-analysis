@@ -190,7 +190,7 @@
                   <td class="bg-muted/40"></td>
                   <td colspan="7" class="px-3 py-4">
                     <div class="grid grid-cols-2 gap-x-8 gap-y-3 max-w-3xl">
-                      <div>
+                      <div class="min-w-0">
                         <div
                           class="text-[11px] font-semibold uppercase tracking-wider text-muted-foreground mb-1"
                         >
@@ -199,7 +199,7 @@
                         <dl class="text-xs grid grid-cols-[auto_1fr] gap-x-4 gap-y-1">
                           <template v-for="[key, value] in visibleParams(v.parameters)" :key="key">
                             <dt class="text-muted-foreground">{{ key }}</dt>
-                            <dd class="font-mono">{{ formatParam(value) }}</dd>
+                            <dd class="font-mono min-w-0 break-words whitespace-pre-line">{{ formatParam(value) }}</dd>
                           </template>
                         </dl>
                       </div>
@@ -690,15 +690,35 @@ function toggleExpanded(id: number) {
   expandedIds.value = next
 }
 
+// Compact one-line rendering for nested values (numbers, arrays, objects).
+function inlineParam(value: unknown): string {
+  if (typeof value === 'number') {
+    if (value < 0.01 && value > 0) return value.toExponential(1)
+    return String(value)
+  }
+  if (Array.isArray(value)) return `[${value.map(inlineParam).join(', ')}]`
+  if (value !== null && typeof value === 'object') {
+    return `{${Object.entries(value)
+      .map(([k, v]) => `${k}: ${inlineParam(v)}`)
+      .join(', ')}}`
+  }
+  return String(value)
+}
+
 function formatParam(value: unknown): string {
   if (typeof value === 'number') {
     if (value < 0.01 && value > 0) return value.toExponential(1)
     return String(value)
   }
-  if (Array.isArray(value)) return value.join(', ')
-  // Nested objects (e.g. tile_config) would stringify to "[object Object]";
-  // render compact JSON so the values are actually readable.
-  if (value !== null && typeof value === 'object') return JSON.stringify(value)
+  if (Array.isArray(value)) return value.map(inlineParam).join(', ')
+  // Nested objects (e.g. tile_config): render one "key: value" per line so the
+  // card stays readable instead of a long JSON blob. Nested objects are
+  // compacted inline. The <dd> uses whitespace-pre-line to honor the breaks.
+  if (value !== null && typeof value === 'object') {
+    return Object.entries(value)
+      .map(([k, v]) => `${k}: ${inlineParam(v)}`)
+      .join('\n')
+  }
   return String(value)
 }
 </script>
