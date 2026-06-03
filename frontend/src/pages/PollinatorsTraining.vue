@@ -1481,12 +1481,17 @@ function toggleJobLog(trackId: string) {
 // shared GPU/CPU.
 const anyJobActive = computed(() => tracks.value.some((t) => t.active_job !== null))
 
+// The YOLO detector needs enough images to form a train/val split and to be
+// worth training on at all; below this we lock the detector retrain.
+const MIN_DETECTOR_IMAGES = 10
+
 const canSubmit = computed(() => {
   if (!selectedTrack.value) return false
   if (anyJobActive.value) return false
   if (splitTotal.value !== 100) return false
   // Incremental retraining requires a base model to continue from.
   if (selectedSourceId.value == null) return false
+  if (isDetector.value && totalPoolSamples.value < MIN_DETECTOR_IMAGES) return false
   return true
 })
 
@@ -1503,6 +1508,9 @@ const submitBlockReason = computed<string>(() => {
   }
   if (selectedSourceId.value == null) {
     return `${selectedTrack.value.label} has no model version to retrain from.`
+  }
+  if (isDetector.value && totalPoolSamples.value < MIN_DETECTOR_IMAGES) {
+    return `The detector needs at least ${MIN_DETECTOR_IMAGES} images to retrain (have ${totalPoolSamples.value}). Review more images or upload a labelled dataset.`
   }
   return ''
 })
