@@ -54,12 +54,19 @@ function Invoke-Tool([string[]]$cmd) {
 }
 
 function Start-Server([string[]]$cmd, [string]$dir) {
+  # Start-Process -NoNewWindow uses CreateProcess, which only launches real
+  # .exe files. npm is a batch shim (npm.cmd), so launching it directly fails
+  # with "%1 is not a valid Win32 application". Route everything through
+  # cmd.exe /c so both .cmd shims (npm) and native exes (uv) work; taskkill /T
+  # below still tears down the whole tree from the cmd.exe PID.
   $all = $prefix + $cmd
-  return Start-Process -FilePath $all[0] `
-    -ArgumentList $all[1..($all.Count - 1)] `
+  $line = ($all | ForEach-Object {
+    if ($_ -match '\s') { '"' + $_ + '"' } else { $_ }
+  }) -join ' '
+  return Start-Process -FilePath $env:ComSpec `
+    -ArgumentList '/c', $line `
     -WorkingDirectory $dir -PassThru -NoNewWindow
 }
-
 # ── Dependencies ───────────────────────────────────────────────────────────
 Write-Host '==> Syncing Python dependencies (uv sync)'
 Invoke-Tool @('uv', 'sync')
