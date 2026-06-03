@@ -596,9 +596,18 @@ Research notebooks (this folder)
 
 ### Checkpoint format compatibility
 
-The `.pth` files saved by the training notebooks are loaded directly by the
-`pollinator.classification` module that the Django app uses. No manual conversion is
-needed. The fields that matter:
+The `.pth` files saved by the training notebooks use the same dictionary format that
+the `pollinator.classification` module in the Django backend expects. No manual
+conversion is needed — the checkpoint can be uploaded directly via the web frontend.
+
+> **Note:** the standalone notebooks do not import the `pollinator` package — they use
+> their own self-contained PyTorch training code. What makes the checkpoints compatible
+> is that both the notebooks and the `pollinator.classification` loader use the same
+> PyTorch architectures (EfficientNet-B2, RegNet-Y-32GF) and the same checkpoint
+> dictionary layout. The file format is standard PyTorch (`torch.save` / `torch.load`) —
+> not anything notebook-specific.
+
+The fields the backend reads:
 
 | Field | Binary classifier | Group classifier |
 |---|---|---|
