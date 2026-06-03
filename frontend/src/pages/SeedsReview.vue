@@ -135,6 +135,16 @@
       <div
         class="relative w-full overflow-hidden rounded-2xl border border-border bg-black/5 shadow-sm"
       >
+        <button
+          class="absolute top-4 left-4 z-10 px-3 py-2 rounded-lg border border-border bg-surface shadow-md text-sm font-medium select-none hover:bg-muted"
+          :class="boxesHidden ? 'ring-2 ring-primary text-primary' : ''"
+          title="Hold to hide the boxes (or hold H) so missed seeds are easy to spot; they come back on release"
+          @mousedown.prevent="peekStart"
+          @mouseup="peekEnd"
+          @mouseleave="peekEnd"
+        >
+          {{ boxesHidden ? 'Boxes hidden' : 'Hold to hide' }}
+        </button>
         <div
           class="absolute top-4 right-4 z-10 flex items-center bg-surface border border-border rounded-lg shadow-md overflow-hidden text-sm"
         >
@@ -170,6 +180,7 @@
             >
               <polygon
                 v-for="detection in currentDetections"
+                v-show="!boxesHidden"
                 :key="detection.id"
                 :points="getPolygonPoints(detection)"
                 stroke-width="12"
@@ -601,4 +612,45 @@ function goBack() {
 function navigateToExport() {
   router.push({ path: `/seeds/runs/${route.params.id}/export` })
 }
+
+// Peek: hold H (or press-and-hold the toolbar button) to fully hide the
+// detection polygons so missed seeds are easy to spot; they return on release.
+const boxesHidden = ref(false)
+
+function peekStart() {
+  boxesHidden.value = true
+}
+function peekEnd() {
+  boxesHidden.value = false
+}
+
+function onPeekKeyDown(e: KeyboardEvent) {
+  if (e.repeat) return
+  const t = e.target
+  if (t instanceof HTMLElement && ['INPUT', 'TEXTAREA', 'SELECT'].includes(t.tagName)) {
+    return
+  }
+  if (e.key === 'h' || e.key === 'H') {
+    e.preventDefault()
+    peekStart()
+  }
+}
+function onPeekKeyUp(e: KeyboardEvent) {
+  if (e.key === 'h' || e.key === 'H') {
+    e.preventDefault()
+    peekEnd()
+  }
+}
+
+onMounted(() => {
+  window.addEventListener('keydown', onPeekKeyDown)
+  window.addEventListener('keyup', onPeekKeyUp)
+  // Losing focus mid-hold (alt-tab) would otherwise leave the boxes hidden.
+  window.addEventListener('blur', peekEnd)
+})
+onBeforeUnmount(() => {
+  window.removeEventListener('keydown', onPeekKeyDown)
+  window.removeEventListener('keyup', onPeekKeyUp)
+  window.removeEventListener('blur', peekEnd)
+})
 </script>
