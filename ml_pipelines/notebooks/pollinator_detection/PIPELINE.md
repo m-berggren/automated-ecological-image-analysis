@@ -19,7 +19,7 @@ For quick-start instructions, see [README.md](README.md).
 9. [Model outputs and versioning](#9-model-outputs-and-versioning)
 10. [Active learning loop](#10-active-learning-loop)
 11. [Relationship to the Django production system](#11-relationship-to-the-django-production-system)
-12. [Deploying models to the production system](#12-deploying-models-to-the-production-system)
+12. [Checkpoint format and model upload](#12-deploying-models-to-the-production-system)
 
 ---
 
@@ -38,12 +38,14 @@ Runs in `infer_cropbased.ipynb`.
    bumblebee, fly, butterfly, or other.
 
 The preprocessing step is independent of the classification step. You can run
-`infer_cropbased.ipynb` in `MODE = 'preprocess'` to extract crops without any model loaded
-(useful for data collection), or in `MODE = 'infer'` to do both in one pass.
+`infer_cropbased.ipynb` with all pipelines disabled (set `enabled: False` for every
+entry in the `PIPELINES` dict in Cell 3) to extract crops without running any classifier
+— useful for data collection. Or leave pipelines enabled to do preprocessing and
+classification in one pass.
 
 > **Note on the notebook name:** `infer_cropbased.ipynb` does *both* preprocessing and
-> inference — the name only reflects the most common use case. If you want to collect
-> training data without running a classifier, set `MODE = 'preprocess'` in Cell 3.
+> inference — the name only reflects the most common use case. To collect training data
+> without running a classifier, disable all pipelines in Cell 3's `PIPELINES` config.
 
 ### YOLO pipeline
 Runs in `infer_yolo.ipynb`.
@@ -129,7 +131,7 @@ new training data from field images.
 Camera folder (raw JPG images)
       ↓  [optional] tools/triage/frame_flag_mac.py or feh-triage.sh
          → flag interesting frames to prioritise
-      ↓  infer_cropbased.ipynb  (MODE = 'preprocess', no classifiers loaded)
+      ↓  infer_cropbased.ipynb  (all pipelines disabled — preprocessing only)
          → background subtraction extracts candidate regions
          → crops/ folder: one JPEG per candidate bounding box
          → results.csv: one row per crop with bbox coords, no predictions
@@ -157,7 +159,7 @@ which crops to label.
 **Full path (model is trustworthy, large runs):**
 ```
 Camera folder (raw JPG images)
-      ↓  infer_cropbased.ipynb  (MODE = 'infer', classifiers loaded)
+      ↓  infer_cropbased.ipynb  (pipelines enabled — preprocessing + classification)
          → full inference: preprocessing + classification
          → crop_results/{run_name}/{camera}/crops/*.jpg  +  results.csv
       ↓  prepare_retrain.ipynb
@@ -426,7 +428,7 @@ The full iterative improvement cycle looks like this:
         ↓
 2. [optional] tools/triage/frame_flag_mac.py  — flag interesting frames
         ↓
-3. infer_cropbased.ipynb  (MODE='infer')
+3. infer_cropbased.ipynb  (pipelines enabled)
    → preprocessing + current classifiers
    → writes crop_results/{run_name}/{camera}/crops/  +  results.csv
         ↓
@@ -571,34 +573,19 @@ UI uses to flag disagreements.
 
 ---
 
-## 12. Deploying models to the production system
+## 12. Checkpoint format and model upload
 
-The research notebooks (this folder) and the Django production system share the same
-underlying `pollinator` Python library. A model trained here can be registered in the
-Django app with a single upload step — no format conversion needed.
+The standalone notebooks (`experiments/`) are fully self-contained and do **not** import
+the `pollinator` package. Despite this, the `.pth` checkpoints they produce are directly
+compatible with the Django backend — no format conversion needed. This is because both
+use the same PyTorch architectures (EfficientNet-B2, RegNet-Y-32GF) and save checkpoints
+in the same dictionary layout (`state_dict`, `classes`, `img_size`).
 
-### Overview
+After a training run completes, the best weights are automatically copied to `models/`
+(flat directory). Upload the file through the **web frontend** — the Django backend
+registers it as a new `ModelVersion` that can be selected for inference on Django frontend.
 
-```
-Research notebooks (this folder)
-  train_binary_group.ipynb  /  train_5class.ipynb  /  train_yolo.ipynb
-          ↓  train on Colab or locally
-  outputs/training/model_runs/{name}_{timestamp}/
-          ↓  best weights copied automatically
-  models/binary_best.pth  /  4group_insectnet.pth  /  yolo_best.pt
-          ↓  upload via the web frontend
-  Django ModelVersion (registered, selectable for inference)
-          ↓  Django TrainingJob (active-learning round)
-  retrain_binary() / retrain_group() / retrain_yolo()  ← same functions as here
-          ↓
-  new ModelVersion (incremental, resume_from= previous upload)
-```
-
-### Checkpoint format compatibility
-
-The `.pth` files saved by the training notebooks are loaded directly by the
-`pollinator.classification` module that the Django app uses. No manual conversion is
-needed. The fields that matter:
+### Checkpoint fields
 
 | Field | Binary classifier | Group classifier |
 |---|---|---|
@@ -607,31 +594,13 @@ needed. The fields that matter:
 | `classes` | not used (always background/insect) | ✓ required — list of class names |
 | `model_name` / arch | auto-detected from `state_dict` keys | auto-detected from `state_dict` keys |
 
-The YOLO model (`yolo_best.pt`) is a standard Ultralytics checkpoint and is loaded
-directly by Ultralytics YOLO in the Django backend — no special handling needed.
+The YOLO model (`yolo_best.pt`) is a standard Ultralytics checkpoint — no special handling needed.
 
 > **Architecture auto-detection:** `BinaryClassifier` and `GroupClassifier` identify the
 > backbone by inspecting the `state_dict` key names — no explicit `model_name` field is
 > read. EfficientNet-B2 keys start with `features.`; InsectNet (RegNet-Y-32GF) keys
 > contain `trunk_output` or `stem.`. Both architectures produced by the training
 > notebooks are recognised correctly.
-
-### Uploading a trained model
-
-After a training run completes, the best weights are in `outputs/training/model_runs/{name}_{timestamp}/`
-and also copied to `models/` (flat).
-
-Upload the file through the **web frontend** — navigate to the model management page
-and use the upload form. The Django backend registers it as a new `ModelVersion`, which
-can then be selected for inference and used as the starting point for future retraining jobs.
-
-### Incremental retraining from a notebook-trained base
-
-When Django's `TrainingJob` runs a retraining round, it calls the same
-`retrain_binary()`, `retrain_group()`, and `retrain_yolo()` functions from
-`pollinator.workflows`. The `resume_from` parameter points to the currently deployed
-`ModelVersion` weights, so the production retraining always starts from the last
-uploaded checkpoint — including one you trained here.
 
 This means the standard handoff looks like:
 1. Train a strong base model in the notebooks (full dataset, more epochs, Colab GPU)
