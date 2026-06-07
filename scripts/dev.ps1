@@ -7,10 +7,10 @@ Run the whole app for local development on Windows: Django API + Vite dev server
 Starts the Django API (:8000) and the Vue/Vite dev server (:5173) together and
 shuts both down on Ctrl+C. Open http://localhost:5173 to use the app.
 
-Uses uv + npm directly if they're on PATH. Otherwise installs mise via winget
-(which provides uv + node); because a freshly installed tool isn't on the
-current PATH, it then asks you to reopen the terminal and re-run. uv provides
-Python 3.13, so there's no separate Python install step.
+Uses uv + npm directly if they're on PATH. Otherwise installs mise inline via
+its own PowerShell installer (https://mise.run, no winget required), which
+provides uv + node, and keeps going in the same run by calling mise.exe by full
+path. uv provides Python 3.13, so there's no separate Python install step.
 
 .EXAMPLE
 powershell -ExecutionPolicy Bypass -File scripts\dev.ps1
@@ -33,17 +33,23 @@ if ((Have 'uv') -and (Have 'npm')) {
   # use them directly
 }
 else {
-  if (-not (Have 'mise')) {
-    if (-not (Have 'winget')) {
-      throw "Neither uv/node nor mise/winget found. Install mise (https://mise.jdx.dev) or uv + Node 24, then re-run."
-    }
-    Write-Host '==> Installing mise via winget'
-    winget install --id jdx.mise -e --source winget --accept-package-agreements --accept-source-agreements
-    throw 'Installed mise. Open a NEW terminal (so PATH updates) and re-run this script.'
+  # Find an existing mise, or install it inline. The mise.run installer drops
+  # mise.exe in %USERPROFILE%\.local\bin, which isn't on the current PATH yet,
+  # so we reference it by full path instead of forcing a terminal restart.
+  $mise = if (Have 'mise') { (Get-Command mise).Source }
+          else { Join-Path $env:USERPROFILE '.local\bin\mise.exe' }
+  if (-not (Test-Path $mise)) {
+    Write-Host '==> Installing mise (https://mise.run)'
+    Invoke-RestMethod 'https://mise.run/install.ps1' | Invoke-Expression
+  }
+  if (-not (Test-Path $mise)) {
+    throw "mise not found at $mise after install. Install uv + Node 24 manually (https://docs.astral.sh/uv), then re-run."
   }
   Write-Host '==> Ensuring uv + node via mise (mise install)'
-  mise install
-  $prefix = @('mise', 'exec', '--')
+  & $mise trust 2>$null    # trust this repo's mise.toml so install is non-interactive
+  & $mise install
+  if ($LASTEXITCODE -ne 0) { throw 'mise install failed.' }
+  $prefix = @($mise, 'exec', '--')
 }
 
 # Build a full argv (mise prefix + command) and split into exe + args.
@@ -79,6 +85,17 @@ if (-not (Test-Path 'frontend/node_modules')) {
 
 Write-Host '==> Applying database migrations'
 Invoke-Tool @('uv', 'run', 'python', 'manage.py', 'migrate')
+
+# Ensure a login exists on a fresh DB. createsuperuser --noinput reads the
+# password from DJANGO_SUPERUSER_PASSWORD; it exits non-zero if 'admin' already
+# exists, which is fine (idempotent), so swallow that.
+Write-Host '==> Ensuring admin superuser (admin / admin123)'
+$env:DJANGO_SUPERUSER_PASSWORD = 'admin123'
+try {
+  Invoke-Tool @('uv', 'run', 'python', 'manage.py', 'createsuperuser',
+                '--noinput', '--username', 'admin', '--email', 'admin@example.com')
+}
+catch { Write-Host '    (admin already exists; leaving it as is)' }
 
 # ── Run both servers; kill each whole tree (/T) on exit ─────────────────────
 # 127.0.0.1 (not 0.0.0.0) keeps the Windows Defender Firewall prompt away.

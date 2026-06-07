@@ -60,6 +60,14 @@ fi
 echo "==> Applying database migrations"
 "${PREFIX[@]}" uv run python manage.py migrate
 
+# Ensure a login exists on a fresh DB. createsuperuser --noinput reads the
+# password from DJANGO_SUPERUSER_PASSWORD; it exits non-zero if 'admin' already
+# exists, which is fine (idempotent), so swallow that.
+echo "==> Ensuring admin superuser (admin / admin123)"
+DJANGO_SUPERUSER_PASSWORD=admin123 "${PREFIX[@]}" uv run python manage.py createsuperuser \
+  --noinput --username admin --email admin@example.com 2>/dev/null \
+  || echo "    (admin already exists; leaving it as is)"
+
 # ── Run both servers; kill the whole tree on exit ───────────────────────────
 # `set -m` puts each background job in its own process group, so killing the
 # negative PID tears down the whole tree (Django's reloader child, Vite's node
