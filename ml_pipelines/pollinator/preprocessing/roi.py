@@ -109,7 +109,8 @@ def setup_zone(first_image: np.ndarray, cfg: dict) -> np.ndarray:
 def is_in_roi(bbox: tuple, zone: np.ndarray) -> bool:
     """True if the bbox center or any corner falls inside the zone mask."""
     x, y, w, h = bbox
-    cx, cy = x + w // 2, y + h // 2
+    cx = max(0, min(x + w // 2, zone.shape[1] - 1))
+    cy = max(0, min(y + h // 2, zone.shape[0] - 1))
     if zone[cy, cx] > 0:
         return True
     for px, py in [(x, y), (x + w, y), (x, y + h), (x + w, y + h)]:
