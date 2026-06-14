@@ -58,6 +58,7 @@ dev = [
     "ruff>=0.15.7",
     "pytest>=8.4.0",
     "pytest-cov>=6.0.0",
+    "pytest-django>=4.9.0",
 ]
 prod = [
     "gunicorn>=23.0.0",
@@ -70,18 +71,32 @@ indent = 2
 
 [tool.pytest.ini_options]
 minversion = "8.0"
-testpaths = ["tests/unit"]
+testpaths = ["tests/unit", "tests/integration"]
 # Repo root on sys.path so `import ml_pipelines...` resolves without an install step.
 pythonpath = ["."]
-addopts = "-ra"
+# importlib import-mode lets two test files share a basename across dirs
+# (e.g. ml_pipelines/.../test_exif.py and apps/pollinator/test_exif.py).
+# Tests are categorised by directory (see tests/conftest.py); a bare `pytest`
+# runs only the fast unit set. Select others with -m:
+#   pytest                      -> unit only (default)
+#   pytest -m integration       -> integration only
+#   pytest -m "not e2e"         -> unit + integration
+#   pytest -m e2e               -> end-to-end (real weights / training)
+addopts = "-ra --import-mode=importlib -m 'not integration and not e2e'"
+DJANGO_SETTINGS_MODULE = "config.settings.testing"
+markers = [
+    "unit: fast, isolated test (may use the test DB); runs on every push",
+    "integration: DRF APIClient / cross-component test against the test DB",
+    "e2e: loads real model weights or trains a model; run on demand",
+]
 # Coverage is opt-in (keeps the TDD loop fast); run e.g.
 #   uv run pytest --cov --cov-report=term-missing
 # CI adds --cov-report=xml. Config lives in [tool.coverage.*] below.
 
 [tool.coverage.run]
-source = ["ml_pipelines"]
+source = ["ml_pipelines", "apps"]
 branch = true
-omit = ["*/notebooks/*"]
+omit = ["*/notebooks/*", "*/migrations/*", "*/tests.py"]
 
 [tool.coverage.report]
 show_missing = true
