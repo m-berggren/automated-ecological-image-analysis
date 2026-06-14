@@ -3,6 +3,13 @@ __pycache__/
 *.pyc
 *.pyo
 
+# Testing / coverage
+.pytest_cache/
+.coverage
+.coverage.*
+coverage.xml
+htmlcov/
+
 #yolo seed model
 *.pt
 
