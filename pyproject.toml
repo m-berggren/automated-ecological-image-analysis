@@ -96,10 +96,30 @@ markers = [
 [tool.coverage.run]
 source = ["ml_pipelines", "apps"]
 branch = true
-omit = ["*/notebooks/*", "*/migrations/*", "*/tests.py"]
+omit = [
+    "*/notebooks/*",
+    "*/migrations/*",
+    "*/tests.py",
+    # ML-execution code: only runs with real weights/data, exercised by the
+    # e2e lane (tests/e2e), not by the unit/integration CI lanes. Excluded so
+    # the reported % reflects code CI can actually reach.
+    "ml_pipelines/main.py",
+    "ml_pipelines/pollinator/classification/*.py",
+    "ml_pipelines/pollinator/detection/*.py",
+    "ml_pipelines/pollinator/training/train_*.py",
+    "ml_pipelines/pollinator/training/backbones.py",
+    "ml_pipelines/pollinator/training/plots.py",
+    "ml_pipelines/seed_src/training/train.py",
+    "ml_pipelines/seed_src/inference/inference.py",
+    "ml_pipelines/seed_src/evaluation/*.py",
+]
 
 [tool.coverage.report]
 show_missing = true
+# No global fail_under: the default `pytest --cov` is unit-only (~46%) and
+# would trip it. The floor belongs on the CI command that runs the combined
+# suite (unit + integration, ~66%):
+#   uv run pytest -m "not e2e" --cov --cov-fail-under=60
 exclude_lines = [
     "pragma: no cover",
     "if __name__ == .__main__.:",

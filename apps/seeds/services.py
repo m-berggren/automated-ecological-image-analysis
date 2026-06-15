@@ -20,7 +20,7 @@ from apps.datasets.models import ImageAsset
 logger = logging.getLogger(__name__)
 
 
-def process_seeds_run(run_id: int):
+def process_seeds_run(run_id: int):  # pragma: no cover
     try:
         run = InferenceRun.objects.get(pk=run_id)
         run.status = JobStatus.RUNNING
@@ -149,13 +149,13 @@ def process_seeds_run(run_id: int):
         run.save(update_fields=['status', 'error_message'])
 
 
-def spawn_seeds_pipeline(run):
+def spawn_seeds_pipeline(run):  # pragma: no cover
     thread = threading.Thread(target=process_seeds_run, args=(run.pk,))
     thread.daemon = True
     thread.start()
 
 
-def generate_export_bundle(run_id: int):
+def generate_export_bundle(run_id: int):  # pragma: no cover
     run = InferenceRun.objects.get(pk=run_id)
     images = run.upload.images.filter(purpose='inference')
     species = run.config.get('selected_seed', 'Unknown')
