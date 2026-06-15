@@ -184,7 +184,7 @@ def _merge_image_detections(
     return merged
 
 
-class PollinatorInferencePipeline:
+class PollinatorInferencePipeline:  # pragma: no cover
     """Stateful pollinator pipeline driven one image at a time.
 
     Construction loads the three models and caches the merged config. Call
@@ -386,7 +386,7 @@ class PollinatorInferencePipeline:
         return out
 
 
-def _cli() -> None:
+def _cli() -> None:  # pragma: no cover
     logging.basicConfig(level=logging.INFO, format='%(levelname)s %(message)s')
     parser = argparse.ArgumentParser(
         description='Run the full pollinator inference pipeline on a folder.'

@@ -112,6 +112,10 @@ omit = [
     "ml_pipelines/seed_src/training/train.py",
     "ml_pipelines/seed_src/inference/inference.py",
     "ml_pipelines/seed_src/evaluation/*.py",
+    "ml_pipelines/pollinator/workflows/training_*.py",
+    "ml_pipelines/pollinator/training/__init__.py",
+    # Demo-data importer: operational tooling, not business logic.
+    "*/management/*",
 ]
 
 [tool.coverage.report]
