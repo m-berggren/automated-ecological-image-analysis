@@ -69,6 +69,18 @@ class TestDetail:
         d = _det(run, img)
         assert auth_client.get(f'/api/pollinator/detections/{d.pk}/').status_code == 200
 
+    def test_patch_review_confirms(self, auth_client):
+        run, img = _run(), _image()
+        d = _det(run, img, status=DetectionStatus.PENDING)
+        resp = auth_client.patch(
+            f'/api/pollinator/detections/{d.pk}/',
+            {'reviewer_status': 'confirmed'},
+            format='json',
+        )
+        assert resp.status_code == 200
+        d.refresh_from_db()
+        assert d.status == DetectionStatus.ACCEPTED
+
 
 class TestAutoSelect:
     def _url(self, run_pk):

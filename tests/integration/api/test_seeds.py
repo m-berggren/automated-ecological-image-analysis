@@ -8,7 +8,7 @@ left out of this suite.
 import pytest
 
 from apps.analysis.models import Detection, InferenceRun
-from apps.datasets.models import ImageAsset, Module
+from apps.datasets.models import ImageAsset, Module, Upload
 
 pytestmark = pytest.mark.django_db
 
@@ -80,3 +80,16 @@ class TestManualCount:
         assert resp.status_code == 200
         img.refresh_from_db()
         assert img.metadata['manual_active_count'] == 5
+
+
+class TestReferenceReview:
+    def test_get_lists_images(self, auth_client):
+        up = Upload.objects.create(module=Module.SEEDS, name='u')
+        run = InferenceRun.objects.create(module=Module.SEEDS, upload=up)
+        img = ImageAsset.objects.create(
+            module=Module.SEEDS, file='x.jpg', purpose='inference',
+            upload=up, width=100, height=80,
+        )
+        _det(run, img, SQUARE_BIG)
+        resp = auth_client.get(f'/api/seeds/runs/{run.pk}/reference-review/')
+        assert resp.status_code == 200

@@ -7,7 +7,10 @@ left for an integration test against real camera files.
 """
 
 import datetime
+import io
 from fractions import Fraction
+
+from PIL import Image
 
 from apps.pollinator import exif
 
@@ -126,3 +129,35 @@ class TestDetermineExclusion:
         settings.AUTO_EXCLUDE_FLASH = False
         settings.AUTO_EXCLUDE_FOGGY = False
         assert exif._determine_exclusion(True, 10.0) == (False, '')
+
+
+class TestExtractImageMetadata:
+    """Covers the disk-reading entrypoint: dimensions, real EXIF parsing,
+    Laplacian variance, and the assembled metadata dict."""
+
+    def test_reads_dimensions_and_real_exif(self):
+        ex = Image.Exif()
+        ex[0x0132] = '2024:05:01 13:45:30'  # DateTime (round-trips in main IFD)
+        ex[0x0110] = 'TestCam'  # Model
+        buf = io.BytesIO()
+        Image.new('RGB', (30, 20), (90, 110, 130)).save(buf, 'JPEG', exif=ex)
+        buf.seek(0)
+
+        meta = exif.extract_image_metadata(buf)
+
+        assert meta['width'] == 30
+        assert meta['height'] == 20
+        assert meta['captured_at'] is not None  # parsed from DateTime
+        assert isinstance(meta['exif'], dict) and meta['exif']
+        assert 'laplacian_var' in meta
+
+    def test_image_without_exif(self):
+        buf = io.BytesIO()
+        Image.new('RGB', (10, 10)).save(buf, 'JPEG')
+        buf.seek(0)
+
+        meta = exif.extract_image_metadata(buf)
+
+        assert meta['width'] == 10
+        assert meta['captured_at'] is None
+        assert meta['exif'] == {}

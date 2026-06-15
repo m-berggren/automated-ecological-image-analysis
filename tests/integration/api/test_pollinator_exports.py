@@ -59,10 +59,19 @@ def small_run(settings, tmp_path):
 
 
 class TestExportCsv:
-    def test_streams_csv(self, auth_client, small_run):
+    def test_streams_csv_per_image(self, auth_client, small_run):
         resp = auth_client.get(f'/api/pollinator/runs/{small_run.pk}/export.csv')
         assert resp.status_code == 200
         assert 'csv' in resp['Content-Type'].lower()
+        body = b''.join(resp.streaming_content)  # consume the generator
+        assert body  # at least a header row
+
+    def test_streams_csv_per_detection(self, auth_client, small_run):
+        resp = auth_client.get(
+            f'/api/pollinator/runs/{small_run.pk}/export.csv', {'mode': 'per_detection'}
+        )
+        assert resp.status_code == 200
+        assert b''.join(resp.streaming_content)
 
     def test_missing_returns_404(self, auth_client):
         assert auth_client.get('/api/pollinator/runs/999999/export.csv').status_code == 404

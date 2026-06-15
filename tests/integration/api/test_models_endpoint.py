@@ -49,3 +49,24 @@ class TestSetActive:
 
     def test_missing_returns_404(self, auth_client):
         assert auth_client.post(f'{MODELS}999999/set-active/').status_code == 404
+
+
+class TestModelDetail:
+    def test_get(self, auth_client):
+        mv = _mv(name='a')
+        assert auth_client.get(f'{MODELS}{mv.pk}/').status_code == 200
+
+    def test_patch_rename(self, auth_client):
+        mv = _mv(name='a')
+        resp = auth_client.patch(
+            f'{MODELS}{mv.pk}/', {'version_name': 'renamed'}, format='json'
+        )
+        assert resp.status_code == 200
+        mv.refresh_from_db()
+        assert mv.version_name == 'renamed'
+
+    def test_delete(self, auth_client, settings, tmp_path):
+        settings.MEDIA_ROOT = str(tmp_path)
+        mv = _mv(name='a')
+        assert auth_client.delete(f'{MODELS}{mv.pk}/').status_code == 204
+        assert not ModelVersion.objects.filter(pk=mv.pk).exists()
