@@ -81,7 +81,7 @@ pythonpath = ["."]
 #   pytest                      -> unit only (default)
 #   pytest -m integration       -> integration only
 #   pytest -m "not e2e"         -> unit + integration
-#   pytest -m e2e               -> end-to-end (real weights / training)
+#   pytest -m e2e tests/e2e     -> end-to-end (needs real weights; see tests/e2e)
 addopts = "-ra --import-mode=importlib -m 'not integration and not e2e'"
 DJANGO_SETTINGS_MODULE = "config.settings.testing"
 markers = [
