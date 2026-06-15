@@ -12,8 +12,14 @@ from apps.datasets.models import Module
 pytestmark = pytest.mark.django_db
 
 
-def _make(active, *, kind=ModelKind.DETECTOR, module=Module.POLLINATORS,
-          species=None, name='v'):
+def _make(
+    active,
+    *,
+    kind=ModelKind.DETECTOR,
+    module=Module.POLLINATORS,
+    species=None,
+    name='v',
+):
     return ModelVersion.objects.create(
         module=module,
         kind=kind,

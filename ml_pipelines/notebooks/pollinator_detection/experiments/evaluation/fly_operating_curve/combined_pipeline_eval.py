@@ -77,10 +77,17 @@ def load_gt(label_path: Path, img_w: int, img_h: int, keep: list) -> list:
         if name not in keep:
             continue
         cx, cy, w, h = (float(v) for v in parts[1:5])
-        out.append((name, [
-            (cx - w / 2) * img_w, (cy - h / 2) * img_h,
-            (cx + w / 2) * img_w, (cy + h / 2) * img_h,
-        ]))
+        out.append(
+            (
+                name,
+                [
+                    (cx - w / 2) * img_w,
+                    (cy - h / 2) * img_h,
+                    (cx + w / 2) * img_w,
+                    (cy + h / 2) * img_h,
+                ],
+            )
+        )
     return out
 
 
@@ -120,17 +127,29 @@ def run_pipeline_for_plot(plot: str, paths: list, args, out_json: Path) -> None:
         for p in paths:
             (tmp_dir / p.name).symlink_to(p.resolve())
         cmd = [
-            sys.executable, '-m', 'pollinator.workflows.inference',
-            '--image_dir', str(tmp_dir),
-            '--output_json', str(out_json),
-            '--yolo_model', str(Path(args.yolo_model).resolve()),
-            '--binary_model', str(Path(args.binary_model).resolve()),
-            '--group_model', str(Path(args.group_model).resolve()),
-            '--yolo_confidence', str(args.infer_yolo_conf),
-            '--yolo_slice_size', str(args.slice_size),
-            '--yolo_overlap', str(args.overlap),
-            '--binary_threshold', str(args.infer_binary_thr),
-            '--iou_threshold', str(args.merge_iou),
+            sys.executable,
+            '-m',
+            'pollinator.workflows.inference',
+            '--image_dir',
+            str(tmp_dir),
+            '--output_json',
+            str(out_json),
+            '--yolo_model',
+            str(Path(args.yolo_model).resolve()),
+            '--binary_model',
+            str(Path(args.binary_model).resolve()),
+            '--group_model',
+            str(Path(args.group_model).resolve()),
+            '--yolo_confidence',
+            str(args.infer_yolo_conf),
+            '--yolo_slice_size',
+            str(args.slice_size),
+            '--yolo_overlap',
+            str(args.overlap),
+            '--binary_threshold',
+            str(args.infer_binary_thr),
+            '--iou_threshold',
+            str(args.merge_iou),
         ]
         env = dict(os.environ, PYTHONPATH=str(Path(args.pipeline_root).resolve()))
         print(f'[infer] plot={plot} ({len(paths)} images) -> {out_json}')
@@ -153,7 +172,10 @@ def yolo_branch(d: dict):
 def crop_branch(d: dict):
     """Return (class, conf, box) if this record has a crop detection, else None.
     Confidence is the binary insect/background gate score."""
-    if d['source'] in ('preprocessing', 'both') and d.get('insectnet_class') is not None:
+    if (
+        d['source'] in ('preprocessing', 'both')
+        and d.get('insectnet_class') is not None
+    ):
         conf = d.get('binary_confidence')
         conf = float(conf) if conf is not None else 1.0
         return d['insectnet_class'], conf, detection_to_box(d)
@@ -175,7 +197,9 @@ def combined_branch(d: dict, yolo_thr: float, bin_thr: float):
 
 
 # ── matching ─────────────────────────────────────────────────────────────────
-def evaluate(dets_per_image: dict, gt_per_image: dict, iou_thr: float, classes: list) -> dict:
+def evaluate(
+    dets_per_image: dict, gt_per_image: dict, iou_thr: float, classes: list
+) -> dict:
     """dets_per_image: {image_name: [(class, conf, box), ...]}. Greedy IoU match per class."""
     stats = {c: {'tp': 0, 'fp': 0, 'fn': 0} for c in classes}
     for img_name, gts in gt_per_image.items():
@@ -204,8 +228,7 @@ def evaluate(dets_per_image: dict, gt_per_image: dict, iou_thr: float, classes: 
         tp, fp, fn = s['tp'], s['fp'], s['fn']
         p = tp / max(1, tp + fp)
         r = tp / max(1, tp + fn)
-        out[c] = {**s, 'precision': p, 'recall': r,
-                  'f1': 2 * p * r / max(1e-9, p + r)}
+        out[c] = {**s, 'precision': p, 'recall': r, 'f1': 2 * p * r / max(1e-9, p + r)}
     return out
 
 
@@ -215,23 +238,33 @@ def print_block(title: str, res: dict, classes: list) -> None:
         s = res[c]
         if s['tp'] + s['fp'] + s['fn'] == 0:
             continue
-        print(f'  {c:10s} TP={s["tp"]:4d} FP={s["fp"]:5d} FN={s["fn"]:4d}  '
-              f'R={s["recall"]:.3f} P={s["precision"]:.3f} F1={s["f1"]:.3f}')
+        print(
+            f'  {c:10s} TP={s["tp"]:4d} FP={s["fp"]:5d} FN={s["fn"]:4d}  '
+            f'R={s["recall"]:.3f} P={s["precision"]:.3f} F1={s["f1"]:.3f}'
+        )
 
 
 def main():
-    ap = argparse.ArgumentParser(description=__doc__,
-                                 formatter_class=argparse.RawDescriptionHelpFormatter)
-    ap.add_argument('--pipeline-root', default=PIPELINE_ROOT,
-                    help='Path to ml_pipelines (so pollinator.* is importable).')
+    ap = argparse.ArgumentParser(
+        description=__doc__, formatter_class=argparse.RawDescriptionHelpFormatter
+    )
+    ap.add_argument(
+        '--pipeline-root',
+        default=PIPELINE_ROOT,
+        help='Path to ml_pipelines (so pollinator.* is importable).',
+    )
     ap.add_argument('--images', default=IMAGES)
     ap.add_argument('--labels', default=LABELS)
     ap.add_argument('--yolo-model', required=True)
     ap.add_argument('--binary-model', required=True)
     ap.add_argument('--group-model', required=True)
     ap.add_argument('--out', default=PRED_DIR)
-    ap.add_argument('--plots', nargs='*', default=[],
-                    help='Restrict to these plot prefixes (default: all found).')
+    ap.add_argument(
+        '--plots',
+        nargs='*',
+        default=[],
+        help='Restrict to these plot prefixes (default: all found).',
+    )
     # Inference-time thresholds: keep low to capture every candidate, then sweep in post.
     ap.add_argument('--infer-yolo-conf', type=float, default=0.05)
     ap.add_argument('--infer-binary-thr', type=float, default=0.05)
@@ -242,8 +275,11 @@ def main():
     ap.add_argument('--op-yolo-conf', type=float, default=0.20)
     ap.add_argument('--op-binary-thr', type=float, default=0.50)
     ap.add_argument('--eval-iou', type=float, default=0.5)
-    ap.add_argument('--skip-inference', action='store_true',
-                    help='Reuse existing per-plot results.json under --out.')
+    ap.add_argument(
+        '--skip-inference',
+        action='store_true',
+        help='Reuse existing per-plot results.json under --out.',
+    )
     args = ap.parse_args()
 
     images_dir = Path(args.images)
@@ -277,10 +313,16 @@ def main():
         for p in paths:
             with Image.open(p) as im:
                 w, h = im.size
-            gt_per_image[p.name] = load_gt(labels_dir / (p.stem + '.txt'), w, h, KEEP_CLASSES)
+            gt_per_image[p.name] = load_gt(
+                labels_dir / (p.stem + '.txt'), w, h, KEEP_CLASSES
+            )
 
     # 4. Build per-branch detections at the operating point.
-    yolo_dets, crop_dets, comb_dets = defaultdict(list), defaultdict(list), defaultdict(list)
+    yolo_dets, crop_dets, comb_dets = (
+        defaultdict(list),
+        defaultdict(list),
+        defaultdict(list),
+    )
     for d in all_dets:
         name = d['image_name']
         y = yolo_branch(d)
@@ -299,12 +341,26 @@ def main():
         for cls, _ in v:
             gt_by_class[cls] += 1
     print(f'\nGround truth: {n_gt} boxes  {dict(gt_by_class)}')
-    print(f'Operating point: yolo_conf>={args.op_yolo_conf}, '
-          f'binary>={args.op_binary_thr}, match IoU>={args.eval_iou}')
+    print(
+        f'Operating point: yolo_conf>={args.op_yolo_conf}, '
+        f'binary>={args.op_binary_thr}, match IoU>={args.eval_iou}'
+    )
 
-    print_block('YOLO branch only:', evaluate(yolo_dets, gt_per_image, args.eval_iou, KEEP_CLASSES), KEEP_CLASSES)
-    print_block('Crop branch only:', evaluate(crop_dets, gt_per_image, args.eval_iou, KEEP_CLASSES), KEEP_CLASSES)
-    print_block('Combined (deployed):', evaluate(comb_dets, gt_per_image, args.eval_iou, KEEP_CLASSES), KEEP_CLASSES)
+    print_block(
+        'YOLO branch only:',
+        evaluate(yolo_dets, gt_per_image, args.eval_iou, KEEP_CLASSES),
+        KEEP_CLASSES,
+    )
+    print_block(
+        'Crop branch only:',
+        evaluate(crop_dets, gt_per_image, args.eval_iou, KEEP_CLASSES),
+        KEEP_CLASSES,
+    )
+    print_block(
+        'Combined (deployed):',
+        evaluate(comb_dets, gt_per_image, args.eval_iou, KEEP_CLASSES),
+        KEEP_CLASSES,
+    )
 
     # 5. Combined recall sweep over the YOLO threshold (binary held at the operating value).
     print('\nCombined recall sweep (binary held at operating value):')
@@ -316,18 +372,34 @@ def main():
                 sweep[d['image_name']].append(cb)
         res = evaluate(sweep, gt_per_image, args.eval_iou, KEEP_CLASSES)
         fly = res['fly']
-        print(f'  yolo_conf={t:.2f}  fly R={fly["recall"]:.3f} P={fly["precision"]:.3f} '
-              f'(TP={fly["tp"]} FP={fly["fp"]} FN={fly["fn"]})')
+        print(
+            f'  yolo_conf={t:.2f}  fly R={fly["recall"]:.3f} P={fly["precision"]:.3f} '
+            f'(TP={fly["tp"]} FP={fly["fp"]} FN={fly["fn"]})'
+        )
 
     summary_path = out_dir / 'combined_eval_summary.json'
-    summary_path.write_text(json.dumps({
-        'gt_by_class': dict(gt_by_class),
-        'operating_point': {'yolo_conf': args.op_yolo_conf, 'binary_thr': args.op_binary_thr,
-                            'eval_iou': args.eval_iou},
-        'yolo_only': evaluate(yolo_dets, gt_per_image, args.eval_iou, KEEP_CLASSES),
-        'crop_only': evaluate(crop_dets, gt_per_image, args.eval_iou, KEEP_CLASSES),
-        'combined': evaluate(comb_dets, gt_per_image, args.eval_iou, KEEP_CLASSES),
-    }, indent=2))
+    summary_path.write_text(
+        json.dumps(
+            {
+                'gt_by_class': dict(gt_by_class),
+                'operating_point': {
+                    'yolo_conf': args.op_yolo_conf,
+                    'binary_thr': args.op_binary_thr,
+                    'eval_iou': args.eval_iou,
+                },
+                'yolo_only': evaluate(
+                    yolo_dets, gt_per_image, args.eval_iou, KEEP_CLASSES
+                ),
+                'crop_only': evaluate(
+                    crop_dets, gt_per_image, args.eval_iou, KEEP_CLASSES
+                ),
+                'combined': evaluate(
+                    comb_dets, gt_per_image, args.eval_iou, KEEP_CLASSES
+                ),
+            },
+            indent=2,
+        )
+    )
     print(f'\nWrote {summary_path}')
 
 

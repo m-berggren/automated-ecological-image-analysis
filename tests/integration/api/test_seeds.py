@@ -87,8 +87,12 @@ class TestReferenceReview:
         up = Upload.objects.create(module=Module.SEEDS, name='u')
         run = InferenceRun.objects.create(module=Module.SEEDS, upload=up)
         img = ImageAsset.objects.create(
-            module=Module.SEEDS, file='x.jpg', purpose='inference',
-            upload=up, width=100, height=80,
+            module=Module.SEEDS,
+            file='x.jpg',
+            purpose='inference',
+            upload=up,
+            width=100,
+            height=80,
         )
         _det(run, img, SQUARE_BIG)
         resp = auth_client.get(f'/api/seeds/runs/{run.pk}/reference-review/')

@@ -16,7 +16,10 @@ from apps.analysis import storage
 class TestModelDirAndWeightsPath:
     def test_model_dir(self, settings, tmp_path):
         settings.MEDIA_ROOT = str(tmp_path)
-        assert storage.model_dir('pollinators', 5) == tmp_path / 'models' / 'pollinators' / '5'
+        assert (
+            storage.model_dir('pollinators', 5)
+            == tmp_path / 'models' / 'pollinators' / '5'
+        )
 
     def test_weights_path_adds_missing_dot(self, settings, tmp_path):
         settings.MEDIA_ROOT = str(tmp_path)

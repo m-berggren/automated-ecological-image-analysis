@@ -361,10 +361,12 @@ class DetectionStatus(models.TextChoices):
     REJECTED = 'rejected', 'Rejected'
     UNSURE = 'unsure', 'Unsure'
 
+
 class SeedStatus(models.TextChoices):
     ACTIVE = 'active', 'Active'
     ABORTED = 'aborted', 'Aborted'
     REFERENCE = 'reference', 'Reference'
+
 
 class Detection(models.Model):
     """A single bounding box predicted by an inference run.

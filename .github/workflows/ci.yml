@@ -13,23 +13,16 @@ concurrency:
 
 jobs:
   lint:
-    name: Lint (advisory)
+    name: Lint
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
       - uses: astral-sh/setup-uv@v5
         with:
           enable-cache: true
-      # NOTE: the codebase currently has pre-existing ruff findings (the
-      # ANN001/ANN201 rules are selected but not yet satisfied repo-wide) and
-      # unformatted files. These steps are advisory (continue-on-error) so the
-      # gate is green while the debt is paid down. Drop continue-on-error to
-      # make them blocking once `ruff check`/`ruff format` are clean.
       - name: Ruff lint
-        continue-on-error: true
         run: uv run ruff check .
       - name: Ruff format
-        continue-on-error: true
         run: uv run ruff format --check .
 
   unit-tests:

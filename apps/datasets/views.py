@@ -10,8 +10,6 @@ from rest_framework.response import Response
 from rest_framework.views import APIView
 from seed_src.utils.label_extractor import LabelExtractor
 
-from apps.datasets.models import Upload
-
 from .models import ImageAsset, Module, Upload
 from .serializers import (
     ImageAssetSerializer,

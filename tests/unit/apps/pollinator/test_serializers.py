@@ -59,7 +59,11 @@ class TestValidateConfigAgainstSourceModel:
     def test_wrong_kind_rejected(self):
         from apps.analysis.models import ModelKind
 
-        other = ModelKind.GROUP_CLASSIFIER if EXPECTED_KIND != ModelKind.GROUP_CLASSIFIER else ModelKind.DETECTOR
+        other = (
+            ModelKind.GROUP_CLASSIFIER
+            if EXPECTED_KIND != ModelKind.GROUP_CLASSIFIER
+            else ModelKind.DETECTOR
+        )
         source = self._source(kind=other)
         ser = PollinatorTrainingCreateSerializer()
         with pytest.raises(serializers.ValidationError):

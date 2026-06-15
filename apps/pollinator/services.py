@@ -160,7 +160,10 @@ def _persist_image_results(  # pragma: no cover
 
     created = Detection.objects.bulk_create(det_objs)
     PollinatorDetection.objects.bulk_create(
-        [PollinatorDetection(detection=det, **kw) for det, kw in zip(created, pol_kwargs)]
+        [
+            PollinatorDetection(detection=det, **kw)
+            for det, kw in zip(created, pol_kwargs)
+        ]
     )
 
     # Render crops, then one bulk_update writes every FileField name.

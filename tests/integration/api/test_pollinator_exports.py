@@ -74,7 +74,9 @@ class TestExportCsv:
         assert b''.join(resp.streaming_content)
 
     def test_missing_returns_404(self, auth_client):
-        assert auth_client.get('/api/pollinator/runs/999999/export.csv').status_code == 404
+        assert (
+            auth_client.get('/api/pollinator/runs/999999/export.csv').status_code == 404
+        )
 
 
 class TestExportCropsZip:

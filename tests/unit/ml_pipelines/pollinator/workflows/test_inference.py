@@ -64,7 +64,9 @@ class TestSecondsBetween:
 
 class TestRobustSortKey:
     def test_exif_datetime_takes_priority(self, inference, monkeypatch):
-        monkeypatch.setattr(inference, 'get_exif_datetime', lambda p: (2024, 1, 1, 0, 0, 0))
+        monkeypatch.setattr(
+            inference, 'get_exif_datetime', lambda p: (2024, 1, 1, 0, 0, 0)
+        )
         from pathlib import Path
 
         key = inference._robust_sort_key(Path('whatever.jpg'))
@@ -74,7 +76,11 @@ class TestRobustSortKey:
         monkeypatch.setattr(inference, 'get_exif_datetime', lambda p: None)
         from pathlib import Path
 
-        assert inference._robust_sort_key(Path('img_0042.jpg')) == (1, 42, 'img_0042.jpg')
+        assert inference._robust_sort_key(Path('img_0042.jpg')) == (
+            1,
+            42,
+            'img_0042.jpg',
+        )
 
     def test_filename_fallback_without_digits(self, inference, monkeypatch):
         monkeypatch.setattr(inference, 'get_exif_datetime', lambda p: None)

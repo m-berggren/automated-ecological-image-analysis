@@ -188,14 +188,18 @@ def extract_image_metadata(file: Any) -> dict[str, Any]:
 
     excluded, exclusion_reason = _determine_exclusion(flash_fired, laplacian_var)
 
-    return _strip_nulls({
-        'width': width,
-        'height': height,
-        'captured_at': captured_at,
-        'flash_fired': flash_fired,
-        'exif': exif,
-        'laplacian_var': round(laplacian_var, 1) if laplacian_var is not None else None,
-        'shutter_speed': shutter_speed,
-        'excluded': excluded,
-        'exclusion_reason': exclusion_reason,
-    })
+    return _strip_nulls(
+        {
+            'width': width,
+            'height': height,
+            'captured_at': captured_at,
+            'flash_fired': flash_fired,
+            'exif': exif,
+            'laplacian_var': round(laplacian_var, 1)
+            if laplacian_var is not None
+            else None,
+            'shutter_speed': shutter_speed,
+            'excluded': excluded,
+            'exclusion_reason': exclusion_reason,
+        }
+    )

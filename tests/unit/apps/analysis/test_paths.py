@@ -10,7 +10,9 @@ from apps.analysis.models import detection_crop_path, model_artifact_path
 
 
 def test_detection_crop_path():
-    instance = SimpleNamespace(inference_run=SimpleNamespace(module='pollinators', pk=7))
+    instance = SimpleNamespace(
+        inference_run=SimpleNamespace(module='pollinators', pk=7)
+    )
     assert (
         detection_crop_path(instance, 'WSCT0001_01.jpg')
         == 'runs/pollinators/7/crops/WSCT0001_01.jpg'

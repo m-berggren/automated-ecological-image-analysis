@@ -86,7 +86,9 @@ class TestSeedUploadData:
     def test_stages_and_returns_id(self, auth_client, settings, tmp_path):
         settings.MEDIA_ROOT = str(tmp_path)
         img = SimpleUploadedFile('a.jpg', _jpeg(), content_type='image/jpeg')
-        label = SimpleUploadedFile('a.txt', b'0 0.5 0.5 0.2 0.2\n', content_type='text/plain')
+        label = SimpleUploadedFile(
+            'a.txt', b'0 0.5 0.5 0.2 0.2\n', content_type='text/plain'
+        )
         resp = auth_client.post(
             SEED_UPLOAD, {'species': 'cat', 'files': [img, label]}, format='multipart'
         )

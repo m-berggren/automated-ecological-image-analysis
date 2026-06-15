@@ -24,8 +24,8 @@ MAIN = GRID / 'dia_WSCT0003.JPG'
 CROPS = [
     ('various_WSCT1718', 0.732066, 0.416800, 0.007583, 0.019178),
     ('various_WSCT1722', 0.293007, 0.401043, 0.013567, 0.011874),
-    ('dia_WSCT0075',     0.136208, 0.229199, 0.024159, 0.031566),
-    ('dia_WSCT0057',     0.682259, 0.602893, 0.049890, 0.041483),
+    ('dia_WSCT0075', 0.136208, 0.229199, 0.024159, 0.031566),
+    ('dia_WSCT0057', 0.682259, 0.602893, 0.049890, 0.041483),
 ]
 
 
@@ -41,14 +41,20 @@ def context_crop(stem, cx, cy, w, h):
     im = Image.open(find(stem)).convert('RGB')
     W, H = im.size
     bw, bh = w * W, h * H
-    x1, y1, x2, y2 = (cx - w / 2) * W, (cy - h / 2) * H, (cx + w / 2) * W, (cy + h / 2) * H
+    x1, y1, x2, y2 = (
+        (cx - w / 2) * W,
+        (cy - h / 2) * H,
+        (cx + w / 2) * W,
+        (cy + h / 2) * H,
+    )
     fx, fy = (x1 + x2) / 2, (y1 + y2) / 2
     rx0 = int(max(0, min(W - CROP, fx - CROP / 2)))
     ry0 = int(max(0, min(H - CROP, fy - CROP / 2)))
     crop = im.crop((rx0, ry0, rx0 + CROP, ry0 + CROP))
     d = ImageDraw.Draw(crop)
-    d.rectangle([x1 - rx0, y1 - ry0, x2 - rx0, y2 - ry0],
-                outline=(230, 30, 30), width=5)
+    d.rectangle(
+        [x1 - rx0, y1 - ry0, x2 - rx0, y2 - ry0], outline=(230, 30, 30), width=5
+    )
     return crop, int(round(bw)), int(round(bh))
 
 
@@ -68,9 +74,17 @@ def main():
         crop, bw, bh = context_crop(stem, cx, cy, w, h)
         ax = fig.add_subplot(gs[1, i])
         ax.imshow(crop)
-        ax.text(0.04, 0.96, f'{bw} x {bh} px', transform=ax.transAxes,
-                ha='left', va='top', fontsize=8, color='white',
-                bbox=dict(boxstyle='round,pad=0.2', fc=(0, 0, 0, 0.55), ec='none'))
+        ax.text(
+            0.04,
+            0.96,
+            f'{bw} x {bh} px',
+            transform=ax.transAxes,
+            ha='left',
+            va='top',
+            fontsize=8,
+            color='white',
+            bbox=dict(boxstyle='round,pad=0.2', fc=(0, 0, 0, 0.55), ec='none'),
+        )
         ax.set_xticks([])
         ax.set_yticks([])
         for s in ax.spines.values():

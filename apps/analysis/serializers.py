@@ -368,9 +368,14 @@ class TrainingJobListSerializer(serializers.ModelSerializer):
         if not source_id:
             return None
         try:
-            return ModelVersion.objects.filter(pk=source_id).values_list(
-                'version_name', flat=True,
-            ).first()
+            return (
+                ModelVersion.objects.filter(pk=source_id)
+                .values_list(
+                    'version_name',
+                    flat=True,
+                )
+                .first()
+            )
         except (ValueError, TypeError):
             return None
 

@@ -23,6 +23,7 @@ class SeedsConfig(AppConfig):
             )
             if count:
                 import logging
+
                 logging.getLogger(__name__).warning(
                     f'Marked {count} orphaned seed training jobs as failed on startup'
                 )

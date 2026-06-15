@@ -14,8 +14,6 @@ from rest_framework.response import Response
 from rest_framework.views import APIView
 
 from apps.datasets.models import ImageAsset, UploadStatus, Module
-from apps.pollinator.services import spawn_inference_pipeline
-from apps.seeds.services import spawn_seeds_pipeline
 
 from .engulfment import apply_engulfment_exclusions
 from .artifacts import (
@@ -234,7 +232,8 @@ class ModelVersionListCreateView(generics.ListAPIView):
         # parameters.species; pollinators groups by kind. Other modules
         # fall back to per-module uniqueness.
         name_collision = ModelVersion.objects.filter(
-            module=module, version_name=version_name,
+            module=module,
+            version_name=version_name,
         )
         if module == 'seeds':
             species_extra = (parameters_extra.get('species') or '').strip().lower()
@@ -246,7 +245,9 @@ class ModelVersionListCreateView(generics.ListAPIView):
             name_collision = name_collision.filter(kind=kind)
         if name_collision.exists():
             return Response(
-                {'detail': f'version_name "{version_name}" already exists for this type'},
+                {
+                    'detail': f'version_name "{version_name}" already exists for this type'
+                },
                 status=status.HTTP_400_BAD_REQUEST,
             )
 
@@ -358,9 +359,7 @@ class ModelVersionListCreateView(generics.ListAPIView):
                 description=description,
                 parameters=parameters,
                 metrics=metrics,
-                created_by=request.user
-                if request.user.is_authenticated
-                else None,
+                created_by=request.user if request.user.is_authenticated else None,
             )
 
             try:
@@ -379,9 +378,7 @@ class ModelVersionListCreateView(generics.ListAPIView):
                 try:
                     tmp_path.unlink()
                 except OSError:
-                    logger.exception(
-                        f'Failed to clean temp upload at {tmp_path}'
-                    )
+                    logger.exception(f'Failed to clean temp upload at {tmp_path}')
 
         ingested, skipped = 0, 0
         for f, rel in artifact_entries:
@@ -574,9 +571,11 @@ class InferenceRunStartView(APIView):
 
         if run.module == Module.SEEDS:
             from apps.seeds.services import spawn_seeds_pipeline
+
             transaction.on_commit(lambda: spawn_seeds_pipeline(run))
         else:
             from apps.pollinator.services import spawn_inference_pipeline
+
             transaction.on_commit(lambda: spawn_inference_pipeline(run))
 
         return Response(InferenceRunDetailSerializer(run).data)
@@ -664,9 +663,11 @@ class InferenceRunResumeView(APIView):
         run.save(update_fields=['status', 'config'])
         if run.module == Module.SEEDS:
             from apps.seeds.services import spawn_seeds_pipeline
+
             transaction.on_commit(lambda: spawn_seeds_pipeline(run))
         else:
             from apps.pollinator.services import spawn_inference_pipeline
+
             transaction.on_commit(lambda: spawn_inference_pipeline(run))
         return Response(InferenceRunDetailSerializer(run).data)
 
@@ -795,9 +796,11 @@ class InferenceRunListCreateView(generics.ListCreateAPIView):
         # Defer until commit so the worker thread sees the row.
         if run.module == Module.SEEDS:
             from apps.seeds.services import spawn_seeds_pipeline
+
             transaction.on_commit(lambda: spawn_seeds_pipeline(run))
         else:
             from apps.pollinator.services import spawn_inference_pipeline
+
             transaction.on_commit(lambda: spawn_inference_pipeline(run))
         return Response(
             InferenceRunDetailSerializer(run).data,

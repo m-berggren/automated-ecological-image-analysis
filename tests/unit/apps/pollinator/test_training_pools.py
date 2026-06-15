@@ -34,6 +34,7 @@ pytestmark = pytest.mark.django_db
 
 # --- factories ---------------------------------------------------------------
 
+
 def _run():
     return InferenceRun.objects.create(module=Module.POLLINATORS)
 
@@ -49,8 +50,14 @@ def _image(include_in_training=False):
     )
 
 
-def _det(run, image, status=DetectionStatus.ACCEPTED, predicted_class='fly',
-         reviewer_label='', exclude_from_training=False):
+def _det(
+    run,
+    image,
+    status=DetectionStatus.ACCEPTED,
+    predicted_class='fly',
+    reviewer_label='',
+    exclude_from_training=False,
+):
     return Detection.objects.create(
         inference_run=run,
         image=image,
@@ -80,6 +87,7 @@ def _ids(detections):
 
 # --- lineage -----------------------------------------------------------------
 
+
 class TestLineageModelIds:
     def test_none_source(self):
         assert _lineage_model_ids(None) == []
@@ -100,6 +108,7 @@ class TestLineageModelIds:
 
 
 # --- consumption guard -------------------------------------------------------
+
 
 class TestConsumedDetectionIds:
     def test_none_source_consumes_nothing(self):
@@ -146,6 +155,7 @@ class TestConsumedDetectionIds:
 
 # --- detector pool -----------------------------------------------------------
 
+
 class TestCollectDetectorPool:
     def test_only_opt_in_pending_free_in_class(self):
         run = _run()
@@ -177,6 +187,7 @@ class TestCollectDetectorPool:
 
 # --- binary pool -------------------------------------------------------------
 
+
 class TestCollectBinaryPool:
     def test_accepted_and_rejected_split_with_exclusion(self):
         run, img = _run(), _image()
@@ -201,6 +212,7 @@ class TestCollectBinaryPool:
 
 # --- group pool --------------------------------------------------------------
 
+
 class TestCollectGroupPool:
     def test_uses_reviewer_label_for_class(self):
         run, img = _run(), _image()
@@ -217,6 +229,7 @@ class TestCollectGroupPool:
 
 
 # --- version naming ----------------------------------------------------------
+
 
 class TestNextVersionName:
     def test_first_version(self):

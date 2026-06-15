@@ -60,8 +60,17 @@ def load_gt(label_path, w, h):
         if name not in KEEP_CLASSES:
             continue
         cx, cy, bw, bh = (float(v) for v in parts[1:5])
-        out.append((name, [(cx - bw / 2) * w, (cy - bh / 2) * h,
-                           (cx + bw / 2) * w, (cy + bh / 2) * h]))
+        out.append(
+            (
+                name,
+                [
+                    (cx - bw / 2) * w,
+                    (cy - bh / 2) * h,
+                    (cx + bw / 2) * w,
+                    (cy + bh / 2) * h,
+                ],
+            )
+        )
     return out
 
 
@@ -77,7 +86,10 @@ def yolo_branch(d):
 
 
 def crop_branch(d):
-    if d['source'] in ('preprocessing', 'both') and d.get('insectnet_class') is not None:
+    if (
+        d['source'] in ('preprocessing', 'both')
+        and d.get('insectnet_class') is not None
+    ):
         conf = d.get('binary_confidence')
         return d['insectnet_class'], float(conf) if conf is not None else 1.0, box(d)
     return None
@@ -89,7 +101,7 @@ def combined(d, yt, bt):
     keep_c = c is not None and c[1] >= bt
     if not (keep_y or keep_c):
         return None
-    return (y if keep_y else c)
+    return y if keep_y else c
 
 
 def fly_stats(dets_per_image, gt_per_image):
@@ -149,11 +161,13 @@ def main():
             y = yolo_branch(d)
             if y is not None and y[1] >= t:
                 yolo[d['image_name']].append(y)
-        rows.append({
-            'yolo_conf': t,
-            'combined': fly_stats(comb, gt_per_image),
-            'yolo_only': fly_stats(yolo, gt_per_image),
-        })
+        rows.append(
+            {
+                'yolo_conf': t,
+                'combined': fly_stats(comb, gt_per_image),
+                'yolo_only': fly_stats(yolo, gt_per_image),
+            }
+        )
 
     crop_rows = []
     for bt in BINARY_THRESHOLDS:
@@ -164,15 +178,22 @@ def main():
                 crop[d['image_name']].append(c)
         crop_rows.append({'binary_thr': bt, 'crop_only': fly_stats(crop, gt_per_image)})
 
-    out = {'n_fly': n_fly, 'binary_thr': BINARY_THR, 'eval_iou': EVAL_IOU,
-           'rows': rows, 'crop_rows': crop_rows}
+    out = {
+        'n_fly': n_fly,
+        'binary_thr': BINARY_THR,
+        'eval_iou': EVAL_IOU,
+        'rows': rows,
+        'crop_rows': crop_rows,
+    }
     OPERATING_CURVE_JSON.write_text(json.dumps(out, indent=2))
     print(f'flies (GT) = {n_fly}')
     print(f'{"thr":>5} | {"comb R":>7} {"comb FP":>8} | {"yolo R":>7} {"yolo FP":>8}')
     for r in rows:
         c, y = r['combined'], r['yolo_only']
-        print(f'{r["yolo_conf"]:5.2f} | {c["recall"]:7.3f} {c["fp"]:8d} | '
-              f'{y["recall"]:7.3f} {y["fp"]:8d}')
+        print(
+            f'{r["yolo_conf"]:5.2f} | {c["recall"]:7.3f} {c["fp"]:8d} | '
+            f'{y["recall"]:7.3f} {y["fp"]:8d}'
+        )
     print('crop-only (sweep binary gate):')
     for r in crop_rows:
         s = r['crop_only']

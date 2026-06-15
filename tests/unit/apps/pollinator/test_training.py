@@ -47,8 +47,16 @@ class TestEffectiveClass:
         assert _effective_class(d) == 'bumblebee'
 
     def test_falls_back_to_prediction(self):
-        assert _effective_class(SimpleNamespace(reviewer_label='', predicted_class='fly')) == 'fly'
-        assert _effective_class(SimpleNamespace(reviewer_label=None, predicted_class='other')) == 'other'
+        assert (
+            _effective_class(SimpleNamespace(reviewer_label='', predicted_class='fly'))
+            == 'fly'
+        )
+        assert (
+            _effective_class(
+                SimpleNamespace(reviewer_label=None, predicted_class='other')
+            )
+            == 'other'
+        )
 
 
 class TestStratifiedImageSplit:
@@ -67,9 +75,9 @@ class TestStratifiedImageSplit:
     def test_deterministic_for_seed(self):
         by_class = {'a': list(range(20))}
         splits = {'train': 80, 'val': 10, 'test': 10}
-        assert _stratified_image_split(by_class, splits, seed=7) == _stratified_image_split(
+        assert _stratified_image_split(
             by_class, splits, seed=7
-        )
+        ) == _stratified_image_split(by_class, splits, seed=7)
 
 
 class TestValidateConfig:

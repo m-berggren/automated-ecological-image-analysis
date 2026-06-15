@@ -85,9 +85,7 @@ def restratify_by_plot(
         )
 
     plot_from_stem = plot_from_stem or _default_plot_from_stem
-    marker_id = marker_id or (
-        f'val={val_frac}|test={test_frac}|seed={seed}'
-    )
+    marker_id = marker_id or (f'val={val_frac}|test={test_frac}|seed={seed}')
 
     root = Path(dataset_root)
     marker = root / '.stratified_for'
@@ -130,7 +128,10 @@ def restratify_by_plot(
             n_val = max(1, int(n * val_frac))
         n_train = n - n_test - n_val
         per_plot_counts[plot] = {
-            'total': n, 'train': n_train, 'val': n_val, 'test': n_test,
+            'total': n,
+            'train': n_train,
+            'val': n_val,
+            'test': n_test,
         }
 
         for i, (src_split, img) in enumerate(items):
@@ -201,7 +202,7 @@ def plot_holdout(
     plot_from_stem = plot_from_stem or _default_plot_from_stem
     test_plots_set = set(test_plots)
     marker_id = marker_id or (
-        f"holdout={','.join(sorted(test_plots_set))}|val={val_frac}|seed={seed}"
+        f'holdout={",".join(sorted(test_plots_set))}|val={val_frac}|seed={seed}'
     )
 
     root = Path(dataset_root)
@@ -236,7 +237,10 @@ def plot_holdout(
         n = len(items)
         if plot in test_plots_set:
             per_plot_counts[plot] = {
-                'total': n, 'train': 0, 'val': 0, 'test': n,
+                'total': n,
+                'train': 0,
+                'val': 0,
+                'test': n,
             }
             for src_split, img in items:
                 if src_split == 'test':
@@ -255,7 +259,10 @@ def plot_holdout(
         n_val = max(1, int(n * val_frac)) if n >= 5 else 0
         n_train = n - n_val
         per_plot_counts[plot] = {
-            'total': n, 'train': n_train, 'val': n_val, 'test': 0,
+            'total': n,
+            'train': n_train,
+            'val': n_val,
+            'test': 0,
         }
         for i, (src_split, img) in enumerate(items):
             target_split = 'val' if i < n_val else 'train'
@@ -270,9 +277,7 @@ def plot_holdout(
                     if kind == 'images':
                         moves += 1
 
-    logger.info(
-        f'plot-holdout (test={sorted(test_plots_set)}): moved {moves} images'
-    )
+    logger.info(f'plot-holdout (test={sorted(test_plots_set)}): moved {moves} images')
     for plot, c in per_plot_counts.items():
         held = ' [HELD OUT]' if plot in test_plots_set else ''
         logger.info(

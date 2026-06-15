@@ -47,9 +47,9 @@ LABELS_DIR = LABELS
 OUT_DIR = _OUT_ROOT / 'vetted_analysis'
 
 # Overlay colours (RGB).
-COLOR_TP = (0, 200, 0)      # correctly detected GT
-COLOR_FP = (255, 140, 0)    # false alarm
-COLOR_FN = (220, 0, 0)      # missed GT (the important one)
+COLOR_TP = (0, 200, 0)  # correctly detected GT
+COLOR_FP = (255, 140, 0)  # false alarm
+COLOR_FN = (220, 0, 0)  # missed GT (the important one)
 
 
 def iou(a: list, b: list) -> float:
@@ -153,13 +153,24 @@ def main():
     ap.add_argument('--images', default=IMAGES_DIR)
     ap.add_argument('--labels', default=LABELS_DIR)
     ap.add_argument('--out', default=OUT_DIR)
-    ap.add_argument('--conf', type=float, default=0.05,
-                    help='Confidence threshold for the overlays and FN crops.')
+    ap.add_argument(
+        '--conf',
+        type=float,
+        default=0.05,
+        help='Confidence threshold for the overlays and FN crops.',
+    )
     ap.add_argument('--iou', type=float, default=0.5)
-    ap.add_argument('--classes', nargs='+', default=KEEP_CLASSES,
-                    help='Subset of classes to evaluate (default all kept).')
-    ap.add_argument('--no-overlays', action='store_true',
-                    help='Skip full-image overlays (faster; FN crops still written).')
+    ap.add_argument(
+        '--classes',
+        nargs='+',
+        default=KEEP_CLASSES,
+        help='Subset of classes to evaluate (default all kept).',
+    )
+    ap.add_argument(
+        '--no-overlays',
+        action='store_true',
+        help='Skip full-image overlays (faster; FN crops still written).',
+    )
     args = ap.parse_args()
 
     keep = list(args.classes)
@@ -179,14 +190,18 @@ def main():
     totals = {c: {'tp': 0, 'fp': 0, 'fn': 0} for c in keep}
     fn_count = 0
 
-    img_files = sorted(p for p in images_dir.iterdir()
-                       if p.suffix.lower() in ('.jpg', '.jpeg', '.png'))
+    img_files = sorted(
+        p for p in images_dir.iterdir() if p.suffix.lower() in ('.jpg', '.jpeg', '.png')
+    )
     for img_path in img_files:
         with Image.open(img_path) as im:
             iw, ih = im.size
             gts = load_gt(labels_dir / (img_path.stem + '.txt'), iw, ih, keep)
-            preds = [p for p in all_preds.get(img_path.name, [])
-                     if p['confidence'] >= args.conf and p['class'] in keep]
+            preds = [
+                p
+                for p in all_preds.get(img_path.name, [])
+                if p['confidence'] >= args.conf and p['class'] in keep
+            ]
             tp, fp, fn, _ = match(preds, gts, args.iou)
 
             for c in keep:
@@ -194,22 +209,30 @@ def main():
                 totals[c]['fp'] += sum(1 for i in fp if preds[i]['class'] == c)
                 totals[c]['fn'] += sum(1 for gi in fn if gts[gi][0] == c)
 
-            rows.append({
-                'image': img_path.name,
-                'n_gt': len(gts), 'n_pred': len(preds),
-                'tp': len(tp), 'fp': len(fp), 'fn': len(fn),
-            })
+            rows.append(
+                {
+                    'image': img_path.name,
+                    'n_gt': len(gts),
+                    'n_pred': len(preds),
+                    'tp': len(tp),
+                    'fp': len(fp),
+                    'fn': len(fn),
+                }
+            )
 
             # Dump each missed insect as its own crop for inspection.
             for gi in fn:
                 gc, gb = gts[gi]
                 crop = crop_fn(im, gb)
-                crop.save(fn_dir / f'{img_path.stem}__{gc}__fn{gi}.jpg', 'JPEG', quality=90)
+                crop.save(
+                    fn_dir / f'{img_path.stem}__{gc}__fn{gi}.jpg', 'JPEG', quality=90
+                )
                 fn_count += 1
 
             if not args.no_overlays and (tp or fp or fn):
                 draw_overlay(im, preds, gts, tp, fp, fn).save(
-                    overlays_dir / img_path.name)
+                    overlays_dir / img_path.name
+                )
 
     # Write per-image CSV.
     csv_path = out_dir / f'per_image_conf{args.conf}.csv'
@@ -226,8 +249,10 @@ def main():
         p = s['tp'] / max(1, s['tp'] + s['fp'])
         r = s['tp'] / max(1, s['tp'] + s['fn'])
         f1 = 2 * p * r / max(1e-9, p + r)
-        print(f'  {c:10s}  TP={s["tp"]:4d} FP={s["fp"]:5d} FN={s["fn"]:4d}  '
-              f'P={p:.3f} R={r:.3f} F1={f1:.3f}')
+        print(
+            f'  {c:10s}  TP={s["tp"]:4d} FP={s["fp"]:5d} FN={s["fn"]:4d}  '
+            f'P={p:.3f} R={r:.3f} F1={f1:.3f}'
+        )
     print(f'\nFalse-negative crops written: {fn_count} -> {fn_dir}/')
     if not args.no_overlays:
         print(f'Overlays written -> {overlays_dir}/')
@@ -240,10 +265,16 @@ def main():
         for img_path in img_files:
             with Image.open(img_path) as im:
                 iw, ih = im.size
-            gts = [g for g in load_gt(labels_dir / (img_path.stem + '.txt'), iw, ih, keep)
-                   if g[0] == 'fly']
-            preds = [p for p in all_preds.get(img_path.name, [])
-                     if p['confidence'] >= t and p['class'] == 'fly']
+            gts = [
+                g
+                for g in load_gt(labels_dir / (img_path.stem + '.txt'), iw, ih, keep)
+                if g[0] == 'fly'
+            ]
+            preds = [
+                p
+                for p in all_preds.get(img_path.name, [])
+                if p['confidence'] >= t and p['class'] == 'fly'
+            ]
             t_, f_, n_, _ = match(preds, gts, args.iou)
             tp += len(t_)
             fp += len(f_)

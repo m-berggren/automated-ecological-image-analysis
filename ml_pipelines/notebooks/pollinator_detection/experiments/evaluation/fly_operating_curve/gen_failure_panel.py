@@ -45,7 +45,9 @@ def iou(a, b):
     if ix2 <= ix1 or iy2 <= iy1:
         return 0.0
     inter = (ix2 - ix1) * (iy2 - iy1)
-    return inter / ((a[2] - a[0]) * (a[3] - a[1]) + (b[2] - b[0]) * (b[3] - b[1]) - inter)
+    return inter / (
+        (a[2] - a[0]) * (a[3] - a[1]) + (b[2] - b[0]) * (b[3] - b[1]) - inter
+    )
 
 
 def load_gt_fly(label_path, w, h):
@@ -60,8 +62,9 @@ def load_gt_fly(label_path, w, h):
         if not 0 <= idx < len(CVAT_CLASSES) or CVAT_CLASSES[idx] != 'fly':
             continue
         cx, cy, bw, bh = (float(v) for v in parts[1:5])
-        out.append([(cx - bw / 2) * w, (cy - bh / 2) * h,
-                    (cx + bw / 2) * w, (cy + bh / 2) * h])
+        out.append(
+            [(cx - bw / 2) * w, (cy - bh / 2) * h, (cx + bw / 2) * w, (cy + bh / 2) * h]
+        )
     return out
 
 
@@ -70,11 +73,17 @@ def combined_fly_boxes(dets):
     for d in dets:
         b = d['bbox']
         box = [b['x1'], b['y1'], b['x2'], b['y2']]
-        keep_y = (d['source'] in ('yolo', 'both') and d.get('yolo_class') == 'fly'
-                  and float(d.get('yolo_confidence') or 0) >= YOLO_THR)
+        keep_y = (
+            d['source'] in ('yolo', 'both')
+            and d.get('yolo_class') == 'fly'
+            and float(d.get('yolo_confidence') or 0) >= YOLO_THR
+        )
         bc = d.get('binary_confidence')
-        keep_c = (d['source'] in ('preprocessing', 'both') and d.get('insectnet_class') == 'fly'
-                  and (float(bc) if bc is not None else 1.0) >= BIN_THR)
+        keep_c = (
+            d['source'] in ('preprocessing', 'both')
+            and d.get('insectnet_class') == 'fly'
+            and (float(bc) if bc is not None else 1.0) >= BIN_THR
+        )
         if keep_y or keep_c:
             out[d['image_name']].append(box)
     return out
@@ -108,8 +117,9 @@ def main():
     for rj in sorted(PRED_DIR.glob('*_results.json')):
         all_dets.extend(json.loads(rj.read_text()).get('detections', []))
     comb = combined_fly_boxes(all_dets)
-    name_to_path = {p.name: p for p in IMAGES.iterdir()
-                    if p.suffix.lower() in IMG_SUFFIXES}
+    name_to_path = {
+        p.name: p for p in IMAGES.iterdir() if p.suffix.lower() in IMG_SUFFIXES
+    }
 
     if TARGET:
         chosen = name_to_path[TARGET]
@@ -136,8 +146,9 @@ def main():
     ncol = min(MAX_COLS, n)
     nrow = math.ceil(n / ncol)
     fig = plt.figure(figsize=(7.4, 3.0 + 2.0 * nrow))
-    gs = fig.add_gridspec(1 + nrow, ncol, height_ratios=[1.8] + [1] * nrow,
-                          hspace=0.30, wspace=0.06)
+    gs = fig.add_gridspec(
+        1 + nrow, ncol, height_ratios=[1.8] + [1] * nrow, hspace=0.30, wspace=0.06
+    )
 
     ax0 = fig.add_subplot(gs[0, :])
     with Image.open(chosen) as im:
@@ -146,13 +157,31 @@ def main():
         c = HIT if hit else MISS
         bw, bh = gb[2] - gb[0], gb[3] - gb[1]
         pad = max(W, H) * 0.012
-        ax0.add_patch(Rectangle((gb[0] - pad, gb[1] - pad), bw + 2 * pad, bh + 2 * pad,
-                                fill=False, edgecolor=c, lw=1.6))
-        ax0.text(gb[0] - pad, gb[1] - pad - max(W, H) * 0.012, str(i), color='white',
-                 fontsize=9, ha='left', va='bottom',
-                 bbox=dict(boxstyle='circle,pad=0.15', fc=c, ec='none'))
-    ax0.set_title(f'{chosen.name}: {n} annotated flies, '
-                  f'{hits} detected (green), {n - hits} missed (red)', fontsize=9.5)
+        ax0.add_patch(
+            Rectangle(
+                (gb[0] - pad, gb[1] - pad),
+                bw + 2 * pad,
+                bh + 2 * pad,
+                fill=False,
+                edgecolor=c,
+                lw=1.6,
+            )
+        )
+        ax0.text(
+            gb[0] - pad,
+            gb[1] - pad - max(W, H) * 0.012,
+            str(i),
+            color='white',
+            fontsize=9,
+            ha='left',
+            va='bottom',
+            bbox=dict(boxstyle='circle,pad=0.15', fc=c, ec='none'),
+        )
+    ax0.set_title(
+        f'{chosen.name}: {n} annotated flies, '
+        f'{hits} detected (green), {n - hits} missed (red)',
+        fontsize=9.5,
+    )
     ax0.axis('off')
 
     for i, (gb, hit) in enumerate(flies):
@@ -166,8 +195,9 @@ def main():
             y0 = max(0, min(H - side, cy - side / 2))
             crop = im.crop((int(x0), int(y0), int(x0 + side), int(y0 + side)))
             ax.imshow(crop)
-        ax.add_patch(Rectangle((gb[0] - x0, gb[1] - y0), bw, bh,
-                               fill=False, edgecolor=c, lw=1.6))
+        ax.add_patch(
+            Rectangle((gb[0] - x0, gb[1] - y0), bw, bh, fill=False, edgecolor=c, lw=1.6)
+        )
         tag = 'detected' if hit else 'missed'
         ax.set_title(f'{i + 1}. {tag}, {int(bw)} x {int(bh)} px', fontsize=8.5, color=c)
         ax.set_xticks([])
