@@ -30,8 +30,14 @@ def _weight_or_skip(env_var: str) -> Path:
 
 @pytest.fixture
 def yolo_weights() -> Path:
-    """Path to a trained YOLO .pt checkpoint, or skip the test."""
+    """Path to a trained pollinator YOLO .pt checkpoint, or skip the test."""
     return _weight_or_skip('AEA_E2E_YOLO_WEIGHTS')
+
+
+@pytest.fixture
+def seed_weights() -> Path:
+    """Path to a trained seed-detector .pt checkpoint, or skip the test."""
+    return _weight_or_skip('AEA_E2E_SEED_WEIGHTS')
 
 
 @pytest.fixture
