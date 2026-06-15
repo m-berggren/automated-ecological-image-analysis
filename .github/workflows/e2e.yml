@@ -1,0 +1,28 @@
+name: E2E (manual)
+
+# Manual-only: the e2e tests load real model weights and only make sense with
+# GPU/weights available. Triggered by hand from the Actions tab (or `gh workflow
+# run e2e.yml`), never automatically, so it costs nothing unless you run it.
+# If you decide to keep e2e local-only, this file can simply be deleted.
+on:
+  workflow_dispatch:
+
+jobs:
+  e2e:
+    name: End-to-end inference
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: astral-sh/setup-uv@v5
+        with:
+          enable-cache: true
+      - name: Install dependencies
+        run: uv sync
+      # Point these at real checkpoints (e.g. fetched from a GitHub Release in
+      # a preceding step) to actually exercise inference. Without them the e2e
+      # tests skip cleanly rather than fail.
+      - name: Run e2e tests
+        env:
+          AEA_E2E_YOLO_WEIGHTS: ${{ secrets.AEA_E2E_YOLO_WEIGHTS }}
+          AEA_E2E_SEED_WEIGHTS: ${{ secrets.AEA_E2E_SEED_WEIGHTS }}
+        run: uv run pytest -m e2e tests/e2e -rs

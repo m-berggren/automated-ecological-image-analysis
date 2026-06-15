@@ -1,0 +1,68 @@
+name: CI
+
+# Pull-request gate: lint (advisory), unit tests, and the frontend build.
+# Integration tests run separately on merge to main (see main.yml).
+on:
+  pull_request:
+
+# A new push to a PR cancels the previous in-flight run for that PR, so we
+# don't burn Actions minutes on superseded commits.
+concurrency:
+  group: ci-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  lint:
+    name: Lint (advisory)
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: astral-sh/setup-uv@v5
+        with:
+          enable-cache: true
+      # NOTE: the codebase currently has pre-existing ruff findings (the
+      # ANN001/ANN201 rules are selected but not yet satisfied repo-wide) and
+      # unformatted files. These steps are advisory (continue-on-error) so the
+      # gate is green while the debt is paid down. Drop continue-on-error to
+      # make them blocking once `ruff check`/`ruff format` are clean.
+      - name: Ruff lint
+        continue-on-error: true
+        run: uv run ruff check .
+      - name: Ruff format
+        continue-on-error: true
+        run: uv run ruff format --check .
+
+  unit-tests:
+    name: Unit tests
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: astral-sh/setup-uv@v5
+        with:
+          enable-cache: true
+      - name: Install dependencies
+        run: uv sync
+      # The pytest config defaults to `-m "not integration and not e2e"`, so a
+      # bare invocation runs only the fast unit suite.
+      - name: Run unit tests
+        run: uv run pytest
+
+  frontend:
+    name: Frontend build
+    runs-on: ubuntu-latest
+    defaults:
+      run:
+        working-directory: frontend
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '24'
+          cache: npm
+          cache-dependency-path: frontend/package-lock.json
+      - name: Install dependencies
+        run: npm ci
+      # `npm run build` runs vue-tsc --noEmit (type-check) then vite build, so
+      # this is both the type-check gate and the build.
+      - name: Type-check and build
+        run: npm run build
