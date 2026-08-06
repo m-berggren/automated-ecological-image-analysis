@@ -81,7 +81,7 @@ def _append_log(run_id: int, message: str, level: str = 'info') -> None:
         logger.exception(f'Activity log write failed for run {run_id}')
 
 
-def _persist_image_results(
+def _persist_image_results(  # pragma: no cover
     run: InferenceRun,
     image,
     detections: list[dict],
@@ -198,7 +198,7 @@ def _persist_image_results(
     return len(created), by_class, by_source
 
 
-def _build_pipeline(run: InferenceRun):
+def _build_pipeline(run: InferenceRun):  # pragma: no cover
     """Materialise the ML pipeline object for this run.
 
     Loads model file paths from the run's frozen config, resolves them
@@ -253,7 +253,7 @@ def _build_pipeline(run: InferenceRun):
     )
 
 
-def run_inference_pipeline(run: InferenceRun) -> None:
+def run_inference_pipeline(run: InferenceRun) -> None:  # pragma: no cover
     """Run the pollinator pipeline for one InferenceRun, persist results.
 
     Status flow: pending -> running -> completed / paused / cancelled / failed.
@@ -395,7 +395,7 @@ def run_inference_pipeline(run: InferenceRun) -> None:
         raise
 
 
-def _run_in_thread(run_id: int) -> None:
+def _run_in_thread(run_id: int) -> None:  # pragma: no cover
     """Background-thread entry. Each thread gets its own DB connection;
     close_old_connections at the end prevents leaks for short-lived runs."""
     try:
@@ -409,7 +409,7 @@ def _run_in_thread(run_id: int) -> None:
         close_old_connections()
 
 
-def spawn_inference_pipeline(run: InferenceRun) -> None:
+def spawn_inference_pipeline(run: InferenceRun) -> None:  # pragma: no cover
     """Start a daemon thread that runs the pipeline for the given run.
 
     Returns immediately. The caller (typically the start/resume view)

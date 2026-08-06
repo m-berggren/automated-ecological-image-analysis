@@ -57,7 +57,7 @@ class LabelExtractor:
 
         return matched_type if matched_type != 'UNKNOWN' else raw_text
 
-    def extract_from_image(self, image_path):
+    def extract_from_image(self, image_path):  # pragma: no cover
         """Crops image into zones and runs OCR."""
         img = cv2.imread(image_path)
         if img is None:
@@ -95,7 +95,7 @@ class LabelExtractor:
         return ' | '.join(final_results) if final_results else 'No text detected'
 
 
-def main():
+def main():  # pragma: no cover
     parser = argparse.ArgumentParser(
         description='Extract species labels from seed images.'
     )

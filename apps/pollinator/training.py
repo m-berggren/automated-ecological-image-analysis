@@ -135,7 +135,7 @@ def _resolve_tile_config(source: ModelVersion, config: dict) -> dict:
 # ──────────────────────────────────────────────────────────────────────────
 
 
-def _make_progress_callback(job_id: int):
+def _make_progress_callback(job_id: int):  # pragma: no cover
     """Build the (processed, total, message, level) callback the ML pipeline
     invokes per epoch. Mirrors the inference progress callback pattern."""
 
@@ -243,7 +243,7 @@ class _ActivityLogHandler(logging.Handler):
 # ──────────────────────────────────────────────────────────────────────────
 
 
-def _export_crop(detection: Detection, dst_path: Path) -> bool:
+def _export_crop(detection: Detection, dst_path: Path) -> bool:  # pragma: no cover
     """Crop the detection bbox out of its source image, save as JPG.
     Returns True on success; False if the source file or bbox is invalid.
 
@@ -297,7 +297,7 @@ def _effective_class(d: Detection) -> str:
     return d.reviewer_label or d.predicted_class
 
 
-def _build_detector_dataset(
+def _build_detector_dataset(  # pragma: no cover
     flagged: list, class_filter: list, splits: dict, output_dir: Path
 ) -> int:
     """Write YOLO-format dataset at output_dir/{images,labels}/{train,val,test}/.
@@ -376,7 +376,7 @@ def _build_detector_dataset(
     return written
 
 
-def _build_classifier_dataset(
+def _build_classifier_dataset(  # pragma: no cover
     flagged: list,
     output_dir: Path,
     class_filter: list,
@@ -585,7 +585,7 @@ def _next_version_name(track: str) -> str:
     return f'{track}-v{n}'
 
 
-def _train_detector(
+def _train_detector(  # pragma: no cover
     source: ModelVersion,
     dataset_dir: Path,
     weights_dir: Path,
@@ -652,7 +652,7 @@ def _train_detector(
     return weights_path, metrics, parameters
 
 
-def _train_binary(
+def _train_binary(  # pragma: no cover
     source: ModelVersion,
     dataset_dir: Path,
     weights_dir: Path,
@@ -688,7 +688,7 @@ def _train_binary(
     return weights_path, result, parameters
 
 
-def _train_group(
+def _train_group(  # pragma: no cover
     source: ModelVersion,
     dataset_dir: Path,
     weights_dir: Path,
@@ -727,7 +727,7 @@ def _train_group(
     return weights_path, result, parameters
 
 
-def run_training_job(job: TrainingJob) -> None:
+def run_training_job(job: TrainingJob) -> None:  # pragma: no cover
     """Synchronous core. Status flow: pending → running → completed / failed."""
     import time
 
@@ -979,7 +979,7 @@ def run_training_job(job: TrainingJob) -> None:
             shutil.rmtree(dataset_dir.parent, ignore_errors=True)
 
 
-def _run_in_thread(job_id: int) -> None:
+def _run_in_thread(job_id: int) -> None:  # pragma: no cover
     try:
         job = TrainingJob.objects.get(pk=job_id)
         run_training_job(job)
@@ -991,7 +991,7 @@ def _run_in_thread(job_id: int) -> None:
         close_old_connections()
 
 
-def spawn_training_job(job: TrainingJob) -> None:
+def spawn_training_job(job: TrainingJob) -> None:  # pragma: no cover
     """Start a daemon thread that runs the training for the given job."""
     threading.Thread(
         target=_run_in_thread,

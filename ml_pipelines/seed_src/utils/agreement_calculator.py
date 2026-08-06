@@ -1,7 +1,7 @@
 import os
 
 from PIL import Image
-from seed_src.metrics import calculate_tp_fp_fn
+from seed_src.utils.metrics import calculate_tp_fp_fn
 
 BASE_PATH = '../../data/seed'
 SPECIES_LIST = ['cat', 'peh', 'phyca', 'vau']

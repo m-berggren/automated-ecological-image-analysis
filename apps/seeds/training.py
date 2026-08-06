@@ -123,7 +123,7 @@ def _split_files(
     )
 
 
-def _prepare_job_dataset(
+def _prepare_job_dataset(  # pragma: no cover
     species: str,
     job_pk: int,
     val_ratio: float,
@@ -239,7 +239,7 @@ def _prepare_job_dataset(
 # ──────────────────────────────────────────────────────────────────────────
 
 
-def _make_progress_callback(job_id: int):
+def _make_progress_callback(job_id: int):  # pragma: no cover
     def cb(processed: int, total: int, message: str = '', level: str = 'info'):
         # Cancellation check on every tick. Status is owned by the cancel
         # endpoint; we just read and raise. RunCancelled inherits
@@ -322,7 +322,7 @@ def _validate_config(
     return species, training_mode, epochs, source_model_id, val_ratio, test_ratio
 
 
-def run_training_job(job: TrainingJob) -> None:
+def run_training_job(job: TrainingJob) -> None:  # pragma: no cover
     """Synchronous core. Status flow: pending → running → completed / failed.
     scratch --> train from base YOLO weights
     incremental --> fine-tune from existing ModelVersion
@@ -569,7 +569,7 @@ def run_training_job(job: TrainingJob) -> None:
             shutil.rmtree(job_dir, ignore_errors=True)
 
 
-def _run_in_thread(job_id: int) -> None:
+def _run_in_thread(job_id: int) -> None:  # pragma: no cover
     try:
         job = TrainingJob.objects.get(pk=job_id)
         run_training_job(job)
@@ -581,7 +581,7 @@ def _run_in_thread(job_id: int) -> None:
         close_old_connections()
 
 
-def spawn_training_job(job: TrainingJob) -> None:
+def spawn_training_job(job: TrainingJob) -> None:  # pragma: no cover
     """Start a daemon thread that runs the training for the given job."""
     threading.Thread(
         target=_run_in_thread,

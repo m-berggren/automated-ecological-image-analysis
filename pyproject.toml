@@ -48,10 +48,17 @@ quote-style = "single"
 [tool.ruff.lint]
 select = ["ANN001", "ANN201"] # ANN001: function args, ANN201: return types
 
+[tool.ruff.lint.per-file-ignores]
+# Test functions and fixture parameters do not carry production type hints.
+"tests/**" = ["ANN001", "ANN201"]
+
 [dependency-groups]
 dev = [
     "djlint>=1.36.4",
     "ruff>=0.15.7",
+    "pytest>=8.4.0",
+    "pytest-cov>=6.0.0",
+    "pytest-django>=4.9.0",
 ]
 prod = [
     "gunicorn>=23.0.0",
@@ -61,3 +68,65 @@ prod = [
 [tool.djlint]
 profile = "django"
 indent = 2
+
+[tool.pytest.ini_options]
+minversion = "8.0"
+testpaths = ["tests/unit", "tests/integration"]
+# Repo root on sys.path so `import ml_pipelines...` resolves without an install step.
+pythonpath = ["."]
+# importlib import-mode lets two test files share a basename across dirs
+# (e.g. ml_pipelines/.../test_exif.py and apps/pollinator/test_exif.py).
+# Tests are categorised by directory (see tests/conftest.py); a bare `pytest`
+# runs only the fast unit set. Select others with -m:
+#   pytest                      -> unit only (default)
+#   pytest -m integration       -> integration only
+#   pytest -m "not e2e"         -> unit + integration
+#   pytest -m e2e tests/e2e     -> end-to-end (needs real weights; see tests/e2e)
+addopts = "-ra --import-mode=importlib -m 'not integration and not e2e'"
+DJANGO_SETTINGS_MODULE = "config.settings.testing"
+markers = [
+    "unit: fast, isolated test (may use the test DB); runs on every push",
+    "integration: DRF APIClient / cross-component test against the test DB",
+    "e2e: loads real model weights or trains a model; run on demand",
+]
+# Coverage is opt-in (keeps the TDD loop fast); run e.g.
+#   uv run pytest --cov --cov-report=term-missing
+# CI adds --cov-report=xml. Config lives in [tool.coverage.*] below.
+
+[tool.coverage.run]
+source = ["ml_pipelines", "apps"]
+branch = true
+omit = [
+    "*/notebooks/*",
+    "*/migrations/*",
+    "*/tests.py",
+    # ML-execution code: only runs with real weights/data, exercised by the
+    # e2e lane (tests/e2e), not by the unit/integration CI lanes. Excluded so
+    # the reported % reflects code CI can actually reach.
+    "ml_pipelines/main.py",
+    "ml_pipelines/pollinator/classification/*.py",
+    "ml_pipelines/pollinator/detection/*.py",
+    "ml_pipelines/pollinator/training/train_*.py",
+    "ml_pipelines/pollinator/training/backbones.py",
+    "ml_pipelines/pollinator/training/plots.py",
+    "ml_pipelines/seed_src/training/train.py",
+    "ml_pipelines/seed_src/inference/inference.py",
+    "ml_pipelines/seed_src/evaluation/*.py",
+    "ml_pipelines/pollinator/workflows/training_*.py",
+    "ml_pipelines/pollinator/training/__init__.py",
+    # Demo-data importer: operational tooling, not business logic.
+    "*/management/*",
+]
+
+[tool.coverage.report]
+show_missing = true
+# No global fail_under: the default `pytest --cov` is unit-only (~46%) and
+# would trip it. The floor belongs on the CI command that runs the combined
+# suite (unit + integration, ~66%):
+#   uv run pytest -m "not e2e" --cov --cov-fail-under=60
+exclude_lines = [
+    "pragma: no cover",
+    "if __name__ == .__main__.:",
+    "raise NotImplementedError",
+    "if TYPE_CHECKING:",
+]

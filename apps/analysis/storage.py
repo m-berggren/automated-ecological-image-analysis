@@ -71,7 +71,7 @@ def link_or_copy(src: Path, dst: Path) -> None:
         return
     try:
         os.link(src, dst)
-    except OSError:
+    except OSError:  # pragma: no cover
         shutil.copy2(src, dst)
 
 
@@ -110,12 +110,12 @@ def resolve_model_path(uri: str) -> Path:
         return cached
     cached.parent.mkdir(parents=True, exist_ok=True)
 
-    if scheme == 's3':
+    if scheme == 's3':  # pragma: no cover
         logger.info(f'Downloading s3://{parsed.netloc}/{key} -> {cached}')
         import boto3
 
         boto3.client('s3').download_file(parsed.netloc, key, str(cached))
-    elif scheme == 'gs':
+    elif scheme == 'gs':  # pragma: no cover
         logger.info(f'Downloading gs://{parsed.netloc}/{key} -> {cached}')
         from google.cloud import storage
 
