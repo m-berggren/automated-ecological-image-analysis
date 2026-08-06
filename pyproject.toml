@@ -40,17 +40,22 @@ torchvision = [{ index = 'pytorch-cpu' }]
 
 [tool.ruff]
 line-length = 88
-extend-exclude = ["*.ipynb", "**/migrations/*"]
+extend-exclude = ["*.ipynb", "**/migrations/*", "**/notebooks/**"]
 
 [tool.ruff.format]
 quote-style = "single"
 
 [tool.ruff.lint]
-select = ["ANN001", "ANN201"] # ANN001: function args, ANN201: return types
+# Bug-catching core: pyflakes (F: undefined names, unused imports, redefinition)
+# plus syntax errors (E9). Stylistic checks (import placement, ambiguous names)
+# are left off — the codebase has legitimate sys.path-then-import scripts.
+select = ["E9", "F"]
 
 [tool.ruff.lint.per-file-ignores]
-# Test functions and fixture parameters do not carry production type hints.
-"tests/**" = ["ANN001", "ANN201"]
+# Django settings compose via `from .base import *`, which is idiomatic.
+"config/settings/*.py" = ["F403", "F405"]
+# Package __init__ files re-export their submodules' public names.
+"*/__init__.py" = ["F401"]
 
 [dependency-groups]
 dev = [

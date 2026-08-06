@@ -66,7 +66,9 @@ def _thesis_path(rel: str) -> Path:
 
 
 # Vetted field set: 358 frames + YOLO-normalized labels (large, not vendored).
-DATASET = _path('FLY_EVAL_DATASET', _thesis_path('yolo-test-inference-with-annotations'))
+DATASET = _path(
+    'FLY_EVAL_DATASET', _thesis_path('yolo-test-inference-with-annotations')
+)
 IMAGES = DATASET / 'images'
 LABELS = DATASET / 'labels'
 
@@ -92,5 +94,6 @@ def require(path: Path, what: str) -> Path:
     if not path.exists():
         raise FileNotFoundError(
             f'{what} not found at {path}. Set the matching FLY_EVAL_* '
-            f'environment variable or place the data there.')
+            f'environment variable or place the data there.'
+        )
     return path

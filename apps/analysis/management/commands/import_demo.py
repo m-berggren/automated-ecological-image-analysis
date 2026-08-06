@@ -83,9 +83,7 @@ class Command(BaseCommand):
     help = 'Seed the database with the real demo dataset from a bundle.'
 
     def add_arguments(self, parser: ArgumentParser) -> None:
-        default_bundle = (
-            Path(settings.BASE_DIR) / 'demo_assets' / 'demo_bundle.zip'
-        )
+        default_bundle = Path(settings.BASE_DIR) / 'demo_assets' / 'demo_bundle.zip'
         parser.add_argument('--bundle', default=str(default_bundle))
         parser.add_argument(
             '--url', help='Override the data bundle URL (else demo_assets/sources.json)'
@@ -277,9 +275,7 @@ class Command(BaseCommand):
             new_pk = group_map[old_pk]
             new_target_pk = group_map.get(old_target_pk)
             if new_target_pk is not None:
-                model.objects.filter(pk=new_pk).update(
-                    **{attname: new_target_pk}
-                )
+                model.objects.filter(pk=new_pk).update(**{attname: new_target_pk})
 
         self._write_state(id_map)
         summary = ', '.join(

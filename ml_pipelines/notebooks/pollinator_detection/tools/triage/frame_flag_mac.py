@@ -218,12 +218,9 @@ def path_to_export_name(path):
     parts = list(path.parts)
 
     if 'Gruvan' in parts:
-        parts = parts[parts.index('Gruvan'):]
+        parts = parts[parts.index('Gruvan') :]
     else:
-        parts = [
-            part for part in parts
-            if part not in ('/', 'Volumes')
-        ]
+        parts = [part for part in parts if part not in ('/', 'Volumes')]
 
     if not parts:
         return 'flagged_images'
@@ -234,7 +231,8 @@ def path_to_export_name(path):
 def image_files(folder):
     try:
         return sorted(
-            p for p in folder.iterdir()
+            p
+            for p in folder.iterdir()
             if p.is_file() and p.suffix.lower() in IMAGE_EXTS
         )
     except Exception as exc:
@@ -376,7 +374,7 @@ def render_image(
         ih, iw = fitted.shape[:2]
         x = (canvas_w - iw) // 2
         y = top_h + max(0, (canvas_h - top_h - bottom_h - ih) // 2)
-        canvas[y:y + ih, x:x + iw] = fitted
+        canvas[y : y + ih, x : x + iw] = fitted
 
     key = str(path.resolve())
     marked = bool(flags.get(key))
@@ -399,9 +397,9 @@ def render_image(
         status += ' | MARKED'
 
     folder_color = (80, 220, 255) if is_last else (220, 220, 220)
-    image_color  = (80, 220, 255) if is_last else (245, 245, 245)
+    image_color = (80, 220, 255) if is_last else (245, 245, 245)
     put_text(canvas, folder_txt, (12, 26), 0.50, folder_color, 1)
-    put_text(canvas, image_txt,  (12, 55), 0.58, image_color,  1)
+    put_text(canvas, image_txt, (12, 55), 0.58, image_color, 1)
 
     put_text(
         canvas,
@@ -414,17 +412,25 @@ def render_image(
 
     # Banner at the bottom of the top bar when on the last image
     if is_last:
-        banner = '── END OF FOLDER  |  n = next folder    b = prev folder    Esc = quit ──'
+        banner = (
+            '── END OF FOLDER  |  n = next folder    b = prev folder    Esc = quit ──'
+        )
         put_text(
-            canvas, banner,
+            canvas,
+            banner,
             (canvas_w // 2 - 370, top_h - 6),
-            0.45, (255, 255, 255), 1,
+            0.45,
+            (255, 255, 255),
+            1,
         )
         cv2.rectangle(canvas, (0, top_h - 18), (canvas_w, top_h - 1), (0, 130, 200), -1)
         put_text(
-            canvas, banner,
+            canvas,
+            banner,
             (canvas_w // 2 - 370, top_h - 5),
-            0.45, (255, 255, 255), 1,
+            0.45,
+            (255, 255, 255),
+            1,
         )
 
     help_txt = (
@@ -485,7 +491,7 @@ def show_folder(
     print('=====================================')
 
     while True:
-        is_last = (idx == len(imgs) - 1)
+        is_last = idx == len(imgs) - 1
 
         if dirty:
             frame = render_image(
@@ -602,9 +608,7 @@ def export_marked_images_with_context(
     context_frames=2,
 ):
     marked_paths = {
-        str(Path(path).resolve())
-        for path in session_marked
-        if Path(path).is_file()
+        str(Path(path).resolve()) for path in session_marked if Path(path).is_file()
     }
 
     if not marked_paths:
@@ -630,8 +634,7 @@ def export_marked_images_with_context(
         resolved_imgs = [str(p.resolve()) for p in imgs]
 
         marked_indexes = [
-            idx for idx, img_key in enumerate(resolved_imgs)
-            if img_key in marked_paths
+            idx for idx, img_key in enumerate(resolved_imgs) if img_key in marked_paths
         ]
 
         if not marked_indexes:
@@ -669,7 +672,9 @@ def export_marked_images_with_context(
 
     if copied_count == 0:
         shutil.rmtree(export_dir)
-        print('No marked images from selected folders were copied. Empty export folder removed.')
+        print(
+            'No marked images from selected folders were copied. Empty export folder removed.'
+        )
         return None
 
     print(f'Copied {copied_count} images with context to: {export_dir}')
@@ -785,8 +790,13 @@ def main():
 
     # Only ask for an export folder if something was actually marked this session.
     # The Finder dialog appears here — after browsing — not before.
-    if session_marked and args.export_dir == Path.home() / 'Desktop' / 'pollinator_flagged_frames':
-        print(f'\n{len(session_marked)} frame(s) marked. Choose a folder to copy them to...')
+    if (
+        session_marked
+        and args.export_dir == Path.home() / 'Desktop' / 'pollinator_flagged_frames'
+    ):
+        print(
+            f'\n{len(session_marked)} frame(s) marked. Choose a folder to copy them to...'
+        )
         chosen_export_dir = choose_export_folder_with_finder()
         if chosen_export_dir is None:
             print(f'No folder selected. Using default: {args.export_dir}')

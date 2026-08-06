@@ -38,7 +38,6 @@ from __future__ import annotations
 
 import logging
 import random
-from collections import defaultdict
 from pathlib import Path
 from typing import Optional, Union
 

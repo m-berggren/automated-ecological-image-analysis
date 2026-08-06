@@ -526,8 +526,10 @@ def _apply_detection_filters(qs: QuerySet[Detection], params) -> QuerySet[Detect
             qs = qs.filter(_REVIEWER_STATUS_Q[status_param])
         except KeyError:
             raise serializers.ValidationError(
-                {'status': f'unknown value {status_param!r}; '
-                 f'expected one of {sorted(_REVIEWER_STATUS_Q)}'}
+                {
+                    'status': f'unknown value {status_param!r}; '
+                    f'expected one of {sorted(_REVIEWER_STATUS_Q)}'
+                }
             )
     predicted_class = params.get('predicted_class')
     if predicted_class:
@@ -723,7 +725,10 @@ class PollinatorDetectorDatasetUploadView(APIView):
             source = ModelVersion.objects.get(pk=int(from_id))
         except (ModelVersion.DoesNotExist, TypeError, ValueError):
             return Response(
-                {'ok': False, 'errors': [f'from_model_version_id={from_id!r} does not exist']},
+                {
+                    'ok': False,
+                    'errors': [f'from_model_version_id={from_id!r} does not exist'],
+                },
                 status=status.HTTP_400_BAD_REQUEST,
             )
         if source.module != Module.POLLINATORS or source.kind != 'detector':
@@ -732,7 +737,9 @@ class PollinatorDetectorDatasetUploadView(APIView):
                 status=status.HTTP_400_BAD_REQUEST,
             )
 
-        target_classes = (source.parameters or {}).get('class_filter') or POLLINATOR_CLASSES
+        target_classes = (source.parameters or {}).get(
+            'class_filter'
+        ) or POLLINATOR_CLASSES
         try:
             report = validate_and_stage(upload, target_classes)
         except DetectorUploadError as exc:
@@ -935,11 +942,9 @@ def _active_model(track: str):
     Used by the pool endpoint as the lineage source for consumption scoping
     and to bucket reviewed-since-active detections."""
     kind = PER_TRACK_DEFAULTS[track]['kind']
-    return (
-        ModelVersion.objects.filter(
-            module=Module.POLLINATORS, kind=kind, is_active=True
-        ).first()
-    )
+    return ModelVersion.objects.filter(
+        module=Module.POLLINATORS, kind=kind, is_active=True
+    ).first()
 
 
 def _resolve_thresholds(run: InferenceRun) -> tuple[float, float]:
@@ -1006,9 +1011,7 @@ class PollinatorRunAutoSelectView(APIView):
         run.save(update_fields=['review_settings'])
 
         with transaction.atomic():
-            Detection.objects.filter(
-                inference_run=run, auto_accepted=True
-            ).update(
+            Detection.objects.filter(inference_run=run, auto_accepted=True).update(
                 status=DetectionStatus.PENDING,
                 auto_accepted=False,
                 reviewer_label='',

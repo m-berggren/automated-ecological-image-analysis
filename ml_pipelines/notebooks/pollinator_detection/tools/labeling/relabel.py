@@ -69,18 +69,18 @@ KEY_LABELS = {
     ord('u'): 'unsure',
 }
 
-LEFT_KEYS  = {81, 2424832, 65361}
+LEFT_KEYS = {81, 2424832, 65361}
 RIGHT_KEYS = {83, 2555904, 65363}
 
-WIN_W     = 1500
-WIN_H     = 920
+WIN_W = 1500
+WIN_H = 920
 SIDEBAR_W = 180
-BOTTOM_H  = 56
-GRID_X0   = SIDEBAR_W + 4
-GRID_W    = WIN_W - GRID_X0
-GRID_H    = WIN_H - BOTTOM_H
+BOTTOM_H = 56
+GRID_X0 = SIDEBAR_W + 4
+GRID_W = WIN_W - GRID_X0
+GRID_H = WIN_H - BOTTOM_H
 THUMB_SIZE = 120
-THUMB_PAD  = 6
+THUMB_PAD = 6
 COLS = max(1, GRID_W // (THUMB_SIZE + THUMB_PAD))
 
 state = {'folder_idx': 0, 'selected_idx': None, 'scroll_row': 0}
@@ -111,11 +111,11 @@ def _loader_worker():
         key = str(p)
         with _cache_lock:
             if key in _thumb_cache:
-                continue          # already done
+                continue  # already done
         thumb = _build_thumb(p)
         with _cache_lock:
             _thumb_cache[key] = thumb
-        _needs_render[0] = True   # wake main loop
+        _needs_render[0] = True  # wake main loop
 
 
 def _build_thumb(path: Path) -> np.ndarray:
@@ -123,8 +123,15 @@ def _build_thumb(path: Path) -> np.ndarray:
     img = cv2.imread(str(path))
     if img is None:
         t = np.full((THUMB_SIZE, THUMB_SIZE, 3), 30, dtype=np.uint8)
-        cv2.putText(t, '?', (THUMB_SIZE // 2 - 8, THUMB_SIZE // 2 + 8),
-                    cv2.FONT_HERSHEY_SIMPLEX, 1.0, (80, 80, 200), 2)
+        cv2.putText(
+            t,
+            '?',
+            (THUMB_SIZE // 2 - 8, THUMB_SIZE // 2 + 8),
+            cv2.FONT_HERSHEY_SIMPLEX,
+            1.0,
+            (80, 80, 200),
+            2,
+        )
         return t
     h, w = img.shape[:2]
     scale = THUMB_SIZE / max(w, h)
@@ -133,7 +140,7 @@ def _build_thumb(path: Path) -> np.ndarray:
     t = np.zeros((THUMB_SIZE, THUMB_SIZE, 3), dtype=np.uint8)
     yo = (THUMB_SIZE - nh) // 2
     xo = (THUMB_SIZE - nw) // 2
-    t[yo: yo + nh, xo: xo + nw] = resized
+    t[yo : yo + nh, xo : xo + nw] = resized
     return t
 
 
@@ -144,7 +151,7 @@ def get_thumb(path: Path) -> np.ndarray:
         t = _thumb_cache.get(key)
     if t is not None:
         return t
-    _load_q.put(path)   # schedule; worker sets _needs_render when done
+    _load_q.put(path)  # schedule; worker sets _needs_render when done
     return _PLACEHOLDER
 
 
@@ -157,7 +164,7 @@ def queue_folder_thumbs(folder_name: str):
 
 
 # ── Per-folder crop lists (lazily scanned, incrementally maintained) ───────
-_folder_crops: dict = {}   # folder_name → [Path, ...]
+_folder_crops: dict = {}  # folder_name → [Path, ...]
 _folder_counts: dict = {}  # folder_name → int  (updated in-place on move)
 
 # Globals set in main()
@@ -174,8 +181,7 @@ def _scan_folder(folder_name: str):
         _folder_counts[folder_name] = 0
         return
     all_crops = sorted(
-        p for p in folder.iterdir()
-        if p.is_file() and p.suffix.lower() in IMAGE_EXTS
+        p for p in folder.iterdir() if p.is_file() and p.suffix.lower() in IMAGE_EXTS
     )
     if dest_dir is not None:
         all_crops = [p for p in all_crops if p.name not in reviewed_set]
@@ -195,6 +201,7 @@ def get_counts() -> dict:
 
 # ── Reviewed tracking ─────────────────────────────────────────────────────
 
+
 def load_reviewed(labeled_path: Path) -> set:
     rfile = labeled_path / 'reviewed.txt'
     if not rfile.exists():
@@ -211,9 +218,18 @@ def mark_reviewed(labeled_path: Path, filename: str):
 
 # ── Rendering ─────────────────────────────────────────────────────────────
 
+
 def put(canvas, text, org, scale=0.48, color=(220, 220, 220), thickness=1):
-    cv2.putText(canvas, text, org, cv2.FONT_HERSHEY_SIMPLEX,
-                scale, color, thickness, cv2.LINE_AA)
+    cv2.putText(
+        canvas,
+        text,
+        org,
+        cv2.FONT_HERSHEY_SIMPLEX,
+        scale,
+        color,
+        thickness,
+        cv2.LINE_AA,
+    )
 
 
 def render(crops: list) -> np.ndarray:
@@ -223,11 +239,14 @@ def render(crops: list) -> np.ndarray:
     sel = state['selected_idx']
 
     # Header strip
-    mode_label = (
-        f'REVIEW MODE  →  {dest_dir}' if dest_dir else 'CORRECT MODE'
+    mode_label = f'REVIEW MODE  →  {dest_dir}' if dest_dir else 'CORRECT MODE'
+    put(
+        canvas,
+        mode_label,
+        (SIDEBAR_W + 8, 16),
+        0.40,
+        (160, 200, 160) if dest_dir else (160, 160, 200),
     )
-    put(canvas, mode_label, (SIDEBAR_W + 8, 16), 0.40,
-        (160, 200, 160) if dest_dir else (160, 160, 200))
 
     # Sidebar
     cv2.rectangle(canvas, (0, 0), (SIDEBAR_W, WIN_H), (32, 32, 32), -1)
@@ -266,36 +285,55 @@ def render(crops: list) -> np.ndarray:
             if y + THUMB_SIZE > GRID_H:
                 break
             thumb = get_thumb(crops[idx])
-            canvas[y: y + THUMB_SIZE, x: x + THUMB_SIZE] = thumb
+            canvas[y : y + THUMB_SIZE, x : x + THUMB_SIZE] = thumb
             if idx == sel:
-                cv2.rectangle(canvas,
-                               (x - 2, y - 2),
-                               (x + THUMB_SIZE + 2, y + THUMB_SIZE + 2),
-                               (0, 220, 220), 3)
+                cv2.rectangle(
+                    canvas,
+                    (x - 2, y - 2),
+                    (x + THUMB_SIZE + 2, y + THUMB_SIZE + 2),
+                    (0, 220, 220),
+                    3,
+                )
             else:
-                cv2.rectangle(canvas,
-                               (x - 1, y - 1),
-                               (x + THUMB_SIZE + 1, y + THUMB_SIZE + 1),
-                               (60, 60, 60), 1)
+                cv2.rectangle(
+                    canvas,
+                    (x - 1, y - 1),
+                    (x + THUMB_SIZE + 1, y + THUMB_SIZE + 1),
+                    (60, 60, 60),
+                    1,
+                )
 
         if n_rows > visible_rows:
             bar_h = max(20, int(visible_rows / n_rows * GRID_H))
             bar_y = int(
                 state['scroll_row'] / max(1, n_rows - visible_rows) * (GRID_H - bar_h)
             )
-            cv2.rectangle(canvas,
-                           (WIN_W - 8, bar_y), (WIN_W - 2, bar_y + bar_h),
-                           (100, 100, 100), -1)
+            cv2.rectangle(
+                canvas,
+                (WIN_W - 8, bar_y),
+                (WIN_W - 2, bar_y + bar_h),
+                (100, 100, 100),
+                -1,
+            )
 
     # Bottom bar
     cv2.rectangle(canvas, (0, WIN_H - BOTTOM_H), (WIN_W, WIN_H), (28, 28, 28), -1)
     cv2.line(canvas, (0, WIN_H - BOTTOM_H), (WIN_W, WIN_H - BOTTOM_H), (50, 50, 50), 1)
     if sel is not None and sel < len(crops):
-        put(canvas, f'Selected: {crops[sel].name}',
-            (GRID_X0, WIN_H - BOTTOM_H + 18), 0.42, (180, 180, 180))
+        put(
+            canvas,
+            f'Selected: {crops[sel].name}',
+            (GRID_X0, WIN_H - BOTTOM_H + 18),
+            0.42,
+            (180, 180, 180),
+        )
     btn_labels = [
-        ('b', 'background'), ('1', 'bumblebee'), ('2', 'fly'),
-        ('3', 'butterfly'), ('4', 'other'), ('u', 'unsure'),
+        ('b', 'background'),
+        ('1', 'bumblebee'),
+        ('2', 'fly'),
+        ('3', 'butterfly'),
+        ('4', 'other'),
+        ('u', 'unsure'),
     ]
     bx = GRID_X0
     for key_ch, label in btn_labels:
@@ -304,16 +342,27 @@ def render(crops: list) -> np.ndarray:
         by = WIN_H - BOTTOM_H + 24
         cv2.rectangle(canvas, (bx, by), (bx + 110, by + 24), bg, -1)
         cv2.rectangle(canvas, (bx, by), (bx + 110, by + 24), (80, 80, 80), 1)
-        put(canvas, f'{key_ch}={label[:8]}', (bx + 4, by + 17), 0.40,
-            (200, 220, 200) if active else (190, 190, 190))
+        put(
+            canvas,
+            f'{key_ch}={label[:8]}',
+            (bx + 4, by + 17),
+            0.40,
+            (200, 220, 200) if active else (190, 190, 190),
+        )
         bx += 114
-    put(canvas, 'a/d=prev/next  w/s=folder  scroll=wheel  q=quit',
-        (WIN_W - 420, WIN_H - 10), 0.40, (130, 130, 130))
+    put(
+        canvas,
+        'a/d=prev/next  w/s=folder  scroll=wheel  q=quit',
+        (WIN_W - 420, WIN_H - 10),
+        0.40,
+        (130, 130, 130),
+    )
 
     return canvas
 
 
 # ── Mouse ─────────────────────────────────────────────────────────────────
+
 
 def on_mouse(event, x, y, flags, crops):
     if event == cv2.EVENT_LBUTTONDOWN:
@@ -341,6 +390,7 @@ def on_mouse(event, x, y, flags, crops):
 
 
 # ── Crop action ───────────────────────────────────────────────────────────
+
 
 def send_crop(src: Path, target_label: str, source_label: str):
     """
@@ -392,6 +442,7 @@ def send_crop(src: Path, target_label: str, source_label: str):
         # Add to destination list (keep sorted by name)
         dest_list = _folder_crops.setdefault(target_label, [])
         import bisect
+
         bisect.insort(dest_list, dst, key=lambda p: str(p))
         _folder_counts[target_label] = len(dest_list)
 
@@ -406,6 +457,7 @@ def send_crop(src: Path, target_label: str, source_label: str):
 
 # ── Main ──────────────────────────────────────────────────────────────────
 
+
 def main():
     global labeled_dir, dest_dir, reviewed_set, _PLACEHOLDER
 
@@ -415,12 +467,15 @@ def main():
         epilog=__doc__,
     )
     parser.add_argument(
-        '--labeled', type=Path,
+        '--labeled',
+        type=Path,
         default=Path('data/training/annotated_crops/labeled'),
         help='Folder with class subfolders to browse.',
     )
     parser.add_argument(
-        '--dest', type=Path, default=None,
+        '--dest',
+        type=Path,
+        default=None,
         help=(
             'Review mode: copy reviewed crops to this folder (e.g. annotated_crops/). '
             'Already-reviewed crops are tracked in --labeled/reviewed.txt and skipped '
@@ -438,8 +493,15 @@ def main():
 
     # Build placeholder thumbnail (shown while real thumb loads in background)
     _PLACEHOLDER = np.full((THUMB_SIZE, THUMB_SIZE, 3), 45, dtype=np.uint8)
-    cv2.putText(_PLACEHOLDER, '...', (THUMB_SIZE // 2 - 18, THUMB_SIZE // 2 + 6),
-                cv2.FONT_HERSHEY_SIMPLEX, 0.6, (100, 100, 100), 1)
+    cv2.putText(
+        _PLACEHOLDER,
+        '...',
+        (THUMB_SIZE // 2 - 18, THUMB_SIZE // 2 + 6),
+        cv2.FONT_HERSHEY_SIMPLEX,
+        0.6,
+        (100, 100, 100),
+        1,
+    )
 
     print()
     print('═' * 60)

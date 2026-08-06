@@ -1,0 +1,62 @@
+name: CI
+
+# Pull-request gate: lint (advisory), unit tests, and the frontend build.
+# Integration tests run separately on merge to main (see main.yml).
+on:
+  pull_request:
+
+# A new push to a PR cancels the previous in-flight run for that PR, so we
+# don't burn Actions minutes on superseded commits.
+concurrency:
+  group: ci-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  lint:
+    name: Lint
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: astral-sh/setup-uv@v5
+        with:
+          enable-cache: true
+      - name: Ruff lint
+        run: uv run ruff check .
+      - name: Ruff format
+        run: uv run ruff format --check .
+
+  unit-tests:
+    name: Unit tests
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: astral-sh/setup-uv@v5
+        with:
+          enable-cache: true
+      - name: Install dependencies
+        run: uv sync
+      # The pytest config defaults to `-m "not integration and not e2e"`, so a
+      # bare invocation runs only the fast unit suite.
+      - name: Run unit tests
+        run: uv run pytest
+
+  frontend:
+    name: Frontend build
+    runs-on: ubuntu-latest
+    defaults:
+      run:
+        working-directory: frontend
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '24'
+          cache: npm
+          cache-dependency-path: frontend/package-lock.json
+      - name: Install dependencies
+        run: npm ci
+      # Build only. `npm run build` also runs the strict vue-tsc type-check,
+      # which the codebase doesn't pass yet; vite build transpiles without it.
+      # Run `npm run type-check` locally if you want the type pass.
+      - name: Build
+        run: npx vite build

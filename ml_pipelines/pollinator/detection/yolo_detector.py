@@ -18,7 +18,6 @@ import logging
 from pathlib import Path
 from typing import Optional, Union
 
-import torch
 from sahi import AutoDetectionModel
 from sahi.predict import get_sliced_prediction
 from ultralytics import YOLO

@@ -106,7 +106,9 @@ def _detect_root(infos: list[zipfile.ZipInfo]) -> str:
     if not yamls:
         raise DetectorUploadError('data.yaml not found in zip')
     if len(yamls) > 1:
-        raise DetectorUploadError('multiple data.yaml found; zip must contain exactly one')
+        raise DetectorUploadError(
+            'multiple data.yaml found; zip must contain exactly one'
+        )
     parent = str(PurePosixPath(yamls[0]).parent)
     return '' if parent == '.' else parent
 
@@ -126,9 +128,13 @@ def _read_names(zf: zipfile.ZipFile, root: str) -> list[str]:
         try:
             names = [names[k] for k in sorted(names, key=lambda k: int(k))]
         except (ValueError, TypeError) as exc:
-            raise DetectorUploadError('data.yaml names: index map has non-integer keys') from exc
+            raise DetectorUploadError(
+                'data.yaml names: index map has non-integer keys'
+            ) from exc
     if not isinstance(names, list) or not names:
-        raise DetectorUploadError('data.yaml names: must be a non-empty list or index map')
+        raise DetectorUploadError(
+            'data.yaml names: must be a non-empty list or index map'
+        )
     return [str(n) for n in names]
 
 
@@ -191,7 +197,9 @@ def validate_and_stage(uploaded_file, target_classes: list[str]) -> dict:
     return report
 
 
-def _process(zip_path: Path, staging: Path, target_classes: list[str], token: str) -> dict:
+def _process(
+    zip_path: Path, staging: Path, target_classes: list[str], token: str
+) -> dict:
     name_to_idx = {c.lower(): i for i, c in enumerate(target_classes)}
     zf = _open_checked(zip_path)
     with zf:
@@ -221,7 +229,10 @@ def _process(zip_path: Path, staging: Path, target_classes: list[str], token: st
                 continue
             fn = info.filename
             stem = PurePosixPath(fn).stem
-            if fn.startswith(img_prefix) and PurePosixPath(fn).suffix.lower() in IMAGE_EXTS:
+            if (
+                fn.startswith(img_prefix)
+                and PurePosixPath(fn).suffix.lower() in IMAGE_EXTS
+            ):
                 images[stem] = info
             elif fn.startswith(lbl_prefix) and fn.lower().endswith('.txt'):
                 labels[stem] = info

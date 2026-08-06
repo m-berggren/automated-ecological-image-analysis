@@ -93,9 +93,9 @@ def process_image(img_path, label_path, output_img_dir, output_lbl_dir):
 
 
 if __name__ == '__main__':
-# -------------------------
-# EXECUTION
-# -------------------------
+    # -------------------------
+    # EXECUTION
+    # -------------------------
     for species in SPECIES_LIST:
         for split in SPLITS:
             input_img_dir = os.path.join(BASE_PATH, f'{species}_model', split, 'images')

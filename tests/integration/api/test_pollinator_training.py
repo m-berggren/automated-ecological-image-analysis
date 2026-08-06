@@ -25,7 +25,10 @@ def _no_spawn(monkeypatch):
 
 def _source():
     return ModelVersion.objects.create(
-        module=Module.POLLINATORS, kind=KIND, version_name='src', model_file_path='file://x'
+        module=Module.POLLINATORS,
+        kind=KIND,
+        version_name='src',
+        model_file_path='file://x',
     )
 
 

@@ -66,8 +66,9 @@ def md5_file(path: Path) -> str:
     return h.hexdigest()
 
 
-def write_sources(sources_path: Path, bundle_name: str, bundle_md5: str,
-                  weight_paths: list[str]) -> None:
+def write_sources(
+    sources_path: Path, bundle_name: str, bundle_md5: str, weight_paths: list[str]
+) -> None:
     """Create or update the sources manifest used by import_demo's downloader.
 
     Preserves any URLs/checksums already filled in on a prior run; only the

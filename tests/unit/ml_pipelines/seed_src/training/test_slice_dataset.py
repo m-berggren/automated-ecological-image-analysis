@@ -31,7 +31,9 @@ def test_seed_centroid_kept_and_tiles_written(slice_dataset, tmp_path):
     lbl_path = lbl_dir / 'frame.txt'
     lbl_path.write_text('cat 0.49 0.4875 0.51 0.4875 0.51 0.5125 0.49 0.5125\n')
 
-    slice_dataset.process_image(str(img_path), str(lbl_path), str(out_img), str(out_lbl))
+    slice_dataset.process_image(
+        str(img_path), str(lbl_path), str(out_img), str(out_lbl)
+    )
 
     # Grid: x in {0, 232}, y in {0, 32} -> 4 tiles, all contain the centroid.
     imgs = sorted(p.name for p in out_img.glob('*.png'))

@@ -37,7 +37,9 @@ class TestSplitFiles:
 
     def test_deterministic_for_seed(self):
         files = _files(15)
-        assert _split_files(files, 0.2, 0.1, seed=9) == _split_files(files, 0.2, 0.1, seed=9)
+        assert _split_files(files, 0.2, 0.1, seed=9) == _split_files(
+            files, 0.2, 0.1, seed=9
+        )
 
 
 class TestValidateConfig:

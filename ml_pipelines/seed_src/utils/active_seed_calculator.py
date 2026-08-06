@@ -54,11 +54,13 @@ def count_active_and_aborted_seeds(reference_seed, detected_seeds, threshold=0.3
             status = 'active'
             active_count += 1
 
-        classifications.append({
-            'detection_id': detection_id,
-            'status': status,
-            'area': seed_area,
-        })
+        classifications.append(
+            {
+                'detection_id': detection_id,
+                'status': status,
+                'area': seed_area,
+            }
+        )
 
     total_count = active_count + aborted_count
 

@@ -1,7 +1,6 @@
 import os
 import shutil
 import uuid
-from pathlib import Path
 
 from PIL import Image
 from rest_framework.parsers import MultiPartParser
@@ -10,7 +9,7 @@ from rest_framework.response import Response
 from rest_framework.views import APIView
 
 from apps.analysis.models import InferenceRun, JobStatus, TrainingJob
-from apps.datasets.models import ImageAsset, Module
+from apps.datasets.models import Module
 from apps.seeds.reference_seed_service import (
     bulk_calculate_run_seed_status,
     calculate_seed_status,
@@ -18,7 +17,6 @@ from apps.seeds.reference_seed_service import (
 from apps.seeds.services import generate_export_bundle
 from apps.seeds.training import _job_dir, _staging_root, spawn_training_job
 
-from django.conf import settings
 
 class SeedTrainingDataUploadView(APIView):
     """POST /api/seeds/training/upload-data/ to stage training images.
@@ -74,15 +72,16 @@ class SeedTrainingDataUploadView(APIView):
             if stem in label_files:
                 save_file(label_files[stem], lbl_dir)
 
-        return Response({
-            'staging_id': staging_id,
-            'species': species,
-            'uploaded_images': len(image_files),
-            'labels_matched': sum(
-                1 for f in image_files
-                if f.name.rsplit('.', 1)[0] in label_files
-            ),
-        })
+        return Response(
+            {
+                'staging_id': staging_id,
+                'species': species,
+                'uploaded_images': len(image_files),
+                'labels_matched': sum(
+                    1 for f in image_files if f.name.rsplit('.', 1)[0] in label_files
+                ),
+            }
+        )
 
 
 class SeedTrainingJobCreateView(APIView):

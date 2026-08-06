@@ -37,7 +37,6 @@ from apps.analysis.cancellation import RunCancelled
 
 from ml_pipelines.seed_src.training.slice_dataset import process_image
 from ml_pipelines.seed_src.training.train import train_species_model
-from ml_pipelines.seed_src.utils.metrics import calculate_tp_fp_fn, calculate_precision_recall_f1_score
 
 logger = logging.getLogger(__name__)
 
@@ -145,27 +144,23 @@ def _prepare_job_dataset(  # pragma: no cover
         p for p in upload_imgs.iterdir() if p.suffix.lower() in _IMAGE_EXTS
     ):
         raise FileNotFoundError(
-            f'No training images for job {job_pk} '
-            f'(expected files under {upload_imgs}).'
+            f'No training images for job {job_pk} (expected files under {upload_imgs}).'
         )
 
     # Only consider images that actually have a label file. The slicer
     # would skip them anyway; filtering here keeps the split honest about
     # how much training signal exists.
-    all_images = [
-        p for p in upload_imgs.iterdir() if p.suffix.lower() in _IMAGE_EXTS
-    ]
-    paired = [
-        p for p in all_images
-        if (upload_lbls / f'{p.stem}.txt').exists()
-    ]
+    all_images = [p for p in upload_imgs.iterdir() if p.suffix.lower() in _IMAGE_EXTS]
+    paired = [p for p in all_images if (upload_lbls / f'{p.stem}.txt').exists()]
     if not paired:
         # Empty paired means we'd slice 0 tiles and ultralytics would
         # bail with a confusing "images not found" — emit a clear job
         # error instead so the UI surface it as a real message.
-        n_labels = sum(
-            1 for p in upload_lbls.iterdir() if p.suffix.lower() == '.txt'
-        ) if upload_lbls.exists() else 0
+        n_labels = (
+            sum(1 for p in upload_lbls.iterdir() if p.suffix.lower() == '.txt')
+            if upload_lbls.exists()
+            else 0
+        )
         raise ValueError(
             f'No image/label pairs found. Got {len(all_images)} image(s) '
             f'and {n_labels} label file(s), but no pair shares the same '
@@ -184,8 +179,14 @@ def _prepare_job_dataset(  # pragma: no cover
     val_lbls = dataset_dir / 'val' / 'labels'
     test_imgs = dataset_dir / 'test' / 'images'
     test_lbls = dataset_dir / 'test' / 'labels'
-    for d in (sliced_train_imgs, sliced_train_lbls, val_imgs, val_lbls,
-              test_imgs, test_lbls):
+    for d in (
+        sliced_train_imgs,
+        sliced_train_lbls,
+        val_imgs,
+        val_lbls,
+        test_imgs,
+        test_lbls,
+    ):
         d.mkdir(parents=True, exist_ok=True)
 
     # Slice every train image. process_image emits multiple tiles per
@@ -203,10 +204,14 @@ def _prepare_job_dataset(  # pragma: no cover
     # SAHI eval expect full-resolution images with original polygons.
     for img_file in val_files:
         shutil.copy2(img_file, val_imgs / img_file.name)
-        shutil.copy2(upload_lbls / f'{img_file.stem}.txt', val_lbls / f'{img_file.stem}.txt')
+        shutil.copy2(
+            upload_lbls / f'{img_file.stem}.txt', val_lbls / f'{img_file.stem}.txt'
+        )
     for img_file in test_files:
         shutil.copy2(img_file, test_imgs / img_file.name)
-        shutil.copy2(upload_lbls / f'{img_file.stem}.txt', test_lbls / f'{img_file.stem}.txt')
+        shutil.copy2(
+            upload_lbls / f'{img_file.stem}.txt', test_lbls / f'{img_file.stem}.txt'
+        )
 
     val_has_images = any(p.suffix.lower() in _IMAGE_EXTS for p in val_imgs.iterdir())
 
@@ -233,6 +238,7 @@ def _prepare_job_dataset(  # pragma: no cover
         1 for p in sliced_train_imgs.iterdir() if p.suffix.lower() in _IMAGE_EXTS
     )
     return yaml_path, val_imgs, sliced_count
+
 
 # ──────────────────────────────────────────────────────────────────────────
 # Progress reporting
@@ -335,8 +341,12 @@ def run_training_job(job: TrainingJob) -> None:  # pragma: no cover
 
         config = job.config or {}
         (
-            species, training_mode, epochs, source_model_id,
-            val_ratio, test_ratio,
+            species,
+            training_mode,
+            epochs,
+            source_model_id,
+            val_ratio,
+            test_ratio,
         ) = _validate_config(config)
         job_dir = _job_dir(job.pk)
 
@@ -355,7 +365,10 @@ def run_training_job(job: TrainingJob) -> None:  # pragma: no cover
         # write a fresh YAML. _prepare_job_dataset raises FileNotFoundError
         # when the job has no uploaded training images.
         yaml_path, val_imgs_dir, sliced_train_count = _prepare_job_dataset(
-            species, job.pk, val_ratio, test_ratio,
+            species,
+            job.pk,
+            val_ratio,
+            test_ratio,
         )
         data_yaml_path = str(yaml_path)
         val_has_images = any(
@@ -363,7 +376,9 @@ def run_training_job(job: TrainingJob) -> None:  # pragma: no cover
         )
 
         progress_cb = _make_progress_callback(job.pk)
-        print(f'Starting training job {job.pk} — species={species} mode={training_mode} epochs={epochs}')
+        print(
+            f'Starting training job {job.pk} — species={species} mode={training_mode} epochs={epochs}'
+        )
 
         # Train model. project= keeps ultralytics' run output inside the
         # per-job dir, so cleanup is just rmtree(job_dir) — no CWD-relative
@@ -389,7 +404,10 @@ def run_training_job(job: TrainingJob) -> None:  # pragma: no cover
             try:
                 from ml_pipelines.seed_src.utils.helpers import load_model
                 from ml_pipelines.seed_src.inference.inference import run_inference
-                from ml_pipelines.seed_src.utils.metrics import calculate_tp_fp_fn, calculate_precision_recall_f1_score
+                from ml_pipelines.seed_src.utils.metrics import (
+                    calculate_tp_fp_fn,
+                    calculate_precision_recall_f1_score,
+                )
 
                 eval_model = load_model(weights_path)
                 val_dir = val_imgs_dir
@@ -405,6 +423,7 @@ def run_training_job(job: TrainingJob) -> None:  # pragma: no cover
                         gt_boxes = []
                         if label_file.exists():
                             from PIL import Image as PILImage
+
                             with PILImage.open(img_file) as img:
                                 w, h = img.size
                             with open(label_file) as f:
@@ -423,11 +442,23 @@ def run_training_job(job: TrainingJob) -> None:  # pragma: no cover
                         preds = []
                         for pred in result.object_prediction_list:
                             b = pred.bbox
-                            poly = [b.minx, b.miny, b.maxx, b.miny,
-                                    b.maxx, b.maxy, b.minx, b.maxy]
-                            preds.append({'poly': poly, 'conf': float(pred.score.value)})
+                            poly = [
+                                b.minx,
+                                b.miny,
+                                b.maxx,
+                                b.miny,
+                                b.maxx,
+                                b.maxy,
+                                b.minx,
+                                b.maxy,
+                            ]
+                            preds.append(
+                                {'poly': poly, 'conf': float(pred.score.value)}
+                            )
 
-                        tp, fp, fn = calculate_tp_fp_fn(preds, gt_boxes, iou_threshold=0.3)
+                        tp, fp, fn = calculate_tp_fp_fn(
+                            preds, gt_boxes, iou_threshold=0.3
+                        )
                         total_tp += tp
                         total_fp += fp
                         total_fn += fn
@@ -449,7 +480,9 @@ def run_training_job(job: TrainingJob) -> None:  # pragma: no cover
                 # Sliced training image count comes from _prepare_job_dataset.
                 sample_count = sliced_train_count
 
-                print(f'Evaluation complete — MAE={metrics.get("mae")} F1={metrics.get("f1")} samples={sample_count}')
+                print(
+                    f'Evaluation complete — MAE={metrics.get("mae")} F1={metrics.get("f1")} samples={sample_count}'
+                )
 
             except Exception as e:
                 logger.warning(f'Post-training evaluation failed: {e}')
@@ -518,9 +551,7 @@ def run_training_job(job: TrainingJob) -> None:  # pragma: no cover
             try:
                 ingest_run_dir(new_mv, run_dir)
             except Exception:
-                logger.exception(
-                    f'Failed to ingest run artifacts from {run_dir}'
-                )
+                logger.exception(f'Failed to ingest run artifacts from {run_dir}')
 
             # Move weights to the canonical models/seeds/<id>/weights<ext>
             # location and update the row. Without this the path would

@@ -4,12 +4,9 @@ from __future__ import annotations
 
 import logging
 import os
-import tempfile
 import threading
 from io import BytesIO
-from pathlib import Path
 
-from django.core.files import File
 from django.core.files.base import ContentFile
 from django.utils import timezone
 from PIL import Image, ImageDraw

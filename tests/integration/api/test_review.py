@@ -55,7 +55,11 @@ class TestBulkReview:
         d = _det(run, img)
         resp = auth_client.post(
             BULK,
-            {'ids': [d.pk], 'reviewer_status': 'corrected', 'reviewer_label': 'bumblebee'},
+            {
+                'ids': [d.pk],
+                'reviewer_status': 'corrected',
+                'reviewer_label': 'bumblebee',
+            },
             format='json',
         )
         assert resp.status_code == 200
@@ -128,10 +132,18 @@ class TestImageIncludeTraining:
 class TestRecomputeExclusions:
     def test_flags_duplicate(self, auth_client):
         run, img = _run(), _image()
-        _det(run, img, bbox={'x1': 0, 'y1': 0, 'x2': 10, 'y2': 10},
-             status=DetectionStatus.ACCEPTED)
-        _det(run, img, bbox={'x1': 3, 'y1': 3, 'x2': 5, 'y2': 5},
-             status=DetectionStatus.ACCEPTED)
+        _det(
+            run,
+            img,
+            bbox={'x1': 0, 'y1': 0, 'x2': 10, 'y2': 10},
+            status=DetectionStatus.ACCEPTED,
+        )
+        _det(
+            run,
+            img,
+            bbox={'x1': 3, 'y1': 3, 'x2': 5, 'y2': 5},
+            status=DetectionStatus.ACCEPTED,
+        )
         resp = auth_client.post(f'/api/analysis/runs/{run.pk}/recompute-exclusions/')
         assert resp.status_code == 200
         assert resp.data['excluded'] == 1

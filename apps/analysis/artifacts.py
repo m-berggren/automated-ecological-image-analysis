@@ -132,7 +132,13 @@ def metrics_from_results_json(text: str) -> dict:
     out: dict = {}
     candidates = {
         'accuracy': ('test_acc', 'test_arctic_acc', 'val_acc', 'acc'),
-        'f1': ('test_f1', 'test_arctic_macro_f1', 'val_macro_f1', 'macro_f1', 'best_val_f1'),
+        'f1': (
+            'test_f1',
+            'test_arctic_macro_f1',
+            'val_macro_f1',
+            'macro_f1',
+            'best_val_f1',
+        ),
         'recall': ('test_recall', 'recall'),
         'precision': ('test_precision', 'precision'),
     }
@@ -172,7 +178,9 @@ def ingest_run_dir(model_version, run_dir: Path) -> tuple[int, dict, dict]:
         if kind_value is None:
             continue
         try:
-            art = ModelArtifact(model_version=model_version, kind=kind_value, caption=caption)
+            art = ModelArtifact(
+                model_version=model_version, kind=kind_value, caption=caption
+            )
             art.file.save(name, ContentFile(path.read_bytes()), save=True)
             ingested += 1
         except Exception:

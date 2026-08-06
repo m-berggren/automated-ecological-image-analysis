@@ -86,7 +86,7 @@ def prepare_data_labels():
 
 if PREPARE_LABELS:
     prepare_data_labels()
-    print(f'Class labels prepared')
+    print('Class labels prepared')
 
 # -------------------------
 # TRAIN

@@ -31,7 +31,9 @@ class TestIsUnsafeMember:
     def test_unsafe_paths(self, name):
         assert _is_unsafe_member(name) is True
 
-    @pytest.mark.parametrize('name', ['data.yaml', 'images/train/a.jpg', 'labels/b.txt'])
+    @pytest.mark.parametrize(
+        'name', ['data.yaml', 'images/train/a.jpg', 'labels/b.txt']
+    )
     def test_safe_paths(self, name):
         assert _is_unsafe_member(name) is False
 
@@ -90,12 +92,20 @@ class TestRemapLabel:
 
     def test_class_out_of_range_is_error(self):
         out, errs, _ = _remap_label(
-            '3 0.5 0.5 0.2 0.2', stem='img', remap={0: 0}, n_their=1, target_classes=['a']
+            '3 0.5 0.5 0.2 0.2',
+            stem='img',
+            remap={0: 0},
+            n_their=1,
+            target_classes=['a'],
         )
         assert len(errs) == 1
 
     def test_coords_outside_unit_range_is_error(self):
         out, errs, _ = _remap_label(
-            '0 1.5 0.5 0.2 0.2', stem='img', remap={0: 0}, n_their=1, target_classes=['a']
+            '0 1.5 0.5 0.2 0.2',
+            stem='img',
+            remap={0: 0},
+            n_their=1,
+            target_classes=['a'],
         )
         assert len(errs) == 1
